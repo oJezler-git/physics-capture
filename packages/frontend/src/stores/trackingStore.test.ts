@@ -34,4 +34,15 @@ describe('trackingStore addSeed', () => {
 
     expect(useTrackingStore.getState().seeds).toEqual([updatedSeed]);
   });
+
+  it('replaces existing correction for the same keyframe', () => {
+    const state = useTrackingStore.getState();
+    const correctionA = { ballId: 0, cameraId: 'cam-a', frameIdx: 12, x_new: 10, y_new: 20 };
+    const correctionB = { ballId: 0, cameraId: 'cam-a', frameIdx: 12, x_new: 30, y_new: 40 };
+
+    state.applyCorrection(correctionA);
+    useTrackingStore.getState().applyCorrection(correctionB);
+
+    expect(useTrackingStore.getState().corrections).toEqual([correctionB]);
+  });
 });

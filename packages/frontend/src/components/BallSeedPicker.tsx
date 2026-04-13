@@ -11,7 +11,8 @@ interface BallSeedPickerProps {
   frameWidth: number;
   frameHeight: number;
   seeds: BallSeed[];
-  onAddSeed: (seed: BallSeed) => void;
+  onAddSeed: (seed: BallSeed) => boolean;
+  interactive?: boolean;
   className?: string;
 }
 
@@ -42,6 +43,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   frameHeight,
   seeds,
   onAddSeed,
+  interactive = true,
   className,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       return;
     }
 
-    onAddSeed({
+    const accepted = onAddSeed({
       ballId: nextBallId,
       cameraId,
       frameIdx: 0,
@@ -103,11 +105,16 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       bbox,
     });
 
+    if (!accepted) {
+      setWarning('Maximum 3 balls reached for this camera.');
+      return;
+    }
+
     setWarning(null);
   }
 
   const handleClickSeed = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (mode !== 'click') return;
+    if (!interactive || mode !== 'click') return;
 
     const point = toFrameCoordinates(event);
     if (!point) return;
@@ -116,7 +123,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   };
 
   const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (mode !== 'bbox') return;
+    if (!interactive || mode !== 'bbox') return;
     const point = toFrameCoordinates(event);
     if (!point) return;
 
@@ -125,7 +132,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   };
 
   const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDraggingBbox || !bboxDraft) return;
+    if (!interactive || !isDraggingBbox || !bboxDraft) return;
     const point = toFrameCoordinates(event);
     if (!point) return;
 
@@ -133,7 +140,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   };
 
   const handleMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (mode !== 'bbox' || !bboxDraft) return;
+    if (!interactive || mode !== 'bbox' || !bboxDraft) return;
 
     const point = toFrameCoordinates(event);
     const finalDraft = point
@@ -178,6 +185,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
         <button
           type="button"
           onClick={() => setMode('click')}
+          disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
             mode === 'click' ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           }`}
@@ -187,6 +195,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
         <button
           type="button"
           onClick={() => setMode('bbox')}
+          disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
             mode === 'bbox' ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           }`}
@@ -204,7 +213,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
       <div
         ref={containerRef}
-        className={className}
+        className={`${className ?? ''} ${interactive ? 'pointer-events-auto' : 'pointer-events-none'}`}
         onClick={handleClickSeed}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

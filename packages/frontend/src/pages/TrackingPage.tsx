@@ -14,19 +14,33 @@ import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
+import type { CorrectionKeyframe } from '../types';
 
 const FRAME_WIDTH = 1280;
 const FRAME_HEIGHT = 720;
 
 export const TrackingPage = () => {
-  const { cameras, advancePhase } = useSessionStore();
-  const { frameCount, currentFrame, setFrame, tracks, status, progress, seeds, startTracking, addSeed } =
-    useTrackingStore();
+  const { cameras, advancePhase, experimentId } = useSessionStore();
+  const {
+    frameCount,
+    currentFrame,
+    setFrame,
+    tracks,
+    status,
+    progress,
+    seeds,
+    startTracking,
+    addSeed,
+    applyCorrection,
+  } = useTrackingStore();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resolvedActiveCameraId = activeCameraId ?? cameras[0]?.id ?? null;
+  const correctionEnabled = tracks.length > 0 && status !== 'tracking';
+  const seedInteractive = currentFrame === 0 && tracks.length === 0 && status !== 'tracking';
 
   useEffect(() => {
     if (isPlaying && frameCount > 0) {
@@ -61,6 +75,30 @@ export const TrackingPage = () => {
   }, [currentFrame, frameCount, setFrame]);
 
   const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
+
+  const handleCorrection = async (correction: CorrectionKeyframe) => {
+    applyCorrection(correction);
+    setTrackingError(null);
+
+    if (!experimentId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/experiments/${experimentId}/correct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(correction),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Correction request failed (${response.status})`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to apply correction';
+      setTrackingError(message);
+    }
+  };
 
   return (
     <div className="mx-auto flex h-[calc(100vh-120px)] max-w-[1600px] flex-col gap-6">
@@ -116,6 +154,12 @@ export const TrackingPage = () => {
         </div>
       </header>
 
+      {trackingError ? (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {trackingError}
+        </div>
+      ) : null}
+
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-4">
         <div className="flex min-h-0 flex-col gap-4 lg:col-span-3">
           <div className="group relative flex-1 overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl">
@@ -131,6 +175,8 @@ export const TrackingPage = () => {
                   cameraId={resolvedActiveCameraId || ''}
                   width={FRAME_WIDTH}
                   height={FRAME_HEIGHT}
+                  correctionEnabled={correctionEnabled}
+                  onCorrection={handleCorrection}
                 />
 
                 <BallSeedPicker
@@ -140,6 +186,7 @@ export const TrackingPage = () => {
                   frameHeight={FRAME_HEIGHT}
                   seeds={seeds}
                   onAddSeed={addSeed}
+                  interactive={seedInteractive}
                   className="relative h-full w-full cursor-crosshair"
                 />
               </div>
@@ -244,7 +291,7 @@ export const TrackingPage = () => {
                   </span>
                 </div>
                 <div className="text-[10px] italic leading-relaxed text-slate-500">
-                  * Place ball seeds on frame 0 using click or bbox mode.
+                  * Place seeds on frame 0. Drag trajectory points to apply corrections after tracking.
                 </div>
               </div>
 

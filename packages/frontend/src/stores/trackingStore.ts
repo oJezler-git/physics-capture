@@ -87,7 +87,38 @@ export const useTrackingStore = create<TrackingState>((set) => ({
 
   applyCorrection: (correction) =>
     set((state) => ({
-      corrections: [...state.corrections, correction],
+      corrections: [
+        ...state.corrections.filter(
+          (entry) =>
+            !(
+              entry.ballId === correction.ballId &&
+              entry.cameraId === correction.cameraId &&
+              entry.frameIdx === correction.frameIdx
+            ),
+        ),
+        correction,
+      ],
+      tracks: state.tracks.map((track) => {
+        if (track.ballId !== correction.ballId || track.cameraId !== correction.cameraId) {
+          return track;
+        }
+
+        return {
+          ...track,
+          points: track.points.map((point) => {
+            if (point.frameIdx !== correction.frameIdx) {
+              return point;
+            }
+
+            return {
+              ...point,
+              x: correction.x_new,
+              y: correction.y_new,
+              isCorrected: true,
+            };
+          }),
+        };
+      }),
       status: 'tracking', // Usually triggers a re-track
     })),
 

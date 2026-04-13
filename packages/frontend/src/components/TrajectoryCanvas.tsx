@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import type { BallTrack } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { findNearestPoint, toFrame } from '../lib/trajectory';
+import type { BallTrack, CorrectionKeyframe } from '../types';
 
 interface TrajectoryCanvasProps {
   tracks: BallTrack[];
@@ -7,6 +8,8 @@ interface TrajectoryCanvasProps {
   cameraId: string;
   width: number;
   height: number;
+  onCorrection?: (correction: CorrectionKeyframe) => void;
+  correctionEnabled?: boolean;
 }
 
 const BALL_COLORS = ['#3b82f6', '#10b981', '#f59e0b']; // Blue, Green, Amber
@@ -17,8 +20,100 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
   cameraId,
   width,
   height,
+  onCorrection,
+  correctionEnabled = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dragTargetRef = useRef<{ ballId: number; frameIdx: number } | null>(null);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+
+  const activeTracks = useMemo(
+    () => tracks.filter((track) => track.cameraId === cameraId),
+    [tracks, cameraId],
+  );
+
+  const correctedPoint = useMemo(() => {
+    if (!dragTargetRef.current || !dragPosition) {
+      return null;
+    }
+
+    const color = BALL_COLORS[dragTargetRef.current.ballId % BALL_COLORS.length];
+    return { ...dragTargetRef.current, ...dragPosition, color };
+  }, [dragPosition]);
+
+  const toFramePoint = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = event.clientX - rect.left;
+    const canvasY = event.clientY - rect.top;
+
+    return toFrame(canvasX, canvasY, width, height, rect.width, rect.height);
+  };
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!correctionEnabled || !onCorrection) {
+      return;
+    }
+
+    const query = toFramePoint(event);
+    if (!query) {
+      return;
+    }
+
+    const candidates = activeTracks.flatMap((track) =>
+      track.points
+        .filter((point) => Math.abs(point.frameIdx - currentFrame) <= 2)
+        .map((point) => ({
+          ...point,
+          ballId: track.ballId,
+        })),
+    );
+
+    const nearest = findNearestPoint(query, candidates, 24);
+    if (!nearest) {
+      return;
+    }
+
+    dragTargetRef.current = {
+      ballId: nearest.ballId,
+      frameIdx: nearest.frameIdx,
+    };
+    setDragPosition({ x: nearest.x, y: nearest.y });
+  };
+
+  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!dragTargetRef.current) {
+      return;
+    }
+
+    const point = toFramePoint(event);
+    if (!point) {
+      return;
+    }
+
+    setDragPosition(point);
+  };
+
+  const handleMouseUp = () => {
+    if (!dragTargetRef.current || !dragPosition || !onCorrection) {
+      dragTargetRef.current = null;
+      setDragPosition(null);
+      return;
+    }
+
+    onCorrection({
+      ballId: dragTargetRef.current.ballId,
+      cameraId,
+      frameIdx: dragTargetRef.current.frameIdx,
+      x_new: dragPosition.x,
+      y_new: dragPosition.y,
+    });
+
+    dragTargetRef.current = null;
+    setDragPosition(null);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -28,8 +123,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
 
     ctx.clearRect(0, 0, width, height);
 
-    tracks.forEach((track) => {
-      if (track.cameraId !== cameraId) return;
+    activeTracks.forEach((track) => {
 
       const color = BALL_COLORS[track.ballId % BALL_COLORS.length];
 
@@ -77,14 +171,28 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
         }
       }
     });
-  }, [tracks, currentFrame, cameraId, width, height]);
+    if (correctedPoint) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = correctedPoint.color;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(correctedPoint.x, correctedPoint.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }, [activeTracks, currentFrame, width, height, correctedPoint]);
 
   return (
     <canvas
       ref={canvasRef}
       width={width}
       height={height}
-      className="absolute inset-0 pointer-events-none"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      className={`absolute inset-0 ${correctionEnabled ? 'cursor-grab pointer-events-auto' : 'pointer-events-none'}`}
     />
   );
 };
