@@ -33,3 +33,6 @@ ENV/
 dist/
 build/
 out/
+
+# Markdown files
+*.md
