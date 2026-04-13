@@ -2,19 +2,15 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useResultsStore } from '../stores/resultsStore';
-import type { 
-  CalibrationResult, 
-  PhysicsResult, 
-  CameraDevice 
-} from '../types';
+import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '../types';
 
 // Define message types matching the implementation plan
-type InboundMessage =
+export type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
   | { type: 'calibration:progress'; data: { progress: number; stage: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
-  | { type: 'tracking:update'; data: { tracks: any[], progress: number } }
-  | { type: 'tracking:complete'; data: { tracks: any[] } }
+  | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
+  | { type: 'tracking:complete'; data: { tracks: BallTrack[] } }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
   | { type: 'frames:ready'; data: { frameCount: number } }
@@ -24,7 +20,7 @@ type InboundMessage =
   | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string } }
   | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } };
 
-type OutboundMessage =
+export type OutboundMessage =
   | { type: 'record:start'; experimentId: string }
   | { type: 'record:stop'; experimentId: string }
   | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
@@ -32,7 +28,7 @@ type OutboundMessage =
   | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } }
   | { type: 'join'; room: string; role: 'pc' | 'phone'; label?: string };
 
-class WSClient {
+export class WSClient {
   private socket: WebSocket | null = null;
   private url: string;
   private reconnectAttempts = 0;
@@ -83,7 +79,9 @@ class WSClient {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = Math.min(250 * Math.pow(2, this.reconnectAttempts), 8000);
-      console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      console.log(
+        `[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+      );
       setTimeout(() => this.connect(), delay);
     } else {
       console.error('[WS] Max reconnect attempts reached');
@@ -152,4 +150,6 @@ class WSClient {
   }
 }
 
-export const wsClient = new WSClient();
+// Use environment variable for the WebSocket URL or fallback to the current hostname
+const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001`;
+export const wsClient = new WSClient(WS_URL);
