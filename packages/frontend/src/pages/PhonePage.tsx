@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { wsClient } from '../lib/wsClient';
-import { Camera, Smartphone, Wifi, WifiOff, Circle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Smartphone, Wifi, WifiOff, Circle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 type RecordState = 'idle' | 'recording' | 'uploading' | 'done' | 'error';
 
@@ -80,7 +80,6 @@ export const PhonePage = () => {
 
   const handleWebRTC = async (event: any) => {
     const { type, data } = event.detail;
-    const peerId = data.peerId;
 
     if (type === 'peer:answer') {
       await peerConnectionRef.current?.setRemoteDescription(new RTCSessionDescription(data));
@@ -117,7 +116,7 @@ export const PhonePage = () => {
     await pc.setLocalDescription(offer);
     wsClient.send({ 
       type: 'peer:offer', 
-      data: { ...offer.toJSON(), peerId: 'phone' } as any 
+      data: { ...offer, peerId: 'phone' } as any 
     });
   };
 

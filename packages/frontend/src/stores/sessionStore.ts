@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CameraDevice, BallMassConfig, SessionPhase } from '../types';
+import type { CameraDevice, BallMassConfig, SessionPhase } from '../types';
 
 interface SessionState {
   experimentId: string | null;

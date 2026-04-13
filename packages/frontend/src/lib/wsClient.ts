@@ -2,9 +2,8 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useResultsStore } from '../stores/resultsStore';
-import { 
+import type { 
   CalibrationResult, 
-  TrackingStatusMessage, 
   PhysicsResult, 
   CameraDevice 
 } from '../types';

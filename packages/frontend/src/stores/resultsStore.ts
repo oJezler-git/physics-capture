@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { PhysicsResult, SyncData } from '../types';
+import type { PhysicsResult, SyncData } from '../types';
 
 interface ResultsState {
   physicsResult: PhysicsResult | null;

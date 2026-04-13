@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CalibrationProfile, CalibrationResult, CameraIntrinsics, StereoExtrinsics } from '../types';
+import type { CalibrationProfile, CalibrationResult, CameraIntrinsics, StereoExtrinsics } from '../types';
 
 interface CalibrationState {
   profiles: CalibrationProfile[];     // saved profiles from DB

@@ -65,7 +65,7 @@ class PeerManager {
 
       wsClient.send({
         type: 'peer:answer',
-        data: { ...answer.toJSON(), peerId } as any
+        data: { ...answer, peerId } as any
       });
     } catch (err) {
       console.error(`[WebRTC] Error handling offer from ${peerId}`, err);

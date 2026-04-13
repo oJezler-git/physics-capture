@@ -7,7 +7,7 @@ interface VisualMetronomeProps {
 
 export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onConfigReady }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafIdRef = useRef<number>();
+  const rafIdRef = useRef<number | null>(null);
   const frameIndexRef = useRef(0);
   
   const [speedPxPerFrame, setSpeedPxPerFrame] = useState(0);
@@ -50,7 +50,7 @@ export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onCo
     return () => {
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
     };
-  }, []);
+  }, [onConfigReady]);
 
   // Animation loop
   useEffect(() => {

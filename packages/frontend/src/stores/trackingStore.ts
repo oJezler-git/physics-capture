@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { BallSeed, BallTrack, CorrectionKeyframe } from '../types';
+import type { BallSeed, BallTrack, CorrectionKeyframe } from '../types';
 
 interface TrackingState {
   frameCount: number;
