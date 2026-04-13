@@ -14,6 +14,8 @@ interface CalibrationState {
   intrinsics: CameraIntrinsics[]; // per camera
   stereoExtrinsics: StereoExtrinsics | null;
   rulerScaleFactor: number | null; // px/mm; null if stereo calibration used
+  progress: number;
+  error: string | null;
 
   // Actions
   setProfiles: (profiles: CalibrationProfile[]) => void;
@@ -35,14 +37,14 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
   intrinsics: [],
   stereoExtrinsics: null,
   rulerScaleFactor: null,
+  progress: 0,
+  error: null,
 
   setProfiles: (profiles) => set({ profiles }),
 
-  startCalibration: () => set({ status: 'running', reprojectionError: null }),
+  startCalibration: () => set({ status: 'running', reprojectionError: null, progress: 0, error: null }),
 
-  onCalibrationProgress: (_progress) => {
-    // Progress could be handled here if needed, or just left as 'running'
-  },
+  onCalibrationProgress: (progress) => set({ status: 'running', progress }),
 
   onCalibrationComplete: (result) =>
     set({
@@ -52,9 +54,11 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
       reprojectionError:
         result.stereo?.reprojection_error_px || result.intrinsics[0]?.reprojection_error_px || null,
       rulerScaleFactor: result.rulerScaleFactor,
+      progress: 1,
+      error: null,
     }),
 
-  onCalibrationFailed: (_error) => set({ status: 'failed' }),
+  onCalibrationFailed: (error) => set({ status: 'failed', error }),
 
   saveProfile: (_name) => {
     // This would typically involve an API call, then updating the 'profiles' list
@@ -71,9 +75,11 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
         null,
       rulerScaleFactor: profile.result.rulerScaleFactor,
       status: 'complete',
+      progress: 1,
+      error: null,
     }),
 
-  setRulerScale: (pxPerMm) => set({ rulerScaleFactor: pxPerMm, status: 'complete' }),
+  setRulerScale: (pxPerMm) => set({ rulerScaleFactor: pxPerMm, status: 'complete', error: null }),
 
   reset: () =>
     set({
@@ -83,5 +89,7 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
       intrinsics: [],
       stereoExtrinsics: null,
       rulerScaleFactor: null,
+      progress: 0,
+      error: null,
     }),
 }));

@@ -8,9 +8,11 @@ import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '
 export type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
   | { type: 'calibration:progress'; data: { progress: number; stage: string } }
+  | { type: 'calibration:failed'; data: { message: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
   | { type: 'tracking:complete'; data: { tracks: BallTrack[] } }
+  | { type: 'tracking:correction_applied'; data: { ok: boolean } }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
   | { type: 'frames:ready'; data: { frameCount: number } }
@@ -117,11 +119,17 @@ export class WSClient {
       case 'calibration:complete':
         useCalibrationStore.getState().onCalibrationComplete(msg.data);
         break;
+      case 'calibration:failed':
+        useCalibrationStore.getState().onCalibrationFailed(msg.data.message);
+        break;
       case 'tracking:update':
         useTrackingStore.getState().onTrackingUpdate(msg.data.tracks, msg.data.progress);
         break;
       case 'tracking:complete':
         useTrackingStore.getState().onTrackingComplete(msg.data.tracks);
+        break;
+      case 'tracking:correction_applied':
+        window.dispatchEvent(new CustomEvent('ws:tracking', { detail: msg }));
         break;
       case 'physics:result':
         useResultsStore.getState().onPhysicsResult(msg.data);
@@ -133,6 +141,7 @@ export class WSClient {
         break;
       case 'frames:ready':
         useTrackingStore.getState().setFrameCount(msg.data.frameCount);
+        window.dispatchEvent(new CustomEvent('ws:frames', { detail: msg }));
         break;
       case 'record:start':
       case 'record:stop':
@@ -145,11 +154,45 @@ export class WSClient {
         window.dispatchEvent(new CustomEvent('ws:webrtc', { detail: msg }));
         break;
       default:
-        console.warn('[WS] Unknown message type', (msg as any).type);
+        console.warn('[WS] Unknown message type', (msg as { type: string }).type);
     }
   }
 }
 
-// Use environment variable for the WebSocket URL or fallback to the current hostname
-const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001`;
+const parseHost = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      return new URL(trimmed).hostname;
+    } catch {
+      return trimmed;
+    }
+  }
+
+  return trimmed.split(':')[0];
+};
+
+const isLocalHostname = (hostname: string) => {
+  if (!hostname) return false;
+
+  if (hostname === 'localhost' || hostname === '0.0.0.0') return true;
+  if (hostname.endsWith('.local')) return true;
+  if (/^127\./.test(hostname)) return true;
+  if (/^10\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) return true;
+
+  return false;
+};
+
+const getDefaultWsUrl = () => {
+  const host = parseHost(import.meta.env.VITE_APP_HOST || '') || window.location.hostname;
+  const protocol = isLocalHostname(host) ? 'ws' : 'wss';
+  return `${protocol}://${host}:3001`;
+};
+
+// Use explicit WebSocket URL when provided, otherwise infer local/public fallback.
+const WS_URL = import.meta.env.VITE_WS_URL || getDefaultWsUrl();
 export const wsClient = new WSClient(WS_URL);
