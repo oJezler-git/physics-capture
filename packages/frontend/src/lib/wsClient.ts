@@ -12,22 +12,26 @@ import {
 // Define message types matching the implementation plan
 type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
-  | { type: 'calibration:progress'; data: { progress: number } }
+  | { type: 'calibration:progress'; data: { progress: number; stage: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: any[], progress: number } }
   | { type: 'tracking:complete'; data: { tracks: any[] } }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
   | { type: 'frames:ready'; data: { frameCount: number } }
-  | { type: 'peer:offer'; data: RTCSessionDescriptionInit }
-  | { type: 'peer:ice'; data: RTCIceCandidateInit };
+  | { type: 'record:start'; data: { experimentId: string } }
+  | { type: 'record:stop'; data: { experimentId: string } }
+  | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
+  | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string } }
+  | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } };
 
 type OutboundMessage =
   | { type: 'record:start'; experimentId: string }
   | { type: 'record:stop'; experimentId: string }
-  | { type: 'peer:answer'; data: RTCSessionDescriptionInit }
-  | { type: 'peer:ice'; data: RTCIceCandidateInit }
-  | { type: 'join'; room: string; role: 'pc' | 'phone' };
+  | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
+  | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string } }
+  | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } }
+  | { type: 'join'; room: string; role: 'pc' | 'phone'; label?: string };
 
 class WSClient {
   private socket: WebSocket | null = null;
@@ -133,7 +137,12 @@ class WSClient {
       case 'frames:ready':
         useTrackingStore.getState().setFrameCount(msg.data.frameCount);
         break;
+      case 'record:start':
+      case 'record:stop':
+        window.dispatchEvent(new CustomEvent('ws:record', { detail: msg }));
+        break;
       case 'peer:offer':
+      case 'peer:answer':
       case 'peer:ice':
         // These will be handled by the WebRTC Manager
         window.dispatchEvent(new CustomEvent('ws:webrtc', { detail: msg }));
