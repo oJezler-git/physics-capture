@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, Ruler, Save, Target } from 'lucide-react';
+import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type { CalibrationProfile, CalibrationResult } from '../types';
@@ -180,6 +181,12 @@ export const CalibrationPage = () => {
             <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress * 100}%` }} />
           </div>
 
+          {isBusy ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <LoadingSkeleton lines={4} />
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <p className={`font-semibold ${qualityTone(reprojectionError)}`}>
               Reprojection Error: {reprojectionError === null ? '--' : `${reprojectionError.toFixed(3)} px`}
@@ -330,3 +337,4 @@ export const CalibrationPage = () => {
     </div>
   );
 };
+

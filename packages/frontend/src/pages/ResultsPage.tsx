@@ -13,6 +13,7 @@ import { Download, FileSpreadsheet, FileText, Sigma, Zap } from 'lucide-react';
 import { useResultsStore } from '../stores/resultsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { downloadBlob, exportCSV, exportJSON, exportPDF } from '../lib/export';
+import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import type { PhysicsResult } from '../types';
 
 const BALL_COLORS = ['#3b82f6', '#10b981', '#f59e0b'];
@@ -181,7 +182,11 @@ export const ResultsPage = () => {
 
       {!physicsResult ? (
         <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center text-slate-400">
-          Run physics to generate collision metrics and exportable reports.
+          {status === 'computing' ? (
+            <LoadingSkeleton lines={5} className="mx-auto max-w-xl text-left" />
+          ) : (
+            'Run physics to generate collision metrics and exportable reports.'
+          )}
         </div>
       ) : (
         <>

@@ -26,6 +26,7 @@ export const PhonePage = () => {
   const [recordState, setRecordState] = useState<RecordState>('idle');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
+  const [visibilityWarning, setVisibilityWarning] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
 
   const experimentIdRef = useRef<string | null>(null);
@@ -43,8 +44,20 @@ export const PhonePage = () => {
     return () => {
       stream?.getTracks().forEach((t) => t.stop());
       peerConnectionRef.current?.close();
+      window.removeEventListener('ws:webrtc', handleWebRTC);
+      window.removeEventListener('ws:record', handleRecordCommand);
     };
   }, [room]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      const shouldWarn = document.hidden && recordState === 'recording';
+      setVisibilityWarning(shouldWarn);
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [recordState]);
 
   const init = async () => {
     try {
@@ -256,6 +269,12 @@ export const PhonePage = () => {
             <span className="text-sm font-bold tracking-widest uppercase">Recording</span>
           </div>
         )}
+
+        {visibilityWarning ? (
+          <div className="absolute top-24 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-4 py-2 text-xs font-semibold text-amber-100">
+            Recording paused risk: keep this tab visible during capture.
+          </div>
+        ) : null}
 
         {(recordState === 'uploading' || recordState === 'done' || recordState === 'error') && (
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-8 z-20">

@@ -2,6 +2,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useResultsStore } from '../stores/resultsStore';
+import { useUiStore } from '../stores/uiStore';
 import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '../types';
 
 // Define message types matching the implementation plan
@@ -42,6 +43,14 @@ export class WSClient {
     this.url = url;
   }
 
+  get connected() {
+    return this.isConnected;
+  }
+
+  get reconnectCount() {
+    return this.reconnectAttempts;
+  }
+
   connect() {
     try {
       this.socket = new WebSocket(this.url);
@@ -59,20 +68,24 @@ export class WSClient {
           this.dispatch(msg);
         } catch (err) {
           console.error('[WS] Parse error', err, event.data);
+          useUiStore.getState().pushToast('error', 'Received malformed server message.');
         }
       };
 
       this.socket.onclose = (event) => {
         this.isConnected = false;
         console.warn(`[WS] Disconnected (code: ${event.code})`);
+        useUiStore.getState().pushToast('warn', 'WebSocket disconnected. Reconnecting...');
         this.attemptReconnect();
       };
 
       this.socket.onerror = (err) => {
         console.error('[WS] Error', err);
+        useUiStore.getState().pushToast('error', 'WebSocket error. Check backend connectivity.');
       };
     } catch (err) {
       console.error('[WS] Connection failed', err);
+      useUiStore.getState().pushToast('error', 'Failed to connect to WebSocket server.');
       this.attemptReconnect();
     }
   }
@@ -155,6 +168,9 @@ export class WSClient {
         break;
       default:
         console.warn('[WS] Unknown message type', (msg as { type: string }).type);
+        useUiStore
+          .getState()
+          .pushToast('warn', `Unhandled WS message: ${(msg as { type: string }).type}`);
     }
   }
 }
