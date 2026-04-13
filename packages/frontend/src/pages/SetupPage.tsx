@@ -1,0 +1,1 @@
+export const SetupPage = () => <div>Setup Page</div>;

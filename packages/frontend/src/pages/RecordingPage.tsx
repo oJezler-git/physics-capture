@@ -1,0 +1,1 @@
+export const RecordingPage = () => <div>Recording Page</div>;

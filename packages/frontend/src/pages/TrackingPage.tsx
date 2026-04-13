@@ -1,0 +1,1 @@
+export const TrackingPage = () => <div>Tracking Page</div>;

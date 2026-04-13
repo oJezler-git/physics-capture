@@ -1,0 +1,1 @@
+export const PhonePage = () => <div>Phone Page</div>;
