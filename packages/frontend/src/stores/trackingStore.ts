@@ -8,12 +8,12 @@ interface TrackingState {
   tracks: BallTrack[]; // SAM2 output per ball per camera
   corrections: CorrectionKeyframe[]; // user corrections
   status: 'idle' | 'tracking' | 'complete' | 'awaiting_correction';
-  progress: number; // 0.0–1.0
+  progress: number; // 0.0-1.0
 
   // Actions
   setFrameCount: (n: number) => void;
   setFrame: (n: number) => void;
-  addSeed: (seed: BallSeed) => void;
+  addSeed: (seed: BallSeed) => boolean;
   removeSeed: (ballId: number, cameraId: string) => void;
   startTracking: () => void;
   onTrackingUpdate: (tracks: BallTrack[], progress: number) => void;
@@ -38,25 +38,32 @@ export const useTrackingStore = create<TrackingState>((set) => ({
       currentFrame: Math.max(0, Math.min(n, state.frameCount - 1)),
     })),
 
-  addSeed: (seed) =>
+  addSeed: (seed) => {
+    let accepted = false;
+
     set((state) => {
-      // Limit to 3 balls per camera? (Section 8 says "Maximum 3 balls total")
-      // Wait, the plan says "maximum 3 balls per camera" in some places
-      // and "maximum 3 balls total" in others.
-      // Section 8: "User clicks > 3 seeds ... Toast: 'Maximum 3 balls'; refuse 4th click"
-      // Let's assume 3 balls total across all cameras for now as per section 8.
-      const ballCount = new Set(state.seeds.map((s) => s.ballId)).size;
-      if (ballCount >= 3 && !state.seeds.some((s) => s.ballId === seed.ballId)) {
-        return state; // Should ideally show toast elsewhere
+      const cameraSeeds = state.seeds.filter((entry) => entry.cameraId === seed.cameraId);
+      const hasExistingBallSeed = cameraSeeds.some((entry) => entry.ballId === seed.ballId);
+      const uniqueBallCount = new Set(cameraSeeds.map((entry) => entry.ballId)).size;
+
+      if (!hasExistingBallSeed && uniqueBallCount >= 3) {
+        return state;
       }
+
+      accepted = true;
 
       return {
         seeds: [
-          ...state.seeds.filter((s) => s.ballId !== seed.ballId || s.cameraId !== seed.cameraId),
+          ...state.seeds.filter(
+            (entry) => !(entry.ballId === seed.ballId && entry.cameraId === seed.cameraId),
+          ),
           seed,
         ],
       };
-    }),
+    });
+
+    return accepted;
+  },
 
   removeSeed: (ballId, cameraId) =>
     set((state) => ({

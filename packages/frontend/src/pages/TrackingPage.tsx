@@ -1,99 +1,78 @@
-import { useState, useEffect, useRef } from 'react';
-import { useSessionStore } from '../stores/sessionStore';
-import { useTrackingStore } from '../stores/trackingStore';
+import { useEffect, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  Camera,
+  ChevronRight,
+  Maximize2,
+  MousePointer2,
+  RefreshCw,
+  Settings2,
+  Zap,
+} from 'lucide-react';
+import { BallSeedPicker } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
-import {
-  Settings2,
-  Maximize2,
-  Camera,
-  MousePointer2,
-  Zap,
-  ChevronRight,
-  RefreshCw,
-  AlertCircle,
-} from 'lucide-react';
+import { useSessionStore } from '../stores/sessionStore';
+import { useTrackingStore } from '../stores/trackingStore';
+
+const FRAME_WIDTH = 1280;
+const FRAME_HEIGHT = 720;
 
 export const TrackingPage = () => {
   const { cameras, advancePhase } = useSessionStore();
-  const { frameCount, currentFrame, setFrame, tracks, status, progress, seeds, startTracking } =
+  const { frameCount, currentFrame, setFrame, tracks, status, progress, seeds, startTracking, addSeed } =
     useTrackingStore();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const resolvedActiveCameraId = activeCameraId ?? cameras[0]?.id ?? null;
 
-  // Set initial active camera
   useEffect(() => {
-    if (cameras.length > 0 && !activeCameraId) {
-      setActiveCameraId(cameras[0].id);
-    }
-  }, [cameras, activeCameraId]);
-
-  // Playback Loop
-  useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && frameCount > 0) {
       playRef.current = setInterval(() => {
         setFrame((currentFrame + 1) % frameCount);
-      }, 100); // 10 FPS preview
-    } else {
-      if (playRef.current) clearInterval(playRef.current);
+      }, 100);
+    } else if (playRef.current) {
+      clearInterval(playRef.current);
     }
+
     return () => {
-      if (playRef.current) clearInterval(playRef.current);
+      if (playRef.current) {
+        clearInterval(playRef.current);
+      }
     };
   }, [isPlaying, currentFrame, frameCount, setFrame]);
 
-  // Keyboard Shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        setIsPlaying((p) => !p);
-      } else if (e.code === 'ArrowRight') {
-        setFrame(Math.min(currentFrame + 1, frameCount - 1));
-      } else if (e.code === 'ArrowLeft') {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setIsPlaying((playing) => !playing);
+      } else if (event.code === 'ArrowRight') {
+        setFrame(Math.min(currentFrame + 1, Math.max(frameCount - 1, 0)));
+      } else if (event.code === 'ArrowLeft') {
         setFrame(Math.max(currentFrame - 1, 0));
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentFrame, frameCount, setFrame]);
 
-  const handleFrameClick = (_e: React.MouseEvent<HTMLDivElement>) => {
-    if (!activeCameraId) return;
-
-    // const rect = e.currentTarget.getBoundingClientRect();
-    // const _x = e.clientX - rect.left;
-    // const _y = e.clientY - rect.top;
-
-    // Normalizing coordinates (assuming 1280x720 or similar for now)
-    // In a real scenario, we'd scale based on naturalWidth/Height of image
-    // For now, let's just use the raw coordinates for the prototype
-
-    // addSeed({
-    //   ballId: seeds.length, // simple ball ID assignment
-    //   cameraId: activeCameraId,
-    //   frameIdx: 0,
-    //   x,
-    //   y
-    // });
-  };
-
-  const activeCamera = cameras.find((c) => c.id === activeCameraId);
+  const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
 
   return (
-    <div className="max-w-[1600px] mx-auto flex flex-col gap-6 h-[calc(100vh-120px)]">
-      {/* Header Info */}
-      <header className="flex justify-between items-center bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-xl">
+    <div className="mx-auto flex h-[calc(100vh-120px)] max-w-[1600px] flex-col gap-6">
+      <header className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-xl">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-500/20 p-2.5 rounded-xl border border-indigo-500/30">
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/20 p-2.5">
               <MousePointer2 size={20} className="text-indigo-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">Point Tracking</h1>
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+              <h1 className="text-xl font-bold tracking-tight text-white">Point Tracking</h1>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 Review & Correct Trajectories
               </p>
             </div>
@@ -101,21 +80,20 @@ export const TrackingPage = () => {
 
           <div className="h-10 w-px bg-slate-800" />
 
-          {/* Status Indicator */}
           <div className="flex items-center gap-4">
             <div className="flex flex-col">
-              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">
+              <span className="text-[9px] font-bold uppercase tracking-tighter text-slate-500">
                 Current Status
               </span>
               <div className="flex items-center gap-2">
                 <div
-                  className={`w-2 h-2 rounded-full ${status === 'tracking' ? 'bg-yellow-500 animate-pulse' : 'bg-emerald-500'}`}
+                  className={`h-2 w-2 rounded-full ${status === 'tracking' ? 'animate-pulse bg-yellow-500' : 'bg-emerald-500'}`}
                 />
                 <span className="text-sm font-bold capitalize">{status}</span>
               </div>
             </div>
             {status === 'tracking' && (
-              <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+              <div className="h-2 w-48 overflow-hidden rounded-full border border-slate-700 bg-slate-800">
                 <div
                   className="h-full bg-indigo-500 transition-all duration-300"
                   style={{ width: `${progress * 100}%` }}
@@ -126,188 +104,174 @@ export const TrackingPage = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all border border-transparent hover:border-slate-700">
+          <button className="rounded-xl border border-transparent p-3 text-slate-400 transition-all hover:border-slate-700 hover:bg-slate-800 hover:text-white">
             <RefreshCw size={20} />
           </button>
           <button
             onClick={advancePhase}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20"
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 font-bold text-white shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-500"
           >
             Finalize Data <ChevronRight size={18} />
           </button>
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-6 min-h-0">
-        {/* Main Viewport */}
-        <div className="lg:col-span-3 flex flex-col gap-4 min-h-0">
-          <div className="flex-1 bg-black rounded-2xl border border-slate-800 shadow-2xl overflow-hidden relative group">
-            {/* The Image/Frame */}
-            <div
-              className="w-full h-full flex items-center justify-center cursor-crosshair relative"
-              onClick={handleFrameClick}
-            >
-              {/* Placeholder for Frame Image */}
-              <div className="text-slate-800 font-mono text-9xl select-none opacity-20 uppercase font-black italic">
-                FRAME {currentFrame}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-4">
+        <div className="flex min-h-0 flex-col gap-4 lg:col-span-3">
+          <div className="group relative flex-1 overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl">
+            <div className="relative flex h-full w-full items-center justify-center p-4">
+              <div className="relative aspect-video h-full max-h-full w-full max-w-full overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950">
+                <div className="pointer-events-none absolute inset-0 grid place-items-center text-7xl font-black italic uppercase text-slate-800/40 lg:text-9xl">
+                  Frame {currentFrame}
+                </div>
+
+                <TrajectoryCanvas
+                  tracks={tracks}
+                  currentFrame={currentFrame}
+                  cameraId={resolvedActiveCameraId || ''}
+                  width={FRAME_WIDTH}
+                  height={FRAME_HEIGHT}
+                />
+
+                <BallSeedPicker
+                  cameraId={resolvedActiveCameraId}
+                  currentFrame={currentFrame}
+                  frameWidth={FRAME_WIDTH}
+                  frameHeight={FRAME_HEIGHT}
+                  seeds={seeds}
+                  onAddSeed={addSeed}
+                  className="relative h-full w-full cursor-crosshair"
+                />
               </div>
-
-              {/* Trajectory Canvas Overlay */}
-              <TrajectoryCanvas
-                tracks={tracks}
-                currentFrame={currentFrame}
-                cameraId={activeCameraId || ''}
-                width={1280} // These should be dynamic based on frame size
-                height={720}
-              />
-
-              {/* Seed/Marker Overlays */}
-              {seeds
-                .filter((s) => s.cameraId === activeCameraId)
-                .map((seed) => (
-                  <div
-                    key={`${seed.ballId}-${seed.cameraId}`}
-                    className="absolute w-8 h-8 -ml-4 -mt-4 border-2 border-white rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm pointer-events-none"
-                    style={{ left: seed.x, top: seed.y }}
-                  >
-                    <span className="text-[10px] font-bold text-white">{seed.ballId}</span>
-                  </div>
-                ))}
             </div>
 
-            {/* Viewport UI Overlays */}
-            <div className="absolute top-4 left-4 flex gap-2">
-              <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+            <div className="absolute left-4 top-4 flex gap-2">
+              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
                 <Camera size={14} className="text-indigo-400" />
                 {activeCamera?.label || 'No Camera Selected'}
               </div>
-              <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-mono text-indigo-400">
+              <div className="rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 font-mono text-[10px] text-indigo-400 backdrop-blur-md">
                 {currentFrame} / {frameCount}
               </div>
             </div>
 
-            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button className="p-2 bg-black/60 backdrop-blur-md rounded-lg border border-white/10 text-white hover:bg-indigo-500 transition-colors">
+            <div className="absolute right-4 top-4 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+              <button className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-md transition-colors hover:bg-indigo-500">
                 <Maximize2 size={18} />
               </button>
-              <button className="p-2 bg-black/60 backdrop-blur-md rounded-lg border border-white/10 text-white hover:bg-indigo-500 transition-colors">
+              <button className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-md transition-colors hover:bg-indigo-500">
                 <Settings2 size={18} />
               </button>
             </div>
 
-            {/* Legend */}
-            <div className="absolute bottom-4 right-4 flex gap-4 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+            <div className="absolute bottom-4 right-4 flex gap-4 rounded-xl border border-white/10 bg-black/60 px-4 py-2 backdrop-blur-md">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
-                  Ball 0
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
+                <div className="h-3 w-3 rounded-full bg-blue-500" />
+                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
                   Ball 1
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-amber-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
+                <div className="h-3 w-3 rounded-full bg-emerald-500" />
+                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
                   Ball 2
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-3 w-3 rounded-full bg-amber-500" />
+                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
+                  Ball 3
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Scrubber Area */}
           <FrameScrubber
             currentFrame={currentFrame}
-            frameCount={frameCount || 1}
+            frameCount={Math.max(frameCount, 1)}
             onFrameChange={setFrame}
             isPlaying={isPlaying}
-            onPlayToggle={() => setIsPlaying(!isPlaying)}
+            onPlayToggle={() => setIsPlaying((playing) => !playing)}
           />
         </div>
 
-        {/* Sidebar Controls */}
-        <div className="flex flex-col gap-6 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
-          {/* Camera Selector */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
-            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+        <div className="custom-scrollbar flex min-h-0 flex-col gap-6 overflow-y-auto pr-2">
+          <div className="flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-lg">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
               Active Camera
             </h3>
             <div className="space-y-2">
-              {cameras.map((cam) => (
+              {cameras.map((camera) => (
                 <button
-                  key={cam.id}
-                  onClick={() => setActiveCameraId(cam.id)}
-                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all border ${
-                    activeCameraId === cam.id
-                      ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
-                      : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                  key={camera.id}
+                  onClick={() => setActiveCameraId(camera.id)}
+                  className={`w-full rounded-xl border p-3 transition-all ${
+                    resolvedActiveCameraId === camera.id
+                      ? 'border-indigo-500/50 bg-indigo-500/10 text-indigo-400'
+                      : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Camera size={16} />
-                    <span className="text-sm font-bold">{cam.label}</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Camera size={16} />
+                      <span className="text-sm font-bold">{camera.label}</span>
+                    </div>
+                    {resolvedActiveCameraId === camera.id && (
+                      <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+                    )}
                   </div>
-                  {activeCameraId === cam.id && (
-                    <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-                  )}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Tracking Controls */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-5 shadow-lg">
-            <div className="flex justify-between items-center">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+          <div className="flex flex-col gap-5 rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
                 Tracking Logic
               </h3>
-              <div className="bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded text-[10px] font-black italic">
+              <div className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-black italic text-emerald-500">
                 SAM-2
               </div>
             </div>
 
             <div className="space-y-4">
-              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-col gap-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">
-                    Seeds Placed
-                  </span>
-                  <span className="font-mono text-xs text-white bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
-                    {seeds.filter((s) => s.cameraId === activeCameraId).length} / 3
+              <div className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase text-slate-400">Seeds Placed</span>
+                  <span className="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 font-mono text-xs text-white">
+                    {seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length} / 3
                   </span>
                 </div>
-                <div className="text-[10px] text-slate-500 italic leading-relaxed">
-                  * Click in the viewport to place initial seeds for SAM2.
+                <div className="text-[10px] italic leading-relaxed text-slate-500">
+                  * Place ball seeds on frame 0 using click or bbox mode.
                 </div>
               </div>
 
               <button
                 disabled={seeds.length === 0 || status === 'tracking'}
                 onClick={startTracking}
-                className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all ${
+                className={`w-full rounded-xl py-4 font-bold transition-all ${
                   seeds.length > 0 && status !== 'tracking'
-                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500'
+                    : 'cursor-not-allowed border border-slate-700 bg-slate-800 text-slate-500'
                 }`}
               >
-                <Zap size={18} fill={seeds.length > 0 ? 'white' : 'none'} /> Run Auto-Tracker
+                <span className="flex items-center justify-center gap-2">
+                  <Zap size={18} fill={seeds.length > 0 ? 'white' : 'none'} />
+                  Run Auto-Tracker
+                </span>
               </button>
             </div>
           </div>
 
-          {/* Quality Alerts */}
           {tracks.length > 0 && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
               <div className="flex items-center gap-2 text-red-500">
                 <AlertCircle size={16} />
-                <h3 className="text-[10px] font-black uppercase tracking-widest">
-                  Confidence Alerts
-                </h3>
+                <h3 className="text-[10px] font-black uppercase tracking-widest">Confidence Alerts</h3>
               </div>
-              <p className="text-[10px] text-red-200/60 leading-tight">
+              <p className="text-[10px] leading-tight text-red-200/60">
                 Points in red show low SAM2 confidence. Scrub to those frames and apply corrections.
               </p>
             </div>
