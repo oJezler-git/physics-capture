@@ -27,7 +27,7 @@ class PeerManager {
     console.log(`[WebRTC] Received offer from ${peerId}`);
 
     const conn = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
     const entry: PeerEntry = { peerId, conn, stream: null };
@@ -37,7 +37,7 @@ class PeerManager {
       if (event.candidate) {
         wsClient.send({
           type: 'peer:ice',
-          data: { ...event.candidate.toJSON(), peerId } as any
+          data: { ...event.candidate.toJSON(), peerId } as any,
         });
       }
     };
@@ -45,15 +45,15 @@ class PeerManager {
     conn.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}`);
       entry.stream = event.streams[0];
-      
+
       // Update camera in session store
       const cameras = useSessionStore.getState().cameras;
-      const camera = cameras.find(c => c.peerId === peerId);
+      const camera = cameras.find((c) => c.peerId === peerId);
       if (camera) {
         useSessionStore.getState().addCamera({
           ...camera,
           stream: entry.stream,
-          status: 'live'
+          status: 'live',
         });
       }
     };
@@ -65,7 +65,7 @@ class PeerManager {
 
       wsClient.send({
         type: 'peer:answer',
-        data: { ...answer, peerId } as any
+        data: { ...answer, peerId } as any,
       });
     } catch (err) {
       console.error(`[WebRTC] Error handling offer from ${peerId}`, err);
@@ -84,7 +84,7 @@ class PeerManager {
   }
 
   cleanup() {
-    this.peers.forEach(entry => {
+    this.peers.forEach((entry) => {
       entry.conn.close();
     });
     this.peers.clear();

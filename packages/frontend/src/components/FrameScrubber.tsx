@@ -37,7 +37,11 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
             onClick={onPlayToggle}
             className="w-10 h-10 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 rounded-full transition-colors shadow-lg"
           >
-            {isPlaying ? <Pause size={20} fill="white" /> : <Play size={20} fill="white" className="ml-0.5" />}
+            {isPlaying ? (
+              <Pause size={20} fill="white" />
+            ) : (
+              <Play size={20} fill="white" className="ml-0.5" />
+            )}
           </button>
         )}
 
@@ -73,7 +77,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
           {/* Visual indicator for current frame could go here */}
         </div>
       </div>
-      
+
       {/* Keyboard Hint */}
       <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold flex justify-center gap-6">
         <span>Space: Play/Pause</span>

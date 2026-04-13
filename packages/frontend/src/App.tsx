@@ -10,7 +10,9 @@ import { ResultsPage } from './pages/ResultsPage';
 import { PhonePage } from './pages/PhonePage';
 
 function ConnectionStatus() {
-  const [status, setStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('disconnected');
+  const [status, setStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>(
+    'disconnected',
+  );
 
   useEffect(() => {
     const checkStatus = () => {
@@ -18,7 +20,7 @@ function ConnectionStatus() {
       const connected = wsClient.isConnected;
       // @ts-ignore
       const attempts = wsClient.reconnectAttempts;
-      
+
       if (connected) setStatus('connected');
       else if (attempts > 0) setStatus('reconnecting');
       else setStatus('disconnected');
@@ -62,7 +64,7 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
         <ConnectionStatus />
-        
+
         <main className="container mx-auto px-4 py-8">
           <Routes>
             <Route path="/" element={<Navigate to="/setup" replace />} />

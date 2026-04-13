@@ -32,7 +32,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       if (track.cameraId !== cameraId) return;
 
       const color = BALL_COLORS[track.ballId % BALL_COLORS.length];
-      
+
       // Draw full trajectory with lower opacity
       ctx.beginPath();
       ctx.strokeStyle = color;
@@ -50,8 +50,8 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       ctx.beginPath();
       ctx.setLineDash([]);
       ctx.globalAlpha = 0.8;
-      
-      const visiblePoints = track.points.filter(p => p.frameIdx <= currentFrame);
+
+      const visiblePoints = track.points.filter((p) => p.frameIdx <= currentFrame);
       visiblePoints.forEach((point, i) => {
         if (i === 0) ctx.moveTo(point.x, point.y);
         else ctx.lineTo(point.x, point.y);
@@ -59,14 +59,14 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       ctx.stroke();
 
       // Draw current position marker
-      const currentPoint = track.points.find(p => p.frameIdx === currentFrame);
+      const currentPoint = track.points.find((p) => p.frameIdx === currentFrame);
       if (currentPoint) {
         ctx.globalAlpha = 1.0;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(currentPoint.x, currentPoint.y, 6, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Flag low confidence
         if (currentPoint.isFlagged || currentPoint.confidence < 0.7) {
           ctx.strokeStyle = '#ef4444'; // red-500

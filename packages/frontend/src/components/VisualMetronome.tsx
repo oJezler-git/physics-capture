@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { calibrateMetronome } from '../lib/metronome';
 
 interface VisualMetronomeProps {
   isActive: boolean;
@@ -9,7 +10,7 @@ export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onCo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafIdRef = useRef<number | null>(null);
   const frameIndexRef = useRef(0);
-  
+
   const [speedPxPerFrame, setSpeedPxPerFrame] = useState(0);
   const [jitter, setJitter] = useState(0);
 
@@ -23,22 +24,10 @@ export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onCo
       if (timestamps.length < maxSamples) {
         rafIdRef.current = requestAnimationFrame(calibrate);
       } else {
-        // Compute median interval
-        const intervals: number[] = [];
-        for (let i = 1; i < timestamps.length; i++) {
-          intervals.push(timestamps[i] - timestamps[i - 1]);
-        }
-        intervals.sort((a, b) => a - b);
-        const medianInterval = intervals[Math.floor(intervals.length / 2)];
-        
-        // Compute jitter (median absolute deviation)
-        const deviations = intervals.map(i => Math.abs(i - medianInterval));
-        deviations.sort((a, b) => a - b);
-        const rAF_jitter_ms = deviations[Math.floor(deviations.length / 2)];
-
-        // Target: 400 pixels per second
-        const speed_px_per_second = 400;
-        const speed_px_per_frame = speed_px_per_second / (1000 / medianInterval);
+        const { jitterMs: rAF_jitter_ms, speedPxPerFrame: speed_px_per_frame } = calibrateMetronome(
+          timestamps,
+          400,
+        );
 
         setSpeedPxPerFrame(speed_px_per_frame);
         setJitter(rAF_jitter_ms);
@@ -74,17 +63,17 @@ export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onCo
 
     const tick = () => {
       const dot_x = (speedPxPerFrame * frameIndexRef.current) % canvas.width;
-      
+
       // Clear
       ctx.fillStyle = '#0f172a'; // slate-900
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
+
       // Draw Dot
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(dot_x, dot_y, dot_r, 0, Math.PI * 2);
       ctx.fill();
-      
+
       // Draw Guide Text
       ctx.fillStyle = '#475569'; // slate-500
       ctx.font = 'bold 10px sans-serif';
@@ -95,7 +84,7 @@ export const VisualMetronome: React.FC<VisualMetronomeProps> = ({ isActive, onCo
     };
 
     rafIdRef.current = requestAnimationFrame(tick);
-    
+
     return () => {
       window.removeEventListener('resize', resize);
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);

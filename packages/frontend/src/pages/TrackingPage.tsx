@@ -3,29 +3,21 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
-import { 
-  Settings2, 
-  Maximize2, 
-  Camera, 
-  MousePointer2, 
-  Zap, 
+import {
+  Settings2,
+  Maximize2,
+  Camera,
+  MousePointer2,
+  Zap,
   ChevronRight,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
 } from 'lucide-react';
 
 export const TrackingPage = () => {
   const { cameras, advancePhase } = useSessionStore();
-  const { 
-    frameCount, 
-    currentFrame, 
-    setFrame, 
-    tracks, 
-    status, 
-    progress,
-    seeds,
-    startTracking
-  } = useTrackingStore();
+  const { frameCount, currentFrame, setFrame, tracks, status, progress, seeds, startTracking } =
+    useTrackingStore();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
@@ -57,7 +49,7 @@ export const TrackingPage = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         e.preventDefault();
-        setIsPlaying(p => !p);
+        setIsPlaying((p) => !p);
       } else if (e.code === 'ArrowRight') {
         setFrame(Math.min(currentFrame + 1, frameCount - 1));
       } else if (e.code === 'ArrowLeft') {
@@ -70,7 +62,7 @@ export const TrackingPage = () => {
 
   const handleFrameClick = (_e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeCameraId) return;
-    
+
     // const rect = e.currentTarget.getBoundingClientRect();
     // const _x = e.clientX - rect.left;
     // const _y = e.clientY - rect.top;
@@ -78,7 +70,7 @@ export const TrackingPage = () => {
     // Normalizing coordinates (assuming 1280x720 or similar for now)
     // In a real scenario, we'd scale based on naturalWidth/Height of image
     // For now, let's just use the raw coordinates for the prototype
-    
+
     // addSeed({
     //   ballId: seeds.length, // simple ball ID assignment
     //   cameraId: activeCameraId,
@@ -88,7 +80,7 @@ export const TrackingPage = () => {
     // });
   };
 
-  const activeCamera = cameras.find(c => c.id === activeCameraId);
+  const activeCamera = cameras.find((c) => c.id === activeCameraId);
 
   return (
     <div className="max-w-[1600px] mx-auto flex flex-col gap-6 h-[calc(100vh-120px)]">
@@ -112,16 +104,20 @@ export const TrackingPage = () => {
           {/* Status Indicator */}
           <div className="flex items-center gap-4">
             <div className="flex flex-col">
-              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Current Status</span>
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">
+                Current Status
+              </span>
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${status === 'tracking' ? 'bg-yellow-500 animate-pulse' : 'bg-emerald-500'}`} />
+                <div
+                  className={`w-2 h-2 rounded-full ${status === 'tracking' ? 'bg-yellow-500 animate-pulse' : 'bg-emerald-500'}`}
+                />
                 <span className="text-sm font-bold capitalize">{status}</span>
               </div>
             </div>
             {status === 'tracking' && (
               <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-                <div 
-                  className="h-full bg-indigo-500 transition-all duration-300" 
+                <div
+                  className="h-full bg-indigo-500 transition-all duration-300"
                   style={{ width: `${progress * 100}%` }}
                 />
               </div>
@@ -133,7 +129,7 @@ export const TrackingPage = () => {
           <button className="p-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all border border-transparent hover:border-slate-700">
             <RefreshCw size={20} />
           </button>
-          <button 
+          <button
             onClick={advancePhase}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20"
           >
@@ -147,7 +143,7 @@ export const TrackingPage = () => {
         <div className="lg:col-span-3 flex flex-col gap-4 min-h-0">
           <div className="flex-1 bg-black rounded-2xl border border-slate-800 shadow-2xl overflow-hidden relative group">
             {/* The Image/Frame */}
-            <div 
+            <div
               className="w-full h-full flex items-center justify-center cursor-crosshair relative"
               onClick={handleFrameClick}
             >
@@ -166,15 +162,17 @@ export const TrackingPage = () => {
               />
 
               {/* Seed/Marker Overlays */}
-              {seeds.filter(s => s.cameraId === activeCameraId).map(seed => (
-                <div 
-                  key={`${seed.ballId}-${seed.cameraId}`}
-                  className="absolute w-8 h-8 -ml-4 -mt-4 border-2 border-white rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm pointer-events-none"
-                  style={{ left: seed.x, top: seed.y }}
-                >
-                  <span className="text-[10px] font-bold text-white">{seed.ballId}</span>
-                </div>
-              ))}
+              {seeds
+                .filter((s) => s.cameraId === activeCameraId)
+                .map((seed) => (
+                  <div
+                    key={`${seed.ballId}-${seed.cameraId}`}
+                    className="absolute w-8 h-8 -ml-4 -mt-4 border-2 border-white rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm pointer-events-none"
+                    style={{ left: seed.x, top: seed.y }}
+                  >
+                    <span className="text-[10px] font-bold text-white">{seed.ballId}</span>
+                  </div>
+                ))}
             </div>
 
             {/* Viewport UI Overlays */}
@@ -196,20 +194,26 @@ export const TrackingPage = () => {
                 <Settings2 size={18} />
               </button>
             </div>
-            
+
             {/* Legend */}
             <div className="absolute bottom-4 right-4 flex gap-4 bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">Ball 0</span>
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
+                  Ball 0
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">Ball 1</span>
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
+                  Ball 1
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-amber-500" />
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">Ball 2</span>
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">
+                  Ball 2
+                </span>
               </div>
             </div>
           </div>
@@ -228,15 +232,17 @@ export const TrackingPage = () => {
         <div className="flex flex-col gap-6 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
           {/* Camera Selector */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
-            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Active Camera</h3>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+              Active Camera
+            </h3>
             <div className="space-y-2">
-              {cameras.map(cam => (
+              {cameras.map((cam) => (
                 <button
                   key={cam.id}
                   onClick={() => setActiveCameraId(cam.id)}
                   className={`w-full flex items-center justify-between p-3 rounded-xl transition-all border ${
-                    activeCameraId === cam.id 
-                      ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400' 
+                    activeCameraId === cam.id
+                      ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
                       : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
                   }`}
                 >
@@ -244,7 +250,9 @@ export const TrackingPage = () => {
                     <Camera size={16} />
                     <span className="text-sm font-bold">{cam.label}</span>
                   </div>
-                  {activeCameraId === cam.id && <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
+                  {activeCameraId === cam.id && (
+                    <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+                  )}
                 </button>
               ))}
             </div>
@@ -253,16 +261,22 @@ export const TrackingPage = () => {
           {/* Tracking Controls */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-5 shadow-lg">
             <div className="flex justify-between items-center">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Tracking Logic</h3>
-              <div className="bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded text-[10px] font-black italic">SAM-2</div>
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
+                Tracking Logic
+              </h3>
+              <div className="bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded text-[10px] font-black italic">
+                SAM-2
+              </div>
             </div>
-            
+
             <div className="space-y-4">
               <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Seeds Placed</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    Seeds Placed
+                  </span>
                   <span className="font-mono text-xs text-white bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
-                    {seeds.filter(s => s.cameraId === activeCameraId).length} / 3
+                    {seeds.filter((s) => s.cameraId === activeCameraId).length} / 3
                   </span>
                 </div>
                 <div className="text-[10px] text-slate-500 italic leading-relaxed">
@@ -270,7 +284,7 @@ export const TrackingPage = () => {
                 </div>
               </div>
 
-              <button 
+              <button
                 disabled={seeds.length === 0 || status === 'tracking'}
                 onClick={startTracking}
                 className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all ${
@@ -279,7 +293,7 @@ export const TrackingPage = () => {
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
               >
-                <Zap size={18} fill={seeds.length > 0 ? "white" : "none"} /> Run Auto-Tracker
+                <Zap size={18} fill={seeds.length > 0 ? 'white' : 'none'} /> Run Auto-Tracker
               </button>
             </div>
           </div>
@@ -289,7 +303,9 @@ export const TrackingPage = () => {
             <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2 text-red-500">
                 <AlertCircle size={16} />
-                <h3 className="text-[10px] font-black uppercase tracking-widest">Confidence Alerts</h3>
+                <h3 className="text-[10px] font-black uppercase tracking-widest">
+                  Confidence Alerts
+                </h3>
               </div>
               <p className="text-[10px] text-red-200/60 leading-tight">
                 Points in red show low SAM2 confidence. Scrub to those frames and apply corrections.

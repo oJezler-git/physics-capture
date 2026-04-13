@@ -3,7 +3,7 @@ import type { PhysicsResult, SyncData } from '../types';
 
 interface ResultsState {
   physicsResult: PhysicsResult | null;
-  syncData: SyncData | null;         // master timestamp array metadata
+  syncData: SyncData | null; // master timestamp array metadata
   status: 'idle' | 'computing' | 'complete' | 'failed';
 
   // Actions
@@ -20,19 +20,21 @@ export const useResultsStore = create<ResultsState>((set) => ({
   status: 'idle',
 
   requestPhysics: () => set({ status: 'computing' }),
-  
-  onPhysicsResult: (result) => set({
-    physicsResult: result,
-    status: 'complete',
-  }),
-  
+
+  onPhysicsResult: (result) =>
+    set({
+      physicsResult: result,
+      status: 'complete',
+    }),
+
   onPhysicsFailed: (_error) => set({ status: 'failed' }),
-  
+
   setSyncData: (data) => set({ syncData: data }),
 
-  reset: () => set({
-    physicsResult: null,
-    syncData: null,
-    status: 'idle',
-  }),
+  reset: () =>
+    set({
+      physicsResult: null,
+      syncData: null,
+      status: 'idle',
+    }),
 }));
