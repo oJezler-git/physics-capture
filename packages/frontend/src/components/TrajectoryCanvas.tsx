@@ -124,7 +124,6 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
     ctx.clearRect(0, 0, width, height);
 
     activeTracks.forEach((track) => {
-
       const color = BALL_COLORS[track.ballId % BALL_COLORS.length];
 
       // Draw full trajectory with lower opacity

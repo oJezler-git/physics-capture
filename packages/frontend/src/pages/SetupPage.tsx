@@ -3,8 +3,64 @@ import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useSessionStore } from '../stores/sessionStore';
 import { wsClient } from '../lib/wsClient';
-import { Plus, Camera, Smartphone, ArrowRight, Trash2, AlertCircle } from 'lucide-react';
+import {
+  Plus,
+  Camera,
+  Smartphone,
+  ArrowRight,
+  Trash2,
+  AlertCircle,
+  Wifi,
+  Globe,
+  Info,
+} from 'lucide-react';
 import type { BallMassConfig } from '../types';
+
+type ConnectionMode = 'local' | 'public';
+
+const parseHost = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      return new URL(trimmed).hostname;
+    } catch {
+      return trimmed;
+    }
+  }
+
+  return trimmed.split(':')[0];
+};
+
+const isLocalHostname = (hostname: string) => {
+  if (!hostname) return false;
+
+  if (hostname === 'localhost' || hostname === '0.0.0.0') return true;
+  if (hostname.endsWith('.local')) return true;
+  if (/^127\./.test(hostname)) return true;
+  if (/^10\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) return true;
+
+  return false;
+};
+
+const getConnectionDetails = () => {
+  const configuredHost = parseHost(import.meta.env.VITE_APP_HOST || '');
+  const browserHost = window.location.hostname;
+  const host = configuredHost || browserHost;
+  const mode: ConnectionMode = isLocalHostname(host) ? 'local' : 'public';
+  const protocol = mode === 'public' ? 'https' : 'http';
+  const wsProtocol = mode === 'public' ? 'wss' : 'ws';
+
+  return {
+    host,
+    mode,
+    protocol,
+    wsUrl: `${wsProtocol}://${host}:3001`,
+  };
+};
 
 export const SetupPage = () => {
   const navigate = useNavigate();
@@ -16,14 +72,12 @@ export const SetupPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const roomCode = experimentId ? experimentId.slice(0, 6).toUpperCase() : '';
+  const connection = getConnectionDetails();
+  const phoneUrl = `${connection.protocol}://${connection.host}:3000/phone?room=${roomCode}`;
 
   // Generate QR code when experimentId changes
   useEffect(() => {
     if (experimentId) {
-      // Use environment variable or fallback to window.location.hostname
-      const host = import.meta.env.VITE_APP_HOST || window.location.hostname;
-      const phoneUrl = `http://${host}:3000/phone?room=${roomCode}`;
-
       QRCode.toDataURL(phoneUrl, { width: 256, margin: 2 }, (err, url) => {
         if (!err) setQrCodeUrl(url);
       });
@@ -31,7 +85,7 @@ export const SetupPage = () => {
       // Join the room as PC
       wsClient.send({ type: 'join', room: roomCode, role: 'pc' });
     }
-  }, [experimentId, roomCode]);
+  }, [experimentId, phoneUrl, roomCode]);
 
   const handleNewSession = async () => {
     setLoading(true);
@@ -50,7 +104,7 @@ export const SetupPage = () => {
       // Initialize with 2 balls by default
       setBallConfig(0, { ballId: 0, mass_g: 50, uncertainty_g: 1 });
       setBallConfig(1, { ballId: 1, mass_g: 50, uncertainty_g: 1 });
-    } catch (err) {
+    } catch {
       setError('Failed to create new session. Is the server running?');
     } finally {
       setLoading(false);
@@ -120,9 +174,21 @@ export const SetupPage = () => {
                 <Smartphone className="text-indigo-400" size={24} />
                 Connect Phones
               </h2>
-              <span className="bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full text-sm font-mono font-bold">
-                CODE: {roomCode}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full text-sm font-mono font-bold">
+                  CODE: {roomCode}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                    connection.mode === 'local'
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-sky-500/20 text-sky-400'
+                  }`}
+                >
+                  {connection.mode === 'local' ? <Wifi size={12} /> : <Globe size={12} />}
+                  {connection.mode === 'local' ? 'Local' : 'Public'}
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl shadow-inner">
@@ -134,6 +200,34 @@ export const SetupPage = () => {
               <p className="text-slate-600 text-sm mt-4 text-center">
                 Scan with phone camera to join as a recording device
               </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                <Info size={16} className="text-indigo-400" />
+                Connection Status
+              </div>
+              <p className="text-xs text-slate-400">
+                Mode:{' '}
+                <span className="font-semibold text-slate-200">
+                  {connection.mode === 'local' ? 'Local (Hotspot / LAN)' : 'Public (Tunnel)'}
+                </span>
+              </p>
+              <p className="text-xs text-slate-400 break-all">
+                QR Link: <span className="text-slate-200">{phoneUrl}</span>
+              </p>
+              <p className="text-xs text-slate-400 break-all">
+                WebSocket: <span className="text-slate-200">{connection.wsUrl}</span>
+              </p>
+              <div className="border-t border-slate-800 pt-3 space-y-2 text-xs">
+                <p className="text-slate-300 font-semibold">Troubleshooting Guide</p>
+                <p className="text-slate-400">
+                  Local Mode: Ensure phone and PC are on the same Wi-Fi or hotspot.
+                </p>
+                <p className="text-slate-400">
+                  Public Mode: Using ngrok/public tunnel. Works on mobile data.
+                </p>
+              </div>
             </div>
 
             <div className="space-y-3">

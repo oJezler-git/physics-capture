@@ -28,8 +28,14 @@ export const PhonePage = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [visibilityWarning, setVisibilityWarning] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
 
   const experimentIdRef = useRef<string | null>(null);
+
+  const dbg = (msg: string) => {
+    console.log('[Phone]', msg);
+    setDebugLog((prev) => [...prev.slice(-19), `${new Date().toISOString().slice(11, 23)} ${msg}`]);
+  };
 
   useEffect(() => {
     if (!room) {
@@ -61,7 +67,11 @@ export const PhonePage = () => {
 
   const init = async () => {
     try {
+      dbg(`Protocol: ${window.location.protocol}`);
+      dbg(`mediaDevices available: ${!!navigator.mediaDevices}`);
+
       // 1. Get Camera
+      dbg('Requesting camera...');
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -71,10 +81,12 @@ export const PhonePage = () => {
         },
         audio: false,
       });
+      dbg('Camera granted');
       setStream(mediaStream);
       if (videoRef.current) videoRef.current.srcObject = mediaStream;
 
       // 2. Connect WebSocket
+      dbg('Connecting WS...');
       wsClient.connect();
 
       // Wait for WS to connect then join
@@ -83,6 +95,7 @@ export const PhonePage = () => {
         if (wsClient.isConnected) {
           clearInterval(checkWs);
           const label = `${navigator.platform} Phone`;
+          dbg(`WS connected, joining room ${room}`);
           wsClient.send({ type: 'join', room: room!, role: 'phone', label });
           setStatus('connected');
         }
@@ -92,9 +105,9 @@ export const PhonePage = () => {
       window.addEventListener('ws:webrtc', handleWebRTC);
       window.addEventListener('ws:record', handleRecordCommand);
     } catch (err: any) {
-      console.error('Phone init failed', err);
+      dbg(`ERROR: ${err.name}: ${err.message}`);
       setStatus('error');
-      setErrorMessage(err.message || 'Camera access denied');
+      setErrorMessage(`${err.name}: ${err.message}`);
     }
   };
 
@@ -361,6 +374,16 @@ export const PhonePage = () => {
             >
               Reload App
             </button>
+          </div>
+        )}
+
+        {debugLog.length > 0 && (
+          <div className="w-full mt-2 rounded-lg bg-black/60 border border-slate-700 p-2 max-h-32 overflow-y-auto">
+            {debugLog.map((line, i) => (
+              <p key={i} className="text-[10px] font-mono text-slate-400 leading-4">
+                {line}
+              </p>
+            ))}
           </div>
         )}
       </div>

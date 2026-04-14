@@ -187,7 +187,9 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
           onClick={() => setMode('click')}
           disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
-            mode === 'click' ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+            mode === 'click'
+              ? 'bg-indigo-500 text-white'
+              : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           }`}
         >
           Click
@@ -197,7 +199,9 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
           onClick={() => setMode('bbox')}
           disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
-            mode === 'bbox' ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+            mode === 'bbox'
+              ? 'bg-indigo-500 text-white'
+              : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           }`}
         >
           BBox
@@ -251,4 +255,3 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
     </div>
   );
 };
-

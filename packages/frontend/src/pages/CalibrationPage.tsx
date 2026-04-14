@@ -178,7 +178,10 @@ export const CalibrationPage = () => {
           </div>
 
           <div className="h-2 overflow-hidden rounded-full border border-slate-700 bg-slate-800">
-            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress * 100}%` }} />
+            <div
+              className="h-full bg-indigo-500 transition-all"
+              style={{ width: `${progress * 100}%` }}
+            />
           </div>
 
           {isBusy ? (
@@ -189,7 +192,8 @@ export const CalibrationPage = () => {
 
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <p className={`font-semibold ${qualityTone(reprojectionError)}`}>
-              Reprojection Error: {reprojectionError === null ? '--' : `${reprojectionError.toFixed(3)} px`}
+              Reprojection Error:{' '}
+              {reprojectionError === null ? '--' : `${reprojectionError.toFixed(3)} px`}
             </p>
             {reprojectionError !== null && reprojectionError > 1 ? (
               <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-200">
@@ -302,7 +306,9 @@ export const CalibrationPage = () => {
           </div>
 
           <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950 p-4">
-            <label className="text-xs uppercase tracking-wider text-slate-500">Known Distance (mm)</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500">
+              Known Distance (mm)
+            </label>
             <input
               type="number"
               min={1}
@@ -337,4 +343,3 @@ export const CalibrationPage = () => {
     </div>
   );
 };
-

@@ -39,16 +39,17 @@ export const exportCSV = (result: PhysicsResult): string => {
   lines.push(
     `coeff_of_restitution,${result.system.coeff_of_restitution.value.toFixed(4)},${result.system.coeff_of_restitution.uncertainty.toFixed(4)}`,
   );
-  lines.push(
-    `collision_frame_idx,${result.system.collision_frame_idx.toFixed(0)},0.0000`,
-  );
+  lines.push(`collision_frame_idx,${result.system.collision_frame_idx.toFixed(0)},0.0000`);
 
   return `${lines.join('\n')}\n`;
 };
 
 export const exportJSON = (result: PhysicsResult): string => JSON.stringify(result, null, 2);
 
-export const exportPDF = async (container: HTMLElement, title = 'PhysicsCapture Results'): Promise<Blob> => {
+export const exportPDF = async (
+  container: HTMLElement,
+  title = 'PhysicsCapture Results',
+): Promise<Blob> => {
   const canvas = await html2canvas(container, {
     scale: Math.max(2, window.devicePixelRatio || 1),
     backgroundColor: '#020617',

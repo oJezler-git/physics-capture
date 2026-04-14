@@ -175,37 +175,9 @@ export class WSClient {
   }
 }
 
-const parseHost = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    try {
-      return new URL(trimmed).hostname;
-    } catch {
-      return trimmed;
-    }
-  }
-
-  return trimmed.split(':')[0];
-};
-
-const isLocalHostname = (hostname: string) => {
-  if (!hostname) return false;
-
-  if (hostname === 'localhost' || hostname === '0.0.0.0') return true;
-  if (hostname.endsWith('.local')) return true;
-  if (/^127\./.test(hostname)) return true;
-  if (/^10\./.test(hostname)) return true;
-  if (/^192\.168\./.test(hostname)) return true;
-  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) return true;
-
-  return false;
-};
-
 const getDefaultWsUrl = () => {
-  const host = parseHost(import.meta.env.VITE_APP_HOST || '') || window.location.hostname;
-  const protocol = isLocalHostname(host) ? 'ws' : 'wss';
+  const host = window.location.hostname;
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${protocol}://${host}:3001`;
 };
 

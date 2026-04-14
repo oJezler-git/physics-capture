@@ -1,5 +1,6 @@
 import { WSClient } from './wsClient';
 import { useTrackingStore } from '../stores/trackingStore';
+import { useUiStore } from '../stores/uiStore';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -45,6 +46,14 @@ class MockWebSocket {
       }),
     );
   }
+
+  receiveRaw(payload: string): void {
+    this.onmessage?.(
+      new MessageEvent('message', {
+        data: payload,
+      }),
+    );
+  }
 }
 
 describe('WSClient', () => {
@@ -53,6 +62,7 @@ describe('WSClient', () => {
     MockWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWebSocket);
     useTrackingStore.getState().reset();
+    useUiStore.setState({ toasts: [] });
   });
 
   afterEach(() => {
@@ -101,5 +111,35 @@ describe('WSClient', () => {
 
     vi.advanceTimersByTime(1);
     expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('queues outbound messages while disconnected and flushes on open', () => {
+    const client = new WSClient('ws://test.local');
+    client.connect();
+
+    const socket = MockWebSocket.instances[0];
+    client.send({ type: 'record:start', experimentId: 'exp-42' });
+    expect(socket.sentMessages).toHaveLength(0);
+
+    socket.open();
+    expect(socket.sentMessages).toHaveLength(1);
+    expect(JSON.parse(socket.sentMessages[0])).toEqual({
+      type: 'record:start',
+      experimentId: 'exp-42',
+    });
+  });
+
+  it('pushes an error toast for malformed inbound messages', () => {
+    const client = new WSClient('ws://test.local');
+    client.connect();
+
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    socket.receiveRaw('{ definitely-not-json');
+
+    const toasts = useUiStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].level).toBe('error');
+    expect(toasts[0].message).toContain('malformed');
   });
 });

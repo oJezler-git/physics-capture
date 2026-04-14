@@ -285,13 +285,16 @@ export const TrackingPage = () => {
             <div className="space-y-4">
               <div className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">Seeds Placed</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400">
+                    Seeds Placed
+                  </span>
                   <span className="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 font-mono text-xs text-white">
                     {seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length} / 3
                   </span>
                 </div>
                 <div className="text-[10px] italic leading-relaxed text-slate-500">
-                  * Place seeds on frame 0. Drag trajectory points to apply corrections after tracking.
+                  * Place seeds on frame 0. Drag trajectory points to apply corrections after
+                  tracking.
                 </div>
               </div>
 
@@ -316,7 +319,9 @@ export const TrackingPage = () => {
             <div className="flex flex-col gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
               <div className="flex items-center gap-2 text-red-500">
                 <AlertCircle size={16} />
-                <h3 className="text-[10px] font-black uppercase tracking-widest">Confidence Alerts</h3>
+                <h3 className="text-[10px] font-black uppercase tracking-widest">
+                  Confidence Alerts
+                </h3>
               </div>
               <p className="text-[10px] leading-tight text-red-200/60">
                 Points in red show low SAM2 confidence. Scrub to those frames and apply corrections.

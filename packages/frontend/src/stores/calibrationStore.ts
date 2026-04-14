@@ -42,7 +42,8 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
 
   setProfiles: (profiles) => set({ profiles }),
 
-  startCalibration: () => set({ status: 'running', reprojectionError: null, progress: 0, error: null }),
+  startCalibration: () =>
+    set({ status: 'running', reprojectionError: null, progress: 0, error: null }),
 
   onCalibrationProgress: (progress) => set({ status: 'running', progress }),
 

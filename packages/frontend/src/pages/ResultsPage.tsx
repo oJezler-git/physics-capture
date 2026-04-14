@@ -77,7 +77,8 @@ const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =
 
 export const ResultsPage = () => {
   const { experimentId, ballConfigs } = useSessionStore();
-  const { physicsResult, status, requestPhysics, onPhysicsResult, onPhysicsFailed } = useResultsStore();
+  const { physicsResult, status, requestPhysics, onPhysicsResult, onPhysicsFailed } =
+    useResultsStore();
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -123,7 +124,8 @@ export const ResultsPage = () => {
       if (window.location.hostname === 'localhost') {
         onPhysicsResult(buildMockResult(experimentId));
       } else {
-        const message = requestError instanceof Error ? requestError.message : 'Unable to compute physics';
+        const message =
+          requestError instanceof Error ? requestError.message : 'Unable to compute physics';
         onPhysicsFailed(message);
         setError(message);
       }
@@ -139,7 +141,10 @@ export const ResultsPage = () => {
   const handleExportJson = () => {
     if (!physicsResult) return;
     const content = exportJSON(physicsResult);
-    downloadBlob(new Blob([content], { type: 'application/json;charset=utf-8' }), 'physics-results.json');
+    downloadBlob(
+      new Blob([content], { type: 'application/json;charset=utf-8' }),
+      'physics-results.json',
+    );
   };
 
   const handleExportPdf = async () => {
@@ -212,10 +217,15 @@ export const ResultsPage = () => {
             </button>
           </div>
 
-          <div ref={exportRef} className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-6">
+          <div
+            ref={exportRef}
+            className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-6"
+          >
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">Momentum Conserved</p>
+                <p className="text-xs uppercase tracking-wider text-slate-500">
+                  Momentum Conserved
+                </p>
                 <p className="mt-2 text-xl font-bold text-white">
                   {formatWithUncertainty(
                     physicsResult.system.momentum_conserved_pct.value,
@@ -226,7 +236,9 @@ export const ResultsPage = () => {
                 </p>
               </article>
               <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">Coefficient of Restitution</p>
+                <p className="text-xs uppercase tracking-wider text-slate-500">
+                  Coefficient of Restitution
+                </p>
                 <p className="mt-2 text-xl font-bold text-white">
                   {formatWithUncertainty(
                     physicsResult.system.coeff_of_restitution.value,
@@ -237,7 +249,9 @@ export const ResultsPage = () => {
               </article>
               <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <p className="text-xs uppercase tracking-wider text-slate-500">Collision Frame</p>
-                <p className="mt-2 text-xl font-bold text-white">{physicsResult.system.collision_frame_idx}</p>
+                <p className="mt-2 text-xl font-bold text-white">
+                  {physicsResult.system.collision_frame_idx}
+                </p>
               </article>
               <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-slate-500">
@@ -248,8 +262,8 @@ export const ResultsPage = () => {
                     physicsResult.system.ke_before_total.value,
                     physicsResult.system.ke_before_total.uncertainty,
                     4,
-                  )}
-                  {' '}J
+                  )}{' '}
+                  J
                 </p>
               </article>
             </section>
@@ -259,9 +273,14 @@ export const ResultsPage = () => {
               <div className="space-y-6">
                 {chartSeries.map((series) => (
                   <div key={`chart-${series.ballId}`} className="h-[220px] w-full">
-                    <p className="mb-2 text-sm font-semibold text-slate-300">Ball {series.ballId + 1}</p>
+                    <p className="mb-2 text-sm font-semibold text-slate-300">
+                      Ball {series.ballId + 1}
+                    </p>
                     <ResponsiveContainer>
-                      <LineChart data={series.rows} margin={{ top: 10, right: 12, left: 0, bottom: 4 }}>
+                      <LineChart
+                        data={series.rows}
+                        margin={{ top: 10, right: 12, left: 0, bottom: 4 }}
+                      >
                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                         <XAxis
                           dataKey="timeMs"
@@ -352,7 +371,11 @@ export const ResultsPage = () => {
                       <tr key={`energy-${ball.ballId}`} className="border-t border-slate-800">
                         <td className="py-2">Ball {ball.ballId + 1}</td>
                         <td className="py-2">
-                          {formatWithUncertainty(ball.ke_before.value, ball.ke_before.uncertainty, 4)}
+                          {formatWithUncertainty(
+                            ball.ke_before.value,
+                            ball.ke_before.uncertainty,
+                            4,
+                          )}
                         </td>
                         <td className="py-2">
                           {formatWithUncertainty(ball.ke_after.value, ball.ke_after.uncertainty, 4)}
