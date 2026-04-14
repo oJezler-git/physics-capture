@@ -71,9 +71,9 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
 
         console.log(`Client ${clientId} joined room ${roomId} as ${role}`);
 
-        // Broadcast to PC that a phone has joined
+        // If a phone joins, broadcast to the PC. If PC joins, we can potentially broadcast to other members.
         if (role === 'phone') {
-          room.members.forEach((member) => {
+          room.members.forEach((member, clientId) => {
             if (member.role === 'pc') {
               member.ws.send(JSON.stringify({ 
                 type: 'phone:joined', 
@@ -82,6 +82,17 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
             }
           });
         }
+        
+        // Also broadcast the join to everyone in the room (for presence/WebRTC)
+        room.members.forEach((member) => {
+          if (member.ws !== ws) {
+            member.ws.send(JSON.stringify({
+              type: 'peer:joined',
+              clientId: clientId,
+              role: role
+            }));
+          }
+        });
         return;
       }
 
