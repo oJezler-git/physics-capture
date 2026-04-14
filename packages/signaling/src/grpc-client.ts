@@ -33,7 +33,7 @@ export const grpcClient = new PhysicsCapture(
   grpc.credentials.createInsecure()
 );
 
-function mapGrpcError(raw: Error): GrpcError {
+export function mapGrpcError(raw: Error): GrpcError {
   const err = raw as any;
   return Object.assign(new Error(err.details ?? raw.message), {
     code: err.code ?? grpc.status.UNKNOWN,

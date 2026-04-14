@@ -8,6 +8,7 @@
     "dev:signaling": "npm run dev --workspace=signaling",
     "dev:cv": "python packages/cv-service/grpc_server.py",
     "test:frontend": "npm test --workspace=frontend",
+    "test:cv": "pytest packages/cv-service/tests",
     "test:signaling": "npm test --workspace=signaling"
   }
 }
