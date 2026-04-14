@@ -17,7 +17,7 @@ const upload = multer({ dest: path.join(EXPERIMENTS_DIR, "temp") });
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // REST API for file handling
 app.post("/api/upload-video", upload.single("file"), async (req, res) => {
