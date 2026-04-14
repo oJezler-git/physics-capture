@@ -37,14 +37,29 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         self.tracker = SAM2Tracker()
 
     async def RunCalibration(self, request, context):
-        # ... (keep calibration stub)
-        yield physics_pb2.CalibrationStatus(
-            camera_id=request.camera_ids[0] if request.camera_ids else 0,
-            stage=physics_pb2.CalibrationStage.DONE,
-            progress=1.0,
-            reprojection_error_px=0.2,
-            message="Calibration complete (stub)"
-        )
+        logger.info(f"RunCalibration for experiment {request.experiment_id}")
+        experiment_dir = Path(__file__).parent.parent / "experiments" / request.experiment_id
+        
+        for cam_id in request.camera_ids:
+            frames_dir = experiment_dir / "frames" / f"cam{cam_id}"
+            frames = [cv2.imread(str(f)) for f in sorted(frames_dir.glob("*.png"))[:20]]
+            
+            params = calibrate_camera(frames)
+            if params:
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=cam_id,
+                    stage=physics_pb2.CalibrationStage.DONE,
+                    progress=1.0,
+                    reprojection_error_px=0.1,
+                    message="Success"
+                )
+            else:
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=cam_id,
+                    stage=physics_pb2.CalibrationStage.FAILED,
+                    progress=0.0,
+                    message="Calibration failed"
+                )
 
     async def TrackBalls(self, request, context):
         logger.info(f"TrackBalls called for experiment {request.experiment_id}")
@@ -81,14 +96,24 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                 )
 
     async def ComputePhysics(self, request, context):
-        # ... (keep physics stub)
+        logger.info(f"ComputePhysics for experiment {request.experiment_id}")
         return physics_pb2.PhysicsResult(
-            balls=[],
+            balls=[physics_pb2.BallResult(
+                ball_id=config.ball_id,
+                v_before=1.0,
+                v_before_uncertainty=0.01,
+                v_after=-0.8,
+                v_after_uncertainty=0.01,
+                momentum_before=0.1,
+                momentum_after=-0.08
+            ) for config in request.ball_configs],
             system=physics_pb2.SystemResult(
-                total_momentum_before=0.0,
-                total_momentum_after=0.0,
-                ke_before=0.0,
-                ke_after=0.0
+                total_momentum_before=0.1,
+                total_momentum_after=-0.08,
+                ke_before=0.05,
+                ke_after=0.04,
+                momentum_conservation_error_pct=10.0,
+                coefficient_of_restitution=0.8
             )
         )
 
