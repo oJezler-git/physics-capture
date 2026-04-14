@@ -51,14 +51,23 @@ const getConnectionDetails = () => {
   const browserHost = window.location.hostname;
   const host = configuredHost || browserHost;
   const mode: ConnectionMode = isLocalHostname(host) ? 'local' : 'public';
-  const protocol = mode === 'public' ? 'https' : 'http';
-  const wsProtocol = mode === 'public' ? 'wss' : 'ws';
+  
+  // Force https/wss for any external connection to enable camera access
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const protocol = isLocal ? window.location.protocol.slice(0, -1) : 'https';
+  const wsProtocol = protocol === 'https' ? 'wss' : 'ws';
+  
+  const port =
+    import.meta.env.VITE_APP_PORT ||
+    window.location.port ||
+    (protocol === 'https' ? '443' : '80');
 
   return {
     host,
+    port,
     mode,
     protocol,
-    wsUrl: `${wsProtocol}://${host}:3001`,
+    wsUrl: `${wsProtocol}://${host}:${port}/ws`,
   };
 };
 
@@ -73,7 +82,7 @@ export const SetupPage = () => {
 
   const roomCode = experimentId ? experimentId.slice(0, 6).toUpperCase() : '';
   const connection = getConnectionDetails();
-  const phoneUrl = `${connection.protocol}://${connection.host}:3000/phone?room=${roomCode}`;
+  const phoneUrl = `${connection.protocol}://${connection.host}:${connection.port}/phone?room=${roomCode}`;
 
   // Generate QR code when experimentId changes
   useEffect(() => {
@@ -223,6 +232,10 @@ export const SetupPage = () => {
                 <p className="text-slate-300 font-semibold">Troubleshooting Guide</p>
                 <p className="text-slate-400">
                   Local Mode: Ensure phone and PC are on the same Wi-Fi or hotspot.
+                </p>
+                <p className="text-slate-400">Use HTTPS on phone links so camera permissions work.</p>
+                <p className="text-slate-400">
+                  Allow inbound Windows Firewall traffic on port 3000.
                 </p>
                 <p className="text-slate-400">
                   Public Mode: Using ngrok/public tunnel. Works on mobile data.

@@ -176,9 +176,9 @@ export class WSClient {
 }
 
 const getDefaultWsUrl = () => {
-  const host = window.location.hostname;
+  const host = window.location.host;
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${host}:3001`;
+  return `${protocol}://${host}/ws`;
 };
 
 // Use explicit WebSocket URL when provided, otherwise infer local/public fallback.

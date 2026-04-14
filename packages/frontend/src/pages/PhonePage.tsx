@@ -68,7 +68,14 @@ export const PhonePage = () => {
   const init = async () => {
     try {
       dbg(`Protocol: ${window.location.protocol}`);
+      dbg(`isSecureContext: ${window.isSecureContext}`);
       dbg(`mediaDevices available: ${!!navigator.mediaDevices}`);
+
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error(
+          'Camera access requires a secure page. Open this link over HTTPS (or localhost).',
+        );
+      }
 
       // 1. Get Camera
       dbg('Requesting camera...');
@@ -91,8 +98,7 @@ export const PhonePage = () => {
 
       // Wait for WS to connect then join
       const checkWs = setInterval(() => {
-        // @ts-ignore
-        if (wsClient.isConnected) {
+        if (wsClient.connected) {
           clearInterval(checkWs);
           const label = `${navigator.platform} Phone`;
           dbg(`WS connected, joining room ${room}`);
