@@ -1,16 +1,53 @@
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
+import multer from "multer";
+import path from "path";
+import fs from "fs/promises";
+import { fileURLToPath } from "url";
+import { extractFrames } from "./ffmpeg.js";
 import { trackBalls, runCalibration, computePhysics } from "./grpc-client.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
+const upload = multer({ dest: path.resolve(__dirname, "../../experiments/temp/") });
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3000;
 
+app.post("/api/upload-video", upload.single("file"), async (req, res) => {
+  try {
+    const { experiment_id, camera_id } = req.body;
+    const file = req.file;
+    if (!file || !experiment_id || !camera_id) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const experimentDir = path.resolve(__dirname, `../../experiments/${experiment_id}`);
+    const rawDir = path.join(experimentDir, "raw");
+    const framesDir = path.join(experimentDir, "frames", `cam${camera_id}`);
+
+    await fs.mkdir(rawDir, { recursive: true });
+
+    const destPath = path.join(rawDir, `cam${camera_id}${path.extname(file.originalname)}`);
+    await fs.rename(file.path, destPath);
+
+    // Trigger extraction
+    const frameCount = await extractFrames(destPath, framesDir);
+
+    res.json({ experiment_id, camera_id, stored_path: destPath, frame_count: frameCount });
+  } catch (err: any) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 wss.on("connection", (ws: WebSocket) => {
-  console.log("Client connected via WebSocket");
+// ... rest of the signaling logic
+
 
   ws.on("message", async (data: string) => {
     try {
