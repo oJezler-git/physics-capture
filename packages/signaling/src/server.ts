@@ -70,6 +70,18 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
         clientToRoom.set(clientId, roomId);
 
         console.log(`Client ${clientId} joined room ${roomId} as ${role}`);
+
+        // Broadcast to PC that a phone has joined
+        if (role === 'phone') {
+          room.members.forEach((member) => {
+            if (member.role === 'pc') {
+              member.ws.send(JSON.stringify({ 
+                type: 'phone:joined', 
+                data: { id: clientId, type: 'phone', label: msg.label || 'Phone', status: 'live' } 
+              }));
+            }
+          });
+        }
         return;
       }
 
