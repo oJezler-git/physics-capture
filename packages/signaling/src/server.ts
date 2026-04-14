@@ -48,16 +48,56 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
 });
 
 // WebSocket Signaling Hub
-wss.on("connection", (ws: WebSocket) => {
+const rooms = new Map<string, { members: Map<string, { ws: WebSocket; role: string }> }>();
+const clientToRoom = new Map<string, string>();
+
+wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
   ws.on("message", (data: string) => {
-    const msg = JSON.parse(data.toString());
-    // Signaling relay implementation (from I. Orchestration Backend §4.1)
-    console.log("Received signaling message:", msg.type);
-    wss.clients.forEach((client) => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(msg));
+    try {
+      const msg = JSON.parse(data.toString());
+      console.log("Received signaling message:", msg.type);
+
+      if (msg.type === "join") {
+        const { roomId, clientId, role } = msg;
+        ws.clientId = clientId;
+
+        if (!rooms.has(roomId)) {
+          rooms.set(roomId, { members: new Map() });
+        }
+        
+        const room = rooms.get(roomId)!;
+        room.members.set(clientId, { ws, role });
+        clientToRoom.set(clientId, roomId);
+
+        console.log(`Client ${clientId} joined room ${roomId} as ${role}`);
+        return;
       }
-    });
+
+      // Relay signaling messages (offer/answer/ice)
+      if (["offer", "answer", "ice"].includes(msg.type)) {
+        const roomId = clientToRoom.get(msg.from);
+        if (!roomId) return;
+        
+        const room = rooms.get(roomId);
+        const target = room?.members.get(msg.to);
+        if (target) {
+          target.ws.send(JSON.stringify(msg));
+        }
+        return;
+      }
+    } catch (err) {
+      console.error("Signaling error:", err);
+    }
+  });
+
+  ws.on("close", () => {
+    if (ws.clientId && clientToRoom.has(ws.clientId)) {
+      const roomId = clientToRoom.get(ws.clientId)!;
+      const room = rooms.get(roomId);
+      room?.members.delete(ws.clientId);
+      clientToRoom.delete(ws.clientId);
+      if (room?.members.size === 0) rooms.delete(roomId);
+    }
   });
 });
 
