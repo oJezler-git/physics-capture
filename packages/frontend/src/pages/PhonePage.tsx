@@ -100,10 +100,14 @@ export const PhonePage = () => {
       const checkWs = setInterval(() => {
         if (wsClient.connected) {
           clearInterval(checkWs);
-          const label = `${navigator.platform} Phone`;
-          dbg(`WS connected, joining room ${room}`);
-          wsClient.send({ type: 'join', room: room!, role: 'phone', label });
-          setStatus('connected');
+          if (room) {
+            const label = `${navigator.platform} Phone`;
+            dbg(`WS connected, joining room ${room}`);
+            wsClient.send({ type: 'join', roomId: room, role: 'phone', clientId: 'phone', label });
+            setStatus('connected');
+          } else {
+            dbg('ERROR: No room code');
+          }
         }
       }, 500);
 
