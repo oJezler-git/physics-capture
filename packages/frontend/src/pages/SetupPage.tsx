@@ -92,7 +92,7 @@ export const SetupPage = () => {
       });
 
       // Join the room as PC
-      wsClient.send({ type: 'join', room: roomCode, role: 'pc' });
+      wsClient.send({ type: 'join', roomId: roomCode, clientId: 'pc', role: 'pc' });
     }
   }, [experimentId, phoneUrl, roomCode]);
 

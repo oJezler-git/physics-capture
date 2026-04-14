@@ -29,7 +29,7 @@ export type OutboundMessage =
   | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
   | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string } }
   | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } }
-  | { type: 'join'; room: string; role: 'pc' | 'phone'; label?: string };
+  | { type: 'join'; roomId: string; clientId: string; role: 'pc' | 'phone'; label?: string };
 
 export class WSClient {
   private socket: WebSocket | null = null;
