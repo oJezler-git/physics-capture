@@ -15,7 +15,12 @@ const __dirname = path.dirname(__filename);
 const EXPERIMENTS_DIR = path.resolve(__dirname, "../../experiments");
 
 const app = express();
-const upload = multer({ dest: path.join(EXPERIMENTS_DIR, "temp") });
+const TEMP_DIR = path.join(EXPERIMENTS_DIR, "temp");
+if (!existsSync(TEMP_DIR)) {
+  fs.mkdir(TEMP_DIR, { recursive: true }).catch(console.error);
+  console.log("Created missing temp directory:", TEMP_DIR);
+}
+const upload = multer({ dest: TEMP_DIR });
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
