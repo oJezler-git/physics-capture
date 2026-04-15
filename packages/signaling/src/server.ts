@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import multer from "multer";
 import path from "path";
-import fs from "fs/promises";
+import fs, { existsSync } from "fs";
 import dgram from "dgram";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -17,7 +17,7 @@ const EXPERIMENTS_DIR = path.resolve(__dirname, "../../experiments");
 const app = express();
 const TEMP_DIR = path.join(EXPERIMENTS_DIR, "temp");
 if (!existsSync(TEMP_DIR)) {
-  fs.mkdir(TEMP_DIR, { recursive: true }).catch(console.error);
+  fs.promises.mkdir(TEMP_DIR, { recursive: true }).catch(console.error);
   console.log("Created missing temp directory:", TEMP_DIR);
 }
 const upload = multer({ dest: TEMP_DIR });
