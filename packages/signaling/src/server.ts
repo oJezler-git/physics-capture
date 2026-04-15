@@ -200,7 +200,7 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     const rawDir = path.join(experimentDir, "raw");
     const framesDir = path.join(experimentDir, "frames", `cam${camera_id}`);
     
-    await fs.mkdir(rawDir, { recursive: true });
+    await fs.promises.mkdir(rawDir, { recursive: true });
     
     const destPath = path.join(rawDir, `cam${camera_id}${path.extname(file.originalname)}`);
     await fs.rename(file.path, destPath);
