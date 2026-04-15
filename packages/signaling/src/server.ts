@@ -5,6 +5,8 @@ import { createServer } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs/promises";
+import dgram from "dgram";
+import os from "os";
 import { fileURLToPath } from "url";
 import { extractFrames } from "./ffmpeg.js";
 
@@ -19,7 +21,168 @@ const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3001;
 
+const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
+
+const isPrivateIPv4 = (address: string) =>
+  /^10\./.test(address) ||
+  /^192\.168\./.test(address) ||
+  /^172\.(1[6-9]|2\d|3[0-1])\./.test(address);
+
+const isLikelyVirtualInterface = (name: string) =>
+  /(loopback|vmware|virtualbox|vethernet|hyper-v|wsl|docker|tailscale|zerotier|hamachi|bluetooth)/i.test(
+    name,
+  );
+
+type HostCandidate = { interfaceName: string; address: string; score: number };
+
+const getPrivateIPv4Candidates = (): HostCandidate[] => {
+  const interfaces = os.networkInterfaces();
+  const candidates: HostCandidate[] = [];
+
+  for (const [name, infos] of Object.entries(interfaces)) {
+    if (!infos) continue;
+
+    for (const info of infos) {
+      if (info.family !== "IPv4" || info.internal) continue;
+      if (!isPrivateIPv4(info.address)) continue;
+
+      let score = 0;
+      if (!isLikelyVirtualInterface(name)) score += 10;
+      if (/(wi-?fi|wlan|wireless)/i.test(name)) score += 4;
+      if (/(ethernet|eth)/i.test(name)) score += 2;
+      if (/^192\.168\./.test(info.address)) score += 3;
+      if (/^10\./.test(info.address)) score += 2;
+
+      candidates.push({
+        interfaceName: name,
+        address: info.address,
+        score,
+      });
+    }
+  }
+
+  return candidates.sort((a, b) => b.score - a.score);
+};
+
+const detectOutboundIPv4 = (timeoutMs = 500) =>
+  new Promise<string | null>((resolve) => {
+    const socket = dgram.createSocket("udp4");
+    let settled = false;
+
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      socket.close();
+      resolve(value);
+    };
+
+    const timeoutId = setTimeout(() => finish(null), timeoutMs);
+
+    socket.on("error", () => finish(null));
+
+    try {
+      socket.connect(53, "8.8.8.8", () => {
+        const addr = socket.address();
+        if (typeof addr === "string") {
+          finish(null);
+          return;
+        }
+        finish(addr.address);
+      });
+    } catch {
+      finish(null);
+    }
+  });
+
 // REST API for file handling
+app.use(express.json());
+
+app.get("/api/network/host-hint", async (req, res) => {
+  try {
+    const candidates = getPrivateIPv4Candidates();
+    const outboundHost = await detectOutboundIPv4();
+    const preferredHost =
+      outboundHost && isPrivateIPv4(outboundHost) ? outboundHost : (candidates[0]?.address ?? null);
+
+    res.json({
+      preferredHost,
+      outboundHost,
+      candidates: candidates.map(({ interfaceName, address }) => ({ interfaceName, address })),
+    });
+  } catch (err) {
+    console.error("Host hint error:", err);
+    res.status(500).json({ error: "Failed to resolve host hint" });
+  }
+});
+
+app.get("/api/calibration/profiles", async (req, res) => {
+  try {
+    const data = await fs.readFile(PROFILES_FILE, "utf-8");
+    res.json(JSON.parse(data));
+  } catch (err) {
+    // If file doesn't exist, return empty array
+    if ((err as any).code === "ENOENT") {
+      res.json([]);
+    } else {
+      res.status(500).json({ error: "Failed to read profiles" });
+    }
+  }
+});
+
+app.post("/api/calibration/profiles", async (req, res) => {
+  try {
+    const newProfile = req.body;
+    let profiles = [];
+    try {
+      const data = await fs.readFile(PROFILES_FILE, "utf-8");
+      profiles = JSON.parse(data);
+    } catch (err) {
+      if ((err as any).code !== "ENOENT") throw err;
+    }
+    profiles.unshift(newProfile);
+    await fs.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+    res.status(201).json({ message: "Profile saved" });
+  } catch (err) {
+    console.error("Profile save error:", err);
+    res.status(500).json({ error: "Failed to save profile" });
+  }
+});
+
+import { grpcClient, runCalibration } from "./grpc-client.js";
+
+// ... (other imports)
+
+app.post("/api/calibrate", async (req, res) => {
+  try {
+    const { experimentId } = req.body;
+    // Get camera IDs from the session store or request body
+    // Assuming for now we want to calibrate all cameras in the experiment
+    // For smoke test, we'll try to calibrate camera 0
+    const calibrationStream = runCalibration({
+      experiment_id: experimentId,
+      camera_ids: [0] 
+    });
+
+    let finalStatus;
+    for await (const status of calibrationStream) {
+        console.log("Calibration status:", status);
+        finalStatus = status;
+    }
+
+    res.json({
+        experimentId,
+        intrinsics: [], // Should be filled from finalStatus
+        stereo: null,
+        rulerScaleFactor: 1.0,
+        completedAt: Date.now(),
+    });
+  } catch (err: any) {
+    console.error("Calibration error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/upload-video", upload.single("file"), async (req, res) => {
   try {
     const { experiment_id, camera_id } = req.body;
@@ -73,11 +236,17 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
 
         // If a phone joins, broadcast to the PC. If PC joins, we can potentially broadcast to other members.
         if (role === 'phone') {
-          room.members.forEach((member, clientId) => {
+          room.members.forEach((member) => {
             if (member.role === 'pc') {
               member.ws.send(JSON.stringify({ 
                 type: 'phone:joined', 
-                data: { id: clientId, type: 'phone', label: msg.label || 'Phone', status: 'live' } 
+                data: {
+                  id: clientId,
+                  type: 'phone',
+                  label: msg.label || 'Phone',
+                  status: 'live',
+                  peerId: msg.peerId || clientId
+                } 
               }));
             }
           });
@@ -97,12 +266,26 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
       }
 
       // Relay signaling messages (offer/answer/ice)
-      if (["offer", "answer", "ice"].includes(msg.type)) {
-        const roomId = clientToRoom.get(msg.from);
+      if (["peer:offer", "peer:answer", "peer:ice"].includes(msg.type)) {
+        const senderId = ws.clientId;
+        const roomId = senderId ? clientToRoom.get(senderId) : undefined;
         if (!roomId) return;
         
         const room = rooms.get(roomId);
-        const target = room?.members.get(msg.to);
+        let targetId = msg.to;
+        if (!targetId) {
+          if (msg.type === 'peer:offer') {
+            targetId = 'pc';
+          } else if (msg.data?.peerId) {
+            targetId = msg.data.peerId;
+          }
+        }
+        if (!targetId && room && senderId) {
+          targetId = [...room.members.keys()].find((id) => id !== senderId);
+        }
+        if (!targetId) return;
+
+        const target = room?.members.get(targetId);
         if (target) {
           target.ws.send(JSON.stringify(msg));
         }
