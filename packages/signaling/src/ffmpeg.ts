@@ -1,16 +1,16 @@
 // packages/signaling/src/ffmpeg.ts
 import { spawn } from "child_process";
 import path from "path";
-import fs from "fs/promises";
-import { existsSync } from "fs";
+import { createReadStream, existsSync } from "fs";
+import { mkdir, readdir } from "fs/promises";
 
 export async function extractFrames(
   videoPath: string,
-  framesDir: string
+  framesDir: string,
 ): Promise<number> {
   // Ensure frames directory exists
   if (!existsSync(framesDir)) {
-    await fs.mkdir(framesDir, { recursive: true });
+    await mkdir(framesDir, { recursive: true });
   }
 
   // ffmpeg command: extract to lossless pngs
@@ -19,18 +19,22 @@ export async function extractFrames(
   // frame_%06d.png: 6-digit zero-padded filename
   const ffmpeg = spawn("ffmpeg", [
     "-y",
-    "-i", videoPath,
+    "-f", "matroska",
+    "-i", "-",
     "-fps_mode", "passthrough",
-    path.join(framesDir, "frame_%06d.png")
+    path.join(framesDir, "frame_%06d.png"),
   ]);
+
+  const fileStream = createReadStream(videoPath);
+  fileStream.pipe(ffmpeg.stdin);
 
   return new Promise((resolve, reject) => {
     ffmpeg.on("close", async (code) => {
       if (code === 0) {
         // Count files to return frame count
         try {
-          const files = await fs.readdir(framesDir);
-          const pngFiles = files.filter(f => f.endsWith(".png"));
+          const files = await readdir(framesDir);
+          const pngFiles = files.filter((f) => f.endsWith(".png"));
           resolve(pngFiles.length);
         } catch (err) {
           reject(err);
