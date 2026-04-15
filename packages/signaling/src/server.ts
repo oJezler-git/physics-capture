@@ -203,7 +203,7 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     await fs.promises.mkdir(rawDir, { recursive: true });
     
     const destPath = path.join(rawDir, `cam${camera_id}${path.extname(file.originalname)}`);
-    await fs.rename(file.path, destPath);
+    await fs.promises.rename(file.path, destPath);
 
     // Extraction
     const frameCount = await extractFrames(destPath, framesDir);
