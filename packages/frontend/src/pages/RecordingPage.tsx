@@ -1,14 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
-import { wsClient } from '../lib/wsClient';
+import { useTrackingStore } from '../stores/trackingStore';
 import { VisualMetronomeComponent } from '../components/VisualMetronome';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
-import { Circle, Square, Video, Smartphone, Loader2, ArrowRight, CheckCircle2 } from 'lucide-react';
 
 export const RecordingPage = () => {
   const navigate = useNavigate();
   const { experimentId, cameras, advancePhase } = useSessionStore();
+  const setTrackingFrameCount = useTrackingStore((state) => state.setFrameCount);
 
   const [isRecording, setIsRecording] = useState(false);
   const [frameCount, setFrameCount] = useState<number | null>(null);
@@ -16,159 +16,157 @@ export const RecordingPage = () => {
   const recorders = useRef<Map<string, MediaRecorder>>(new Map());
 
   useEffect(() => {
-    let timer: any;
+    let timer: ReturnType<typeof setInterval> | undefined;
     if (isRecording) {
-      timer = setInterval(() => setElapsed((e) => e + 1), 1000);
+      timer = setInterval(() => setElapsed((value) => value + 1), 1000);
     } else {
       setElapsed(0);
     }
-    return () => clearInterval(timer);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
   }, [isRecording]);
 
   const handleStart = async () => {
     if (!experimentId) return;
     setIsRecording(true);
-    
-    // Start recording for all active cameras
-    cameras.forEach(cam => {
-        if (cam.stream) {
-            const recorder = createRecorder(cam.stream);
-            recorders.current.set(cam.id, recorder);
-            startRecording(recorder);
-        }
+
+    cameras.forEach((camera) => {
+      if (!camera.stream) return;
+      const recorder = createRecorder(camera.stream);
+      recorders.current.set(camera.id, recorder);
+      startRecording(recorder);
     });
   };
 
   const handleStop = async () => {
     setIsRecording(false);
-    
-    // Stop recording and upload for each camera
+    let maxFrameCount = 0;
+
     for (const [cameraId, recorder] of recorders.current) {
-        const blob = await stopRecording(recorder);
-        const camera = cameras.find(c => c.id === cameraId);
-        if (camera && experimentId) {
-            const result = await uploadVideo(blob, experimentId, parseInt(cameraId) as 0 | 1, elapsed * 1000, (l, t) => {
-                console.log(`Uploading ${cameraId}: ${l}/${t}`);
-            });
-            console.log('Upload successful:', result);
-            setFrameCount(result.frameCount);
-        }
+      const blob = await stopRecording(recorder);
+      const camera = cameras.find((candidate) => candidate.id === cameraId);
+      const cameraIndex = cameras.findIndex((candidate) => candidate.id === cameraId);
+      if (camera && experimentId) {
+        const result = await uploadVideo(
+          blob,
+          experimentId,
+          cameraIndex >= 0 ? cameraIndex : 0,
+          elapsed * 1000,
+          () => undefined,
+        );
+        maxFrameCount = Math.max(maxFrameCount, result.frameCount);
+      }
+    }
+    if (maxFrameCount > 0) {
+      setFrameCount(maxFrameCount);
+      setTrackingFrameCount(maxFrameCount);
     }
     recorders.current.clear();
   };
 
-  const formatTime = (s: number) => {
-    const mins = Math.floor(s / 60);
-    const secs = s % 60;
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <header className="flex justify-between items-center bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-xl">
-        <div className="flex items-center gap-4">
-          <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
-            <Video className="text-indigo-400" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Record Experiment</h1>
-            <p className="text-slate-500 text-xs font-medium uppercase tracking-widest">
-              Master Session {experimentId?.slice(0, 8)}
-            </p>
-          </div>
+    <div className="mx-auto max-w-7xl space-y-6 rise-in">
+      <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-6">
+        <div>
+          <p className="eyebrow">Phase 03 - Capture</p>
+          <h1 className="mt-1 text-3xl">Record Experiment Run</h1>
+          <p className="subtle-copy mt-2">Session {experimentId?.slice(0, 8).toUpperCase()}</p>
         </div>
 
-        <div className="flex items-center gap-4">
-          {isRecording && (
-            <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 px-4 py-2 rounded-xl">
-              <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
-              <span className="text-lg font-mono font-bold text-red-500">
-                {formatTime(elapsed)}
+        <div className="flex flex-wrap items-center gap-3">
+          {isRecording ? (
+            <div className="rounded-full border border-rose-400/45 bg-rose-500/10 px-4 py-2">
+              <span className="font-mono text-base font-semibold text-rose-100">
+                REC {formatTime(elapsed)}
               </span>
             </div>
-          )}
+          ) : null}
 
           {!isRecording ? (
-            <button
-              onClick={handleStart}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-500/20"
-            >
-              <Circle size={18} fill="white" /> Start Recording
+            <button onClick={handleStart} className="btn-main">
+              Start Recording
             </button>
           ) : (
-            <button
-              onClick={handleStop}
-              className="flex items-center gap-2 bg-slate-100 hover:bg-white text-slate-950 px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
-            >
-              <Square size={18} fill="currentColor" /> Stop Capture
+            <button onClick={handleStop} className="btn-alt border-rose-300/45 text-rose-100">
+              Stop Capture
             </button>
           )}
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
-        {/* Visual Metronome */}
-        <div className="lg:col-span-2 flex flex-col gap-3">
-          <div className="flex-1 bg-black rounded-lg border border-slate-800 relative">
+      <div className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
+        <section className="surface-panel p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="eyebrow">Visual Sync Lane</p>
+            <span className="ui-pill">{isRecording ? 'Capturing' : 'Idle'}</span>
+          </div>
+          <div className="h-[360px]">
             <VisualMetronomeComponent />
           </div>
-        </div>
+        </section>
 
-        {/* Live Previews */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 overflow-hidden">
-          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <Smartphone size={16} /> Live Monitors
-          </h2>
+        <section className="surface-panel flex min-h-[420px] flex-col p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="eyebrow">Live Monitors</p>
+            <span className="ui-pill">{cameras.length} sources</span>
+          </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-            {cameras.map((cam) => (
-              <div
-                key={cam.id}
-                className="relative aspect-video bg-black rounded-lg border border-slate-800 overflow-hidden group"
-              >
-                {cam.stream ? (
-                  <video
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                    ref={(el) => {
-                      if (el) el.srcObject = cam.stream;
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-600">
-                    <Loader2 size={24} className="animate-spin" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">
-                      Negotiating Stream
-                    </span>
+          <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto pr-1">
+            {cameras.map((camera, index) => (
+              <div key={camera.id} className="surface-soft overflow-hidden">
+                <div className="relative aspect-video bg-black">
+                  {camera.stream ? (
+                    <video
+                      autoPlay
+                      playsInline
+                      muted
+                      className="h-full w-full object-cover"
+                      ref={(element) => {
+                        if (element) element.srcObject = camera.stream;
+                      }}
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Negotiating stream...
+                    </div>
+                  )}
+                  <div className="absolute left-2 top-2 rounded border border-black/30 bg-black/55 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-100">
+                    Cam {index + 1}
                   </div>
-                )}
-                <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded text-[9px] font-bold uppercase tracking-wider border border-white/10">
-                  {cam.label}
+                </div>
+                <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-400">
+                  <span>{camera.label}</span>
+                  <span>{camera.status}</span>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="pt-4 border-t border-slate-800">
+          <div className="mt-4 border-t border-slate-800 pt-4">
             {frameCount !== null ? (
               <button
                 onClick={() => {
                   advancePhase();
                   navigate('/tracking');
                 }}
-                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-4 rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20"
+                className="btn-main w-full"
               >
-                Proceed to Tracking <ArrowRight size={18} />
+                Continue to Tracking
               </button>
             ) : (
-              <div className="flex items-center justify-center gap-2 text-slate-500 text-xs py-2">
-                {isRecording ? "Capturing..." : "Awaiting frame extraction..."}
-              </div>
+              <p className="text-center text-xs uppercase tracking-[0.18em] text-slate-500">
+                {isRecording ? 'Capturing in progress' : 'Awaiting frame extraction'}
+              </p>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

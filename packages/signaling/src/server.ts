@@ -123,7 +123,7 @@ app.get("/api/network/host-hint", async (req, res) => {
 
 app.get("/api/calibration/profiles", async (req, res) => {
   try {
-    const data = await fs.readFile(PROFILES_FILE, "utf-8");
+    const data = await fs.promises.readFile(PROFILES_FILE, "utf-8");
     res.json(JSON.parse(data));
   } catch (err) {
     // If file doesn't exist, return empty array
@@ -140,13 +140,13 @@ app.post("/api/calibration/profiles", async (req, res) => {
     const newProfile = req.body;
     let profiles = [];
     try {
-      const data = await fs.readFile(PROFILES_FILE, "utf-8");
+      const data = await fs.promises.readFile(PROFILES_FILE, "utf-8");
       profiles = JSON.parse(data);
     } catch (err) {
       if ((err as any).code !== "ENOENT") throw err;
     }
     profiles.unshift(newProfile);
-    await fs.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+    await fs.promises.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2));
     res.status(201).json({ message: "Profile saved" });
   } catch (err) {
     console.error("Profile save error:", err);
