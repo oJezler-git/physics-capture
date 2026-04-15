@@ -14,11 +14,13 @@ export async function extractFrames(
   }
 
   // ffmpeg command: extract to lossless pngs
-  // -vsync 0: keep all frames, even if duplicates
+  // -y: overwrite output files
+  // -fps_mode passthrough: keep all frames, even if duplicates
   // frame_%06d.png: 6-digit zero-padded filename
   const ffmpeg = spawn("ffmpeg", [
+    "-y",
     "-i", videoPath,
-    "-vsync", "0",
+    "-fps_mode", "passthrough",
     path.join(framesDir, "frame_%06d.png")
   ]);
 
