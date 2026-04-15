@@ -29,7 +29,6 @@ export async function acquireCamera(): Promise<{ stream: MediaStream; settings: 
       width: { ideal: 3840 },
       height: { ideal: 2160 },
       frameRate: { ideal: 60, max: 60 },
-      resizeMode: 'none',
     },
   };
 
@@ -69,11 +68,14 @@ export async function startRecording(recorder: MediaRecorder): Promise<void> {
 }
 
 export async function stopRecording(recorder: MediaRecorder): Promise<Blob> {
+  const chunks: Blob[] = [];
+  
+  // Set up data collection before stopping
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) chunks.push(event.data);
+  };
+
   return new Promise((resolve) => {
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
     recorder.onstop = () => {
       resolve(new Blob(chunks, { type: recorder.mimeType }));
     };
