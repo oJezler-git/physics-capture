@@ -74,6 +74,7 @@ export class WSClient {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+        window.dispatchEvent(new CustomEvent('ws:open'));
         this.flushQueue();
       };
 

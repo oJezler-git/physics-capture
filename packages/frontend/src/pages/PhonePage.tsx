@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { wsClient } from '../lib/wsClient';
 import {
@@ -21,7 +21,6 @@ export const PhonePage = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const wsJoinPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const phoneClientIdRef = useRef<string>('');
 
@@ -53,6 +52,20 @@ export const PhonePage = () => {
     setDebugLog((prev) => [...prev.slice(-19), `${new Date().toISOString().slice(11, 23)} ${msg}`]);
   };
 
+  const joinRoom = useCallback(() => {
+    if (!room || !wsClient.connected || !phoneClientIdRef.current) return;
+    const label = `${navigator.platform} Phone`;
+    dbg(`WS connected, joining room ${room}`);
+    wsClient.send({
+      type: 'join',
+      roomId: room,
+      role: 'phone',
+      clientId: phoneClientIdRef.current,
+      label,
+    });
+    setStatus('connected');
+  }, [room]);
+
   useEffect(() => {
     if (!room) {
       setStatus('error');
@@ -68,10 +81,6 @@ export const PhonePage = () => {
 
     return () => {
       cancelled = true;
-      if (wsJoinPollRef.current) {
-        clearInterval(wsJoinPollRef.current);
-        wsJoinPollRef.current = null;
-      }
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
       peerConnectionRef.current?.close();
@@ -80,6 +89,21 @@ export const PhonePage = () => {
       window.removeEventListener('ws:record', handleRecordCommand);
     };
   }, [room]);
+
+  useEffect(() => {
+    if (!room) return;
+
+    const onWsOpen = () => {
+      joinRoom();
+    };
+
+    window.addEventListener('ws:open', onWsOpen);
+    joinRoom();
+
+    return () => {
+      window.removeEventListener('ws:open', onWsOpen);
+    };
+  }, [room, joinRoom]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -123,41 +147,8 @@ export const PhonePage = () => {
       localStreamRef.current = mediaStream;
       if (videoRef.current) videoRef.current.srcObject = mediaStream;
 
-      // 2. Wait for shared WebSocket client (connected at app root)
-      dbg('Waiting for WS...');
-
-      // Wait for WS to connect then join
-      if (wsJoinPollRef.current) clearInterval(wsJoinPollRef.current);
-
-      wsJoinPollRef.current = setInterval(() => {
-        if (isCancelled()) {
-          if (wsJoinPollRef.current) {
-            clearInterval(wsJoinPollRef.current);
-            wsJoinPollRef.current = null;
-          }
-          return;
-        }
-        if (wsClient.connected) {
-          if (wsJoinPollRef.current) {
-            clearInterval(wsJoinPollRef.current);
-            wsJoinPollRef.current = null;
-          }
-          if (room) {
-            const label = `${navigator.platform} Phone`;
-            dbg(`WS connected, joining room ${room}`);
-            wsClient.send({
-              type: 'join',
-              roomId: room,
-              role: 'phone',
-              clientId: phoneClientIdRef.current,
-              label,
-            });
-            setStatus('connected');
-          } else {
-            dbg('ERROR: No room code');
-          }
-        }
-      }, 500);
+      // 2. Join room immediately when websocket is already online.
+      if (!isCancelled()) joinRoom();
 
       // 3. Listen for commands
       window.addEventListener('ws:webrtc', handleWebRTC);
@@ -286,10 +277,6 @@ export const PhonePage = () => {
       xhr.open('POST', `/api/upload/${experimentId}/phone`);
       xhr.send(formData);
 
-      // MOCK SUCCESS for development if endpoint doesn't exist
-      if (window.location.hostname === 'localhost') {
-        setTimeout(() => setRecordState('done'), 2000);
-      }
     } catch (err: any) {
       setRecordState('error');
       setErrorMessage(err.message || 'Upload failed');
