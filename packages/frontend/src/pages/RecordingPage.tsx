@@ -15,6 +15,10 @@ export const RecordingPage = () => {
   const [elapsed, setElapsed] = useState(0);
   const recorders = useRef<Map<string, MediaRecorder>>(new Map());
 
+  // Track what the backend is doing after Stop is pressed
+  const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'extracting'>('idle');
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     if (isRecording) {
@@ -41,6 +45,8 @@ export const RecordingPage = () => {
 
   const handleStop = async () => {
     setIsRecording(false);
+    setUploadPhase('uploading');
+    setUploadProgress({});
     let maxFrameCount = 0;
 
     for (const [cameraId, recorder] of recorders.current) {
@@ -48,20 +54,28 @@ export const RecordingPage = () => {
       const camera = cameras.find((candidate) => candidate.id === cameraId);
       const cameraIndex = cameras.findIndex((candidate) => candidate.id === cameraId);
       if (camera && experimentId) {
+        // Phase 1: XHR upload with progress
         const result = await uploadVideo(
           blob,
           experimentId,
           cameraIndex >= 0 ? cameraIndex : 0,
           elapsed * 1000,
-          () => undefined,
+          (loaded, total) => {
+            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            setUploadProgress((prev) => ({ ...prev, [cameraId]: pct }));
+            // Once all bytes are sent the server starts ffmpeg — switch phase
+            if (pct === 100) setUploadPhase('extracting');
+          },
         );
         maxFrameCount = Math.max(maxFrameCount, result.frameCount);
       }
     }
+
     if (maxFrameCount > 0) {
       setFrameCount(maxFrameCount);
       setTrackingFrameCount(maxFrameCount);
     }
+    setUploadPhase('idle');
     recorders.current.clear();
   };
 
@@ -70,6 +84,14 @@ export const RecordingPage = () => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const overallUploadPct =
+    Object.keys(uploadProgress).length > 0
+      ? Math.round(
+          Object.values(uploadProgress).reduce((sum, v) => sum + v, 0) /
+            Object.keys(uploadProgress).length,
+        )
+      : 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 rise-in">
@@ -90,7 +112,11 @@ export const RecordingPage = () => {
           ) : null}
 
           {!isRecording ? (
-            <button onClick={handleStart} className="btn-main">
+            <button
+              onClick={handleStart}
+              className="btn-main"
+              disabled={uploadPhase !== 'idle'}
+            >
               Start Recording
             </button>
           ) : (
@@ -160,9 +186,54 @@ export const RecordingPage = () => {
               >
                 Continue to Tracking
               </button>
+            ) : uploadPhase === 'uploading' ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span className="uppercase tracking-[0.14em]">Uploading footage</span>
+                  <span className="font-mono">{overallUploadPct}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-300"
+                    style={{ width: `${overallUploadPct}%` }}
+                  />
+                </div>
+              </div>
+            ) : uploadPhase === 'extracting' ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <svg
+                    className="h-3.5 w-3.5 animate-spin text-sky-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <span className="uppercase tracking-[0.14em]">Extracting frames (ffmpeg)…</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                  <div className="h-full w-full animate-pulse rounded-full bg-gradient-to-r from-sky-500/50 to-indigo-500/50" />
+                </div>
+              </div>
+            ) : isRecording ? (
+              <p className="text-center text-xs uppercase tracking-[0.18em] text-slate-500">
+                Capturing in progress
+              </p>
             ) : (
               <p className="text-center text-xs uppercase tracking-[0.18em] text-slate-500">
-                {isRecording ? 'Capturing in progress' : 'Awaiting frame extraction'}
+                Awaiting frame extraction
               </p>
             )}
           </div>

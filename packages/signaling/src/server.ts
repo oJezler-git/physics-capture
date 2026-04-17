@@ -9,6 +9,7 @@ import dgram from "dgram";
 import os from "os";
 import { fileURLToPath } from "url";
 import { extractFrames } from "./ffmpeg.js";
+import { trackBalls } from "./grpc-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -212,6 +213,143 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
   } catch (err: any) {
     console.error("Upload error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/track", async (req, res) => {
+  try {
+    const { experiment_id, seeds } = req.body as {
+      experiment_id?: string;
+      seeds?: Array<{
+        ball_id: number;
+        camera_id: number;
+        frame_idx: number;
+        x: number;
+        y: number;
+      }>;
+    };
+
+    if (!experiment_id || !Array.isArray(seeds) || seeds.length === 0) {
+      return res.status(400).json({ error: "Missing required tracking payload" });
+    }
+
+    console.log(
+      `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}`,
+    );
+
+    const trackMap = new Map<
+      string,
+      {
+        ballId: number;
+        cameraId: number;
+        points: Array<{
+          frameIdx: number;
+          x: number;
+          y: number;
+          confidence: number;
+          isFlagged: boolean;
+          isCorrected: boolean;
+        }>;
+      }
+    >();
+    let latestProgress = 0;
+    let statusCount = 0;
+
+    for await (const status of trackBalls({ experiment_id, seeds })) {
+      statusCount += 1;
+      latestProgress = Math.max(latestProgress, status.progress ?? 0);
+
+      for (const point of status.points ?? []) {
+        const key = `${point.camera_id}:${point.ball_id}`;
+        if (!trackMap.has(key)) {
+          trackMap.set(key, {
+            ballId: point.ball_id,
+            cameraId: point.camera_id,
+            points: [],
+          });
+        }
+
+        trackMap.get(key)!.points.push({
+          frameIdx: status.frame,
+          x: point.x,
+          y: point.y,
+          confidence: point.confidence,
+          isFlagged: point.confidence < 0.7,
+          isCorrected: false,
+        });
+      }
+    }
+
+    const tracks = [...trackMap.values()].map((track) => ({
+      ...track,
+      points: track.points.sort((a, b) => a.frameIdx - b.frameIdx),
+    }));
+
+    console.log(
+      `[Track] Completed tracking for experiment=${experiment_id}, statuses=${statusCount}, tracks=${tracks.length}`,
+    );
+
+    res.json({
+      experiment_id,
+      progress: latestProgress,
+      tracks,
+    });
+  } catch (err: any) {
+    console.error("Track error:", err);
+    const message = String(err?.message ?? "Failed to run tracking");
+    const isGrpcUnavailable =
+      message.includes("ECONNREFUSED") ||
+      message.includes("No connection established") ||
+      message.includes("UNAVAILABLE");
+
+    if (isGrpcUnavailable) {
+      return res.status(503).json({
+        error:
+          "Tracking service unavailable at localhost:50051. Start the CV gRPC service (`npm run dev:cv`) and retry.",
+      });
+    }
+
+    res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req, res) => {
+  try {
+    const { experimentId, cameraId, frameFile } = req.params;
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
+      return res.status(400).json({ error: "Invalid experiment id" });
+    }
+
+    if (!/^\d+$/.test(cameraId)) {
+      return res.status(400).json({ error: "Invalid camera id" });
+    }
+
+    if (!/^frame_\d{6}\.png$/i.test(frameFile)) {
+      return res.status(400).json({ error: "Invalid frame filename" });
+    }
+
+    const framePath = path.resolve(
+      EXPERIMENTS_DIR,
+      experimentId,
+      "frames",
+      `cam${cameraId}`,
+      frameFile,
+    );
+
+    const expectedPrefix = path.resolve(EXPERIMENTS_DIR, experimentId, "frames");
+    if (framePath !== expectedPrefix && !framePath.startsWith(`${expectedPrefix}${path.sep}`)) {
+      return res.status(400).json({ error: "Invalid frame path" });
+    }
+
+    if (!existsSync(framePath)) {
+      return res.status(404).json({ error: "Frame not found" });
+    }
+
+    res.sendFile(framePath);
+  } catch (err: any) {
+    console.error("Frame fetch error:", err);
+    res.status(500).json({ error: err.message ?? "Failed to fetch frame" });
   }
 });
 
