@@ -27,9 +27,11 @@ const packageDef = protoLoader.loadSync(PROTO_PATH, {
 
 const proto = grpc.loadPackageDefinition(packageDef) as any;
 const PhysicsCapture = proto.physicscapture.v1.PhysicsCapture;
+const grpcPort = process.env.PYTHON_GRPC_PORT ?? "50052";
+const grpcHost = process.env.PYTHON_GRPC_HOST ?? "localhost";
 
 export const grpcClient = new PhysicsCapture(
-  process.env.PYTHON_GRPC_PORT ? `localhost:${process.env.PYTHON_GRPC_PORT}` : "localhost:50051",
+  `${grpcHost}:${grpcPort}`,
   grpc.credentials.createInsecure()
 );
 
