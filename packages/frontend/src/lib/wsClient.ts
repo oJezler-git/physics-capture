@@ -8,13 +8,13 @@ import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '
 // Define message types matching the implementation plan
 export type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
+  | { type: 'peer:joined'; clientId: string; role: 'pc' | 'phone' }
   | { type: 'calibration:progress'; data: { progress: number; stage: string } }
   | { type: 'calibration:failed'; data: { message: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
   | { type: 'tracking:complete'; data: { tracks: BallTrack[] } }
   | { type: 'tracking:correction_applied'; data: { ok: boolean } }
-  | { type: 'peer:joined'; clientId: string; role: 'pc' | 'phone' }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
   | { type: 'frames:ready'; data: { frameCount: number } }
@@ -30,14 +30,7 @@ export type OutboundMessage =
   | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string }; to?: string }
   | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string }; to?: string }
   | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string }; to?: string }
-  | {
-      type: 'join';
-      roomId: string;
-      clientId: string;
-      role: 'pc' | 'phone';
-      label?: string;
-      peerId?: string;
-    };
+  | { type: 'join'; roomId: string; clientId: string; role: 'pc' | 'phone'; label?: string };
 
 export class WSClient {
   private socket: WebSocket | null = null;
@@ -46,7 +39,7 @@ export class WSClient {
   private maxReconnectAttempts = 5;
   private messageQueue: OutboundMessage[] = [];
   private isConnected = false;
-  private destroyed = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(url: string = 'ws://localhost:3001') {
     this.url = url;
@@ -61,17 +54,31 @@ export class WSClient {
   }
 
   connect() {
-    try {
-      this.socket = new WebSocket(this.url);
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
 
-      this.socket.onopen = () => {
+    try {
+      const socket = new WebSocket(this.url);
+      this.socket = socket;
+
+      socket.onopen = () => {
+        if (this.socket !== socket) return;
         console.log('[WS] Connected');
         this.isConnected = true;
         this.reconnectAttempts = 0;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
         this.flushQueue();
       };
 
-      this.socket.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        if (this.socket !== socket) return;
         try {
           const msg: InboundMessage = JSON.parse(event.data);
           this.dispatch(msg);
@@ -81,14 +88,17 @@ export class WSClient {
         }
       };
 
-      this.socket.onclose = (event) => {
+      socket.onclose = (event) => {
+        if (this.socket !== socket) return;
         this.isConnected = false;
+        this.socket = null;
         console.warn(`[WS] Disconnected (code: ${event.code})`);
         useUiStore.getState().pushToast('warn', 'WebSocket disconnected. Reconnecting...');
         this.attemptReconnect();
       };
 
-      this.socket.onerror = (err) => {
+      socket.onerror = (err) => {
+        if (this.socket !== socket) return;
         console.error('[WS] Error', err);
         useUiStore.getState().pushToast('error', 'WebSocket error. Check backend connectivity.');
       };
@@ -99,23 +109,19 @@ export class WSClient {
     }
   }
 
-  disconnect() {
-    this.destroyed = true;
-    this.isConnected = false;
-    this.messageQueue = [];
-    this.socket?.close();
-    this.socket = null;
-  }
-
   private attemptReconnect() {
-    if (this.destroyed) return;
+    if (this.reconnectTimer) return;
+
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = Math.min(250 * Math.pow(2, this.reconnectAttempts), 8000);
       console.log(
         `[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
       );
-      setTimeout(() => this.connect(), delay);
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect();
+      }, delay);
     } else {
       console.error('[WS] Max reconnect attempts reached');
     }
@@ -144,6 +150,9 @@ export class WSClient {
       case 'phone:joined':
         useSessionStore.getState().addCamera(msg.data);
         break;
+      case 'peer:joined':
+        // Presence info only; room membership is handled server-side.
+        break;
       case 'calibration:progress':
         useCalibrationStore.getState().onCalibrationProgress(msg.data.progress);
         break;
@@ -161,9 +170,6 @@ export class WSClient {
         break;
       case 'tracking:correction_applied':
         window.dispatchEvent(new CustomEvent('ws:tracking', { detail: msg }));
-        break;
-      case 'peer:joined':
-        console.log('[WS] Peer joined:', msg.clientId);
         break;
       case 'physics:result':
         useResultsStore.getState().onPhysicsResult(msg.data);

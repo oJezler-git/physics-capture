@@ -25,8 +25,21 @@ export const CalibrationPage = () => {
 
   useEffect(() => {
     if (activeCamera?.stream && videoRef.current) {
-      videoRef.current.srcObject = activeCamera.stream;
-      videoRef.current.play().catch(() => undefined);
+      const videoEl = videoRef.current;
+      if (videoEl.srcObject !== activeCamera.stream) {
+        videoEl.srcObject = activeCamera.stream;
+      }
+
+      const tryPlay = () => {
+        videoEl.play().catch(() => undefined);
+      };
+
+      videoEl.onloadedmetadata = tryPlay;
+      tryPlay();
+
+      return () => {
+        videoEl.onloadedmetadata = null;
+      };
     }
   }, [activeCamera]);
 

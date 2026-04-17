@@ -129,6 +129,20 @@ describe('WSClient', () => {
     });
   });
 
+  it('does not open duplicate sockets when connect is called repeatedly', () => {
+    const client = new WSClient('ws://test.local');
+    client.connect();
+    client.connect();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    client.connect();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
   it('pushes an error toast for malformed inbound messages', () => {
     const client = new WSClient('ws://test.local');
     client.connect();

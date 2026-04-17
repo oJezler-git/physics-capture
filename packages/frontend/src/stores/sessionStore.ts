@@ -27,9 +27,27 @@ export const useSessionStore = create<SessionState>((set) => ({
   createExperiment: (id) => set({ experimentId: id, phase: 'setup' }),
 
   addCamera: (cam) =>
-    set((state) => ({
-      cameras: [...state.cameras.filter((c) => c.id !== cam.id), cam],
-    })),
+    set((state) => {
+      const existing = state.cameras.find((c) => c.id === cam.id);
+      const nextCamera = existing
+        ? {
+            ...existing,
+            ...cam,
+            // Preserve an active stream when presence updates arrive without media.
+            stream: cam.stream ?? existing.stream,
+            status:
+              cam.status === 'disconnected'
+                ? 'disconnected'
+                : cam.stream || existing.stream
+                  ? 'live'
+                  : cam.status,
+          }
+        : cam;
+
+      return {
+        cameras: [...state.cameras.filter((c) => c.id !== cam.id), nextCamera],
+      };
+    }),
 
   removeCamera: (id) =>
     set((state) => ({

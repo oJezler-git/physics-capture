@@ -26,6 +26,7 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3001;
+const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.env.PYTHON_GRPC_PORT ?? "50052"}`;
 
 const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
 
@@ -305,7 +306,7 @@ app.post("/api/track", async (req, res) => {
     if (isGrpcUnavailable) {
       return res.status(503).json({
         error:
-          "Tracking service unavailable at localhost:50051. Start the CV gRPC service (`npm run dev:cv`) and retry.",
+          `Tracking service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
       });
     }
 
@@ -387,8 +388,8 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
                   id: clientId,
                   type: 'phone',
                   label: msg.label || 'Phone',
-                  status: 'live',
-                  peerId: msg.peerId || clientId
+                  status: 'connecting',
+                  peerId: clientId
                 } 
               }));
             }

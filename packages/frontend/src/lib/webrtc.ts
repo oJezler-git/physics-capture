@@ -45,26 +45,42 @@ class PeerManager {
 
     conn.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}`);
-      entry.stream = event.streams[0];
-      console.log(`[DEBUG] Track stream:`, entry.stream);
+      const incomingTrack = event.track;
+      const streamFromEvent = event.streams[0] ?? null;
+      const remoteStream = streamFromEvent ?? entry.stream ?? new MediaStream();
 
-      // Update camera in session store
-      const cameras = useSessionStore.getState().cameras;
-      const camera = cameras.find((c) => c.peerId === peerId) || cameras.find((c) => c.id === peerId);
-      
-      console.log(`[DEBUG] Found camera to update:`, camera);
-      if (camera) {
-        const updatedCamera = {
-          ...camera,
-          stream: entry.stream,
-          status: 'live' as const,
-          peerId: peerId,
-        };
-        useSessionStore.getState().addCamera(updatedCamera);
-        console.log(`[DEBUG] SessionStore updated:`, updatedCamera);
-      } else {
-        console.warn(`[DEBUG] No camera found to update!`);
+      if (!remoteStream.getTracks().some((track) => track.id === incomingTrack.id)) {
+        remoteStream.addTrack(incomingTrack);
       }
+
+      entry.stream = remoteStream;
+
+      const publishStream = () => {
+        // Update camera in session store using deterministic peer-id matching.
+        const cameras = useSessionStore.getState().cameras;
+        const camera =
+          cameras.find((c) => c.peerId === peerId) ?? cameras.find((c) => c.id === peerId);
+
+        useSessionStore.getState().addCamera(
+          camera
+            ? {
+                ...camera,
+                stream: remoteStream,
+                status: 'live',
+              }
+            : {
+                id: peerId,
+                type: 'phone',
+                label: 'Phone',
+                peerId,
+                stream: remoteStream,
+                status: 'live',
+              },
+        );
+      };
+
+      publishStream();
+      incomingTrack.onunmute = publishStream;
     };
 
     try {
