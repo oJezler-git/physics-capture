@@ -14,6 +14,7 @@ export type InboundMessage =
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
   | { type: 'tracking:complete'; data: { tracks: BallTrack[] } }
   | { type: 'tracking:correction_applied'; data: { ok: boolean } }
+  | { type: 'peer:joined'; clientId: string; role: 'pc' | 'phone' }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
   | { type: 'frames:ready'; data: { frameCount: number } }
@@ -26,10 +27,17 @@ export type InboundMessage =
 export type OutboundMessage =
   | { type: 'record:start'; experimentId: string }
   | { type: 'record:stop'; experimentId: string }
-  | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
-  | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string } }
-  | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string } }
-  | { type: 'join'; roomId: string; clientId: string; role: 'pc' | 'phone'; label?: string };
+  | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string }; to?: string }
+  | { type: 'peer:answer'; data: RTCSessionDescriptionInit & { peerId: string }; to?: string }
+  | { type: 'peer:ice'; data: RTCIceCandidateInit & { peerId: string }; to?: string }
+  | {
+      type: 'join';
+      roomId: string;
+      clientId: string;
+      role: 'pc' | 'phone';
+      label?: string;
+      peerId?: string;
+    };
 
 export class WSClient {
   private socket: WebSocket | null = null;
@@ -38,6 +46,7 @@ export class WSClient {
   private maxReconnectAttempts = 5;
   private messageQueue: OutboundMessage[] = [];
   private isConnected = false;
+  private destroyed = false;
 
   constructor(url: string = 'ws://localhost:3001') {
     this.url = url;
@@ -90,7 +99,16 @@ export class WSClient {
     }
   }
 
+  disconnect() {
+    this.destroyed = true;
+    this.isConnected = false;
+    this.messageQueue = [];
+    this.socket?.close();
+    this.socket = null;
+  }
+
   private attemptReconnect() {
+    if (this.destroyed) return;
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = Math.min(250 * Math.pow(2, this.reconnectAttempts), 8000);
@@ -143,6 +161,9 @@ export class WSClient {
         break;
       case 'tracking:correction_applied':
         window.dispatchEvent(new CustomEvent('ws:tracking', { detail: msg }));
+        break;
+      case 'peer:joined':
+        console.log('[WS] Peer joined:', msg.clientId);
         break;
       case 'physics:result':
         useResultsStore.getState().onPhysicsResult(msg.data);

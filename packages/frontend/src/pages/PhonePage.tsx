@@ -1,26 +1,70 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { wsClient } from '../lib/wsClient';
-import {
-  Smartphone,
-  Wifi,
-  WifiOff,
-  Circle,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-} from 'lucide-react';
 
 type RecordState = 'idle' | 'recording' | 'uploading' | 'done' | 'error';
 
+interface WsDetail {
+  type: string;
+  data: any;
+}
+
+const normalizeSessionId = (value: string) => value.trim().toLowerCase();
+const normalizeInviteCode = (value: string) =>
+  value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+const resolveRoomId = (params: URLSearchParams) => {
+  const explicitRoom = params.get('room')?.trim();
+  if (explicitRoom) return explicitRoom;
+
+  const sessionId = params.get('sid')?.trim();
+  if (sessionId) return `exp-${normalizeSessionId(sessionId)}`;
+
+  const inviteCode = params.get('code')?.trim();
+  if (inviteCode) return `code-${normalizeInviteCode(inviteCode)}`;
+
+  return null;
+};
+
+const resolveDisplayCode = (params: URLSearchParams) => {
+  const inviteCode = params.get('code');
+  if (inviteCode) return inviteCode;
+
+  const roomId = resolveRoomId(params);
+  if (!roomId) return '--';
+
+  if (roomId.startsWith('exp-')) return roomId.slice(4, 14).toUpperCase();
+  return roomId.slice(0, 10).toUpperCase();
+};
+
+const getStoredPhoneClientId = (roomId: string) => {
+  const key = `physics-capture:phone-client:${roomId}`;
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+
+  const generated =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `phone-${crypto.randomUUID().slice(0, 8)}`
+      : `phone-${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(key, generated);
+  return generated;
+};
+
 export const PhonePage = () => {
   const [searchParams] = useSearchParams();
-  const room = searchParams.get('room');
+  const roomId = useMemo(() => resolveRoomId(searchParams), [searchParams]);
+  const displayCode = useMemo(() => resolveDisplayCode(searchParams), [searchParams]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const experimentIdRef = useRef<string | null>(null);
+  const clientIdRef = useRef<string>('');
+  const joinIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [status, setStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [recordState, setRecordState] = useState<RecordState>('idle');
@@ -30,30 +74,35 @@ export const PhonePage = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
 
-  const experimentIdRef = useRef<string | null>(null);
-
-  const dbg = (msg: string) => {
-    console.log('[Phone]', msg);
-    setDebugLog((prev) => [...prev.slice(-19), `${new Date().toISOString().slice(11, 23)} ${msg}`]);
+  const dbg = (message: string) => {
+    setDebugLog((prev) => [
+      ...prev.slice(-19),
+      `${new Date().toISOString().slice(11, 23)} ${message}`,
+    ]);
   };
 
   useEffect(() => {
-    if (!room) {
+    if (!roomId) {
       setStatus('error');
-      setErrorMessage('Missing room code in URL');
+      setErrorMessage('Missing invite details in URL.');
       return;
     }
 
-    // Initialize camera and WebSocket
-    init();
+    clientIdRef.current = getStoredPhoneClientId(roomId);
+    void init(roomId);
 
     return () => {
-      stream?.getTracks().forEach((t) => t.stop());
+      if (joinIntervalRef.current !== null) {
+        clearInterval(joinIntervalRef.current);
+        joinIntervalRef.current = null;
+      }
+      stream?.getTracks().forEach((track) => track.stop());
       peerConnectionRef.current?.close();
-      window.removeEventListener('ws:webrtc', handleWebRTC);
-      window.removeEventListener('ws:record', handleRecordCommand);
+      wsClient.disconnect();
+      window.removeEventListener('ws:webrtc', handleWebRTC as unknown as EventListener);
+      window.removeEventListener('ws:record', handleRecordCommand as unknown as EventListener);
     };
-  }, [room]);
+  }, [roomId]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -65,63 +114,77 @@ export const PhonePage = () => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [recordState]);
 
-  const init = async () => {
+  const init = async (targetRoomId: string) => {
     try {
-      dbg(`Protocol: ${window.location.protocol}`);
-      dbg(`isSecureContext: ${window.isSecureContext}`);
-      dbg(`mediaDevices available: ${!!navigator.mediaDevices}`);
+      dbg(`Protocol ${window.location.protocol}`);
+      dbg(`Secure context ${window.isSecureContext}`);
+      dbg(`Room ${targetRoomId}`);
 
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        throw new Error(
-          'Camera access requires a secure page. Open this link over HTTPS (or localhost).',
-        );
+        throw new Error('Camera access requires HTTPS or localhost.');
       }
 
-      // 1. Get Camera
-      dbg('Requesting camera...');
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 60, min: 60 },
         },
         audio: false,
       });
-      dbg('Camera granted');
+
+      const track = mediaStream.getVideoTracks()[0];
+      const capabilities = (track as any).getCapabilities?.() || {};
+      const settings = track.getSettings();
+      
+      const widthPct = Math.round(((settings.width || 0) / (capabilities.width?.max || 1)) * 100);
+      const fpsPct = Math.round(((settings.frameRate || 0) / (capabilities.frameRate?.max || 1)) * 100);
+      
+      dbg(`Cap: ${capabilities.width?.max}x${capabilities.height?.max} @ ${capabilities.frameRate?.max}fps`);
+      dbg(`Cam: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+      dbg(`Util: Res ${widthPct}% | FPS ${fpsPct}%`);
+
       setStream(mediaStream);
-      if (videoRef.current) videoRef.current.srcObject = mediaStream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+      dbg('Camera granted');
 
-      // 2. Connect WebSocket
-      dbg('Connecting WS...');
       wsClient.connect();
+      dbg('Connecting websocket');
 
-      // Wait for WS to connect then join
       const checkWs = setInterval(() => {
-        if (wsClient.connected) {
-          clearInterval(checkWs);
-          if (room) {
-            const label = `${navigator.platform} Phone`;
-            dbg(`WS connected, joining room ${room}`);
-            wsClient.send({ type: 'join', roomId: room, role: 'phone', clientId: 'phone', label });
-            setStatus('connected');
-          } else {
-            dbg('ERROR: No room code');
-          }
-        }
-      }, 500);
+        if (!wsClient.connected) return;
 
-      // 3. Listen for commands
-      window.addEventListener('ws:webrtc', handleWebRTC);
-      window.addEventListener('ws:record', handleRecordCommand);
-    } catch (err: any) {
-      dbg(`ERROR: ${err.name}: ${err.message}`);
+        clearInterval(checkWs);
+        joinIntervalRef.current = null;
+        const label = `${navigator.platform} Phone`;
+        const clientId = clientIdRef.current;
+        wsClient.send({
+          type: 'join',
+          roomId: targetRoomId,
+          role: 'phone',
+          clientId,
+          peerId: clientId,
+          label,
+        });
+        setStatus('connected');
+        dbg(`Joined room ${targetRoomId} as ${clientId}`);
+      }, 500);
+      joinIntervalRef.current = checkWs;
+
+      window.addEventListener('ws:webrtc', handleWebRTC as unknown as EventListener);
+      window.addEventListener('ws:record', handleRecordCommand as unknown as EventListener);
+    } catch (error) {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : 'Init failed';
+      dbg(message);
       setStatus('error');
-      setErrorMessage(`${err.name}: ${err.message}`);
+      setErrorMessage(message);
     }
   };
 
-  const handleWebRTC = async (event: any) => {
+  const handleWebRTC = async (event: CustomEvent<WsDetail>) => {
     const { type, data } = event.detail;
 
     if (type === 'peer:answer') {
@@ -131,10 +194,9 @@ export const PhonePage = () => {
     }
   };
 
-  // Simplified: Phone initiates the offer when it joins to provide preview to PC
   useEffect(() => {
     if (status === 'connected' && stream) {
-      setupPeerConnection();
+      void setupPeerConnection();
     }
   }, [status, stream]);
 
@@ -144,26 +206,31 @@ export const PhonePage = () => {
     });
     peerConnectionRef.current = pc;
 
-    stream!.getTracks().forEach((track) => pc.addTrack(track, stream!));
+    stream?.getTracks().forEach((track) => {
+      if (stream) pc.addTrack(track, stream);
+    });
+
+    const peerId = clientIdRef.current;
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        wsClient.send({
-          type: 'peer:ice',
-          data: { ...event.candidate.toJSON(), peerId: 'phone' } as any,
-        });
-      }
+      if (!event.candidate) return;
+      wsClient.send({
+        type: 'peer:ice',
+        data: { ...event.candidate.toJSON(), peerId } as any,
+        to: 'pc',
+      });
     };
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsClient.send({
       type: 'peer:offer',
-      data: { ...offer, peerId: 'phone' } as any,
+      data: { ...offer, peerId } as any,
+      to: 'pc',
     });
   };
 
-  const handleRecordCommand = (event: any) => {
+  const handleRecordCommand = (event: CustomEvent<WsDetail>) => {
     const { type, data } = event.detail;
     experimentIdRef.current = data.experimentId;
 
@@ -184,22 +251,21 @@ export const PhonePage = () => {
 
     const recorder = new MediaRecorder(stream, {
       mimeType,
-      videoBitsPerSecond: 100_000_000, // 100 Mbps target for high quality
+      videoBitsPerSecond: 150_000_000,
     });
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
     };
 
     recorder.onstop = uploadRecording;
-
-    recorder.start(1000); // 1s chunks
+    recorder.start(1000);
     mediaRecorderRef.current = recorder;
     setRecordState('recording');
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
   };
@@ -212,190 +278,161 @@ export const PhonePage = () => {
     const formData = new FormData();
     formData.append('video', blob, `recording_${Date.now()}.webm`);
 
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setRecordState('done');
-        } else {
-          throw new Error('Upload failed');
-        }
-      };
-
-      xhr.onerror = () => {
-        throw new Error('Upload failed');
-      };
-
-      // In production, this would be the actual API endpoint
-      xhr.open('POST', `/api/upload/${experimentId}/phone`);
-      xhr.send(formData);
-
-      // MOCK SUCCESS for development if endpoint doesn't exist
-      if (window.location.hostname === 'localhost') {
-        setTimeout(() => setRecordState('done'), 2000);
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        setUploadProgress(Math.round((event.loaded / event.total) * 100));
       }
-    } catch (err: any) {
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setRecordState('done');
+      } else {
+        setRecordState('error');
+        setErrorMessage('Upload failed');
+      }
+    };
+
+    xhr.onerror = () => {
       setRecordState('error');
-      setErrorMessage(err.message || 'Upload failed');
+      setErrorMessage('Upload failed');
+    };
+
+    xhr.open('POST', `/api/upload/${experimentId}/phone`);
+    xhr.send(formData);
+
+    if (window.location.hostname === 'localhost') {
+      setTimeout(() => setRecordState('done'), 2000);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black text-white flex flex-col overflow-hidden font-sans">
-      {/* Header */}
-      <div className="p-4 flex items-center justify-between bg-slate-900/80 backdrop-blur-md z-10 border-b border-white/10">
-        <div className="flex items-center gap-2">
-          <Smartphone size={20} className="text-indigo-400" />
-          <span className="font-bold tracking-tight">PHYC-CAP PHONE</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {status === 'connected' ? (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/20 rounded-full">
-              <Wifi size={14} className="text-emerald-400" />
-              <span className="text-[10px] font-bold text-emerald-400 uppercase">Live</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-red-500/20 rounded-full">
-              <WifiOff size={14} className="text-red-400" />
-              <span className="text-[10px] font-bold text-red-400 uppercase">Offline</span>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="fixed inset-0 overflow-hidden bg-[#050a14] text-slate-100">
+      <div className="pointer-events-none absolute -left-20 top-[-8rem] h-[18rem] w-[18rem] rounded-full bg-sky-400/15 blur-3xl" />
+      <div className="pointer-events-none absolute -right-14 bottom-[-6rem] h-[16rem] w-[16rem] rounded-full bg-orange-500/15 blur-3xl" />
 
-      {/* Main Preview */}
-      <div className="flex-1 relative bg-slate-950 flex items-center justify-center">
-        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-
-        {/* Framing Guide Overlay */}
-        <div className="absolute inset-0 pointer-events-none border-[40px] border-black/20">
-          <div className="w-full h-full border-2 border-dashed border-white/30 rounded-lg flex items-start p-6">
-            <div className="bg-black/40 backdrop-blur-sm px-3 py-2 rounded border border-white/10">
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/70">
-                Framing Guide
-              </p>
-              <p className="text-xs text-white/90 mt-0.5">Keep sync dot in this area</p>
+      <div className="relative z-10 flex h-full flex-col">
+        <header className="border-b border-slate-800 bg-slate-950/75 px-4 py-3 backdrop-blur-xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="eyebrow">Phone Capture Node</p>
+              <p className="text-sm font-semibold tracking-[0.08em]">PHYSICS-CAPTURE</p>
+            </div>
+            <div className="text-right">
+              <span
+                className={`ui-pill ${status === 'connected' ? 'border-lime-400/35 text-lime-100' : 'border-rose-400/35 text-rose-100'}`}
+              >
+                {status === 'connected' ? 'Linked' : 'Offline'}
+              </span>
+              <p className="mt-1 text-[10px] font-mono text-slate-500">Code {displayCode}</p>
             </div>
           </div>
-        </div>
+        </header>
 
-        {/* Status Overlays */}
-        {recordState === 'recording' && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-600 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-pulse">
-            <Circle size={12} fill="white" className="text-white" />
-            <span className="text-sm font-bold tracking-widest uppercase">Recording</span>
-          </div>
-        )}
+        <main className="relative flex-1 bg-black">
+          <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
 
-        {visibilityWarning ? (
-          <div className="absolute top-24 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-4 py-2 text-xs font-semibold text-amber-100">
-            Recording paused risk: keep this tab visible during capture.
-          </div>
-        ) : null}
-
-        {(recordState === 'uploading' || recordState === 'done' || recordState === 'error') && (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-8 z-20">
-            <div className="max-w-xs w-full space-y-6 text-center">
-              {recordState === 'uploading' && (
-                <>
-                  <Loader2 size={48} className="text-indigo-400 animate-spin mx-auto" />
-                  <div className="space-y-2">
-                    <h3 className="text-xl font-bold">Uploading Data</h3>
-                    <p className="text-slate-400 text-sm">
-                      Transferring high-speed capture to master session...
-                    </p>
-                  </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-indigo-500 h-full transition-all duration-300 ease-out"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  <span className="text-2xl font-mono font-bold">{uploadProgress}%</span>
-                </>
-              )}
-
-              {recordState === 'done' && (
-                <>
-                  <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto border border-emerald-500/50">
-                    <CheckCircle2 size={40} className="text-emerald-400" />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-2xl font-bold text-white">Capture Synced</h3>
-                    <p className="text-slate-400">Ready for next recording.</p>
-                  </div>
-                  <button
-                    onClick={() => setRecordState('idle')}
-                    className="w-full bg-slate-800 hover:bg-slate-700 py-3 rounded-xl font-bold transition-colors"
-                  >
-                    Done
-                  </button>
-                </>
-              )}
-
-              {recordState === 'error' && (
-                <>
-                  <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto border border-red-500/50">
-                    <AlertCircle size={40} className="text-red-400" />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-2xl font-bold text-white">Sync Failed</h3>
-                    <p className="text-red-400/80 text-sm">{errorMessage}</p>
-                  </div>
-                  <button
-                    onClick={uploadRecording}
-                    className="w-full bg-indigo-600 py-3 rounded-xl font-bold transition-colors"
-                  >
-                    Retry Upload
-                  </button>
-                </>
-              )}
+          <div className="absolute left-4 top-16 z-20 w-64 rounded-xl border border-slate-700 bg-slate-950/80 p-2 opacity-90 backdrop-blur-md">
+            <div className="custom-scrollbar max-h-28 overflow-y-auto">
+              {debugLog.map((line, index) => (
+                <p key={index} className="font-mono text-[9px] leading-3 text-sky-300">
+                  {line}
+                </p>
+              ))}
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Footer / Controls */}
-      <div className="p-8 bg-slate-900 border-t border-white/5 flex flex-col items-center gap-4">
-        {recordState === 'idle' && (
-          <>
-            <div className="w-16 h-16 rounded-full border-4 border-white/20 flex items-center justify-center">
-              <div className="w-12 h-12 bg-white/10 rounded-full" />
+          <div className="pointer-events-none absolute inset-4 rounded-2xl border border-dashed border-white/30">
+            <div className="m-4 inline-block rounded border border-white/15 bg-black/45 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-slate-200 backdrop-blur-md">
+              Keep sync marker in this zone
             </div>
-            <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">
-              Awaiting Master Command
-            </p>
-          </>
-        )}
-
-        {status === 'error' && (
-          <div className="text-center space-y-2">
-            <p className="text-red-400 font-bold">System Error</p>
-            <p className="text-slate-500 text-xs">{errorMessage}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="text-indigo-400 text-sm underline pt-2"
-            >
-              Reload App
-            </button>
           </div>
-        )}
 
-        {debugLog.length > 0 && (
-          <div className="w-full mt-2 rounded-lg bg-black/60 border border-slate-700 p-2 max-h-32 overflow-y-auto">
-            {debugLog.map((line, i) => (
-              <p key={i} className="text-[10px] font-mono text-slate-400 leading-4">
+          {recordState === 'recording' ? (
+            <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded-full border border-rose-300/45 bg-rose-500/20 px-4 py-2 text-sm font-semibold uppercase tracking-[0.18em] text-rose-100">
+              Recording
+            </div>
+          ) : null}
+
+          {visibilityWarning ? (
+            <div className="absolute left-1/2 top-20 -translate-x-1/2 rounded-xl border border-amber-300/45 bg-amber-500/20 px-4 py-2 text-xs font-medium text-amber-100">
+              Keep this tab visible while recording.
+            </div>
+          ) : null}
+
+          {recordState === 'uploading' || recordState === 'done' || recordState === 'error' ? (
+            <div className="absolute inset-0 z-20 grid place-items-center bg-slate-950/90 p-8 backdrop-blur-md">
+              <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-700 bg-slate-900/80 p-6 text-center">
+                {recordState === 'uploading' ? (
+                  <>
+                    <p className="eyebrow">Transfer</p>
+                    <h3 className="text-2xl">Uploading Capture</h3>
+                    <p className="text-sm text-slate-400">Syncing high-speed footage to master node.</p>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-sky-400 to-orange-400"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <p className="font-mono text-lg text-slate-200">{uploadProgress}%</p>
+                  </>
+                ) : null}
+
+                {recordState === 'done' ? (
+                  <>
+                    <p className="eyebrow text-lime-200">Transfer Complete</p>
+                    <h3 className="text-2xl">Capture Synced</h3>
+                    <p className="text-sm text-slate-400">Ready for another recording pass.</p>
+                    <button onClick={() => setRecordState('idle')} className="btn-main w-full">
+                      Done
+                    </button>
+                  </>
+                ) : null}
+
+                {recordState === 'error' ? (
+                  <>
+                    <p className="eyebrow text-rose-200">Transfer Error</p>
+                    <h3 className="text-2xl">Upload Failed</h3>
+                    <p className="text-sm text-rose-100">{errorMessage}</p>
+                    <button onClick={uploadRecording} className="btn-main w-full">
+                      Retry Upload
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </main>
+
+        <footer className="border-t border-slate-800 bg-slate-950/80 p-5 backdrop-blur-xl">
+          <div className="custom-scrollbar mb-3 max-h-28 overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/85 p-2">
+            {debugLog.map((line, index) => (
+              <p key={index} className="font-mono text-[10px] leading-4 text-slate-400">
                 {line}
               </p>
             ))}
           </div>
-        )}
+
+          {recordState === 'idle' ? (
+            <div className="space-y-2 text-center">
+              <p className="eyebrow">Recorder State</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                Awaiting master command
+              </p>
+            </div>
+          ) : null}
+
+          {status === 'error' ? (
+            <div className="mt-3 space-y-2 text-center">
+              <p className="text-sm font-semibold text-rose-100">System Error</p>
+              <p className="text-xs text-slate-400">{errorMessage}</p>
+              <button onClick={() => window.location.reload()} className="btn-alt px-4 py-2">
+                Reload App
+              </button>
+            </div>
+          ) : null}
+        </footer>
       </div>
     </div>
   );
