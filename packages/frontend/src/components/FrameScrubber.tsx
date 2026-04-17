@@ -1,5 +1,4 @@
 import React from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FrameScrubberProps {
   currentFrame: number;
@@ -16,8 +15,8 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
   isPlaying,
   onPlayToggle,
 }) => {
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onFrameChange(parseInt(e.target.value, 10));
+  const handleSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    onFrameChange(parseInt(event.target.value, 10));
   };
 
   const incrementFrame = () => {
@@ -29,59 +28,50 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-4">
-      <div className="flex items-center gap-4">
-        {/* Play/Pause Button */}
-        {onPlayToggle && (
+    <div className="surface-panel rise-in flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {onPlayToggle ? (
           <button
             onClick={onPlayToggle}
-            className="w-10 h-10 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 rounded-full transition-colors shadow-lg"
+            className="btn-main min-w-[7rem] px-4 py-2 text-[11px] tracking-[0.18em]"
           >
-            {isPlaying ? (
-              <Pause size={20} fill="white" />
-            ) : (
-              <Play size={20} fill="white" className="ml-0.5" />
-            )}
+            {isPlaying ? 'PAUSE' : 'PLAY'}
           </button>
-        )}
+        ) : null}
 
-        {/* Step Controls */}
-        <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700">
+        <div className="surface-soft flex items-center gap-1 p-1">
           <button
             onClick={decrementFrame}
-            className="p-2 hover:bg-slate-700 rounded-md transition-colors text-slate-400 hover:text-white"
+            className="rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-slate-800 hover:text-white"
           >
-            <ChevronLeft size={20} />
+            Prev
           </button>
-          <div className="px-4 font-mono text-sm font-bold text-indigo-400 min-w-[100px] text-center">
+          <div className="min-w-[7.5rem] px-3 text-center font-mono text-sm text-slate-200">
             {currentFrame + 1} / {frameCount}
           </div>
           <button
             onClick={incrementFrame}
-            className="p-2 hover:bg-slate-700 rounded-md transition-colors text-slate-400 hover:text-white"
+            className="rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-slate-800 hover:text-white"
           >
-            <ChevronRight size={20} />
+            Next
           </button>
         </div>
 
-        {/* Slider Scrubber */}
-        <div className="flex-1 px-4 relative group">
+        <div className="min-w-[220px] flex-1">
           <input
             type="range"
             min="0"
             max={Math.max(0, frameCount - 1)}
             value={currentFrame}
             onChange={handleSliderChange}
-            className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all"
+            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-orange-500"
           />
-          {/* Visual indicator for current frame could go here */}
         </div>
       </div>
 
-      {/* Keyboard Hint */}
-      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold flex justify-center gap-6">
-        <span>Space: Play/Pause</span>
-        <span>←/→: Step Frames</span>
+      <div className="eyebrow flex flex-wrap gap-4 text-[9px]">
+        <span>SPACE: PLAY/PAUSE</span>
+        <span>LEFT/RIGHT: STEP FRAMES</span>
       </div>
     </div>
   );

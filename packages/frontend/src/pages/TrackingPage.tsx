@@ -1,14 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  AlertCircle,
-  Camera,
-  ChevronRight,
-  Maximize2,
-  MousePointer2,
-  RefreshCw,
-  Settings2,
-  Zap,
-} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { BallSeedPicker } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
@@ -20,6 +11,7 @@ const FRAME_WIDTH = 1280;
 const FRAME_HEIGHT = 720;
 
 export const TrackingPage = () => {
+  const navigate = useNavigate();
   const { cameras, advancePhase, experimentId } = useSessionStore();
   const {
     frameCount,
@@ -30,6 +22,8 @@ export const TrackingPage = () => {
     progress,
     seeds,
     startTracking,
+    setStatus,
+    onTrackingComplete,
     addSeed,
     applyCorrection,
   } = useTrackingStore();
@@ -37,10 +31,27 @@ export const TrackingPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle',
+  );
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resolvedActiveCameraId = activeCameraId ?? cameras[0]?.id ?? null;
+  const activeCameraIndex = resolvedActiveCameraId
+    ? cameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
+    : -1;
+  const frameFile = `frame_${String(currentFrame + 1).padStart(6, '0')}.png`;
+  const frameSrc =
+    experimentId && activeCameraIndex >= 0
+      ? `/api/experiments/${encodeURIComponent(experimentId)}/frames/${activeCameraIndex}/${frameFile}`
+      : null;
   const correctionEnabled = tracks.length > 0 && status !== 'tracking';
-  const seedInteractive = currentFrame === 0 && tracks.length === 0 && status !== 'tracking';
+  const seedInteractive =
+    currentFrame === 0 &&
+    tracks.length === 0 &&
+    status !== 'tracking' &&
+    frameImageState === 'ready' &&
+    activeCameraIndex >= 0;
+  const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
 
   useEffect(() => {
     if (isPlaying && frameCount > 0) {
@@ -52,11 +63,17 @@ export const TrackingPage = () => {
     }
 
     return () => {
-      if (playRef.current) {
-        clearInterval(playRef.current);
-      }
+      if (playRef.current) clearInterval(playRef.current);
     };
   }, [isPlaying, currentFrame, frameCount, setFrame]);
+
+  useEffect(() => {
+    if (!frameSrc) {
+      setFrameImageState('idle');
+      return;
+    }
+    setFrameImageState('loading');
+  }, [frameSrc]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -74,15 +91,11 @@ export const TrackingPage = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentFrame, frameCount, setFrame]);
 
-  const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
-
   const handleCorrection = async (correction: CorrectionKeyframe) => {
     applyCorrection(correction);
     setTrackingError(null);
 
-    if (!experimentId) {
-      return;
-    }
+    if (!experimentId) return;
 
     try {
       const response = await fetch(`/api/experiments/${experimentId}/correct`, {
@@ -100,74 +113,172 @@ export const TrackingPage = () => {
     }
   };
 
+  const handleRunAutoTracker = async () => {
+    if (!experimentId) {
+      setTrackingError('Missing experiment id.');
+      return;
+    }
+
+    if (seeds.length === 0) {
+      setTrackingError('Place at least one seed before running auto-tracker.');
+      return;
+    }
+
+    const unresolvedSeeds = seeds.filter(
+      (seed) => cameras.findIndex((camera) => camera.id === seed.cameraId) < 0,
+    );
+    if (unresolvedSeeds.length > 0) {
+      setTrackingError('Some seeds are bound to cameras that are no longer active.');
+      return;
+    }
+
+    startTracking();
+    setTrackingError(null);
+
+    try {
+      const requestSeeds = seeds.map((seed) => ({
+        ball_id: seed.ballId,
+        camera_id: cameras.findIndex((camera) => camera.id === seed.cameraId),
+        frame_idx: seed.frameIdx,
+        x: seed.x,
+        y: seed.y,
+      }));
+
+      console.log('[Tracking] Starting tracking request', {
+        experimentId,
+        seedCount: requestSeeds.length,
+      });
+
+      const response = await fetch('/api/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          experiment_id: experimentId,
+          seeds: requestSeeds,
+        }),
+      });
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorPayload = await response.json();
+          detail = errorPayload?.error ? `: ${errorPayload.error}` : '';
+        } catch {
+          // No structured error body.
+        }
+        throw new Error(`Tracking request failed (${response.status})${detail}`);
+      }
+
+      const payload = (await response.json()) as {
+        tracks?: Array<{
+          ballId: number;
+          cameraId: number;
+          points: Array<{
+            frameIdx: number;
+            x: number;
+            y: number;
+            confidence: number;
+            isFlagged: boolean;
+            isCorrected: boolean;
+          }>;
+        }>;
+      };
+
+      const normalizedTracks =
+        payload.tracks?.map((track) => ({
+          ballId: track.ballId,
+          cameraId: cameras[track.cameraId]?.id ?? String(track.cameraId),
+          points: track.points,
+        })) ?? [];
+
+      console.log('[Tracking] Tracking completed', {
+        trackCount: normalizedTracks.length,
+      });
+
+      onTrackingComplete(normalizedTracks);
+      if (normalizedTracks.length === 0) {
+        setTrackingError('Tracker returned no points. Check backend tracker logs.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to run tracker.';
+      console.error('[Tracking] Request failed', error);
+      setStatus('idle', 0);
+      setTrackingError(message);
+    }
+  };
+
   return (
-    <div className="mx-auto flex h-[calc(100vh-120px)] max-w-[1600px] flex-col gap-6">
-      <header className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-xl">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/20 p-2.5">
-              <MousePointer2 size={20} className="text-indigo-400" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-white">Point Tracking</h1>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                Review & Correct Trajectories
-              </p>
-            </div>
-          </div>
-
-          <div className="h-10 w-px bg-slate-800" />
-
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col">
-              <span className="text-[9px] font-bold uppercase tracking-tighter text-slate-500">
-                Current Status
-              </span>
-              <div className="flex items-center gap-2">
-                <div
-                  className={`h-2 w-2 rounded-full ${status === 'tracking' ? 'animate-pulse bg-yellow-500' : 'bg-emerald-500'}`}
-                />
-                <span className="text-sm font-bold capitalize">{status}</span>
-              </div>
-            </div>
-            {status === 'tracking' && (
-              <div className="h-2 w-48 overflow-hidden rounded-full border border-slate-700 bg-slate-800">
-                <div
-                  className="h-full bg-indigo-500 transition-all duration-300"
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </div>
-            )}
-          </div>
+    <div className="mx-auto flex h-[calc(100vh-84px)] max-w-[1600px] flex-col gap-6 rise-in">
+      <header className="surface-panel flex flex-wrap items-center justify-between gap-4 p-5">
+        <div className="space-y-2">
+          <p className="eyebrow">Phase 04 - Tracking</p>
+          <h1 className="text-3xl">Trajectory Analysis Console</h1>
+          <p className="subtle-copy">Seed frame zero, run SAM2, then drag points for correction.</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button className="rounded-xl border border-transparent p-3 text-slate-400 transition-all hover:border-slate-700 hover:bg-slate-800 hover:text-white">
-            <RefreshCw size={20} />
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="ui-pill">{status}</span>
+          {status === 'tracking' ? (
+            <div className="w-52 overflow-hidden rounded-full border border-slate-700 bg-slate-900">
+              <div
+                className="h-2 bg-gradient-to-r from-sky-400 to-orange-400 transition-all"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+          ) : null}
           <button
-            onClick={advancePhase}
-            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 font-bold text-white shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-500"
+            onClick={() => {
+              advancePhase();
+              navigate('/results');
+            }}
+            className="btn-main"
           >
-            Finalize Data <ChevronRight size={18} />
+            Finalize Data
           </button>
         </div>
       </header>
 
       {trackingError ? (
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-100">
           {trackingError}
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-4">
-        <div className="flex min-h-0 flex-col gap-4 lg:col-span-3">
-          <div className="group relative flex-1 overflow-hidden rounded-2xl border border-slate-800 bg-black shadow-2xl">
-            <div className="relative flex h-full w-full items-center justify-center p-4">
-              <div className="relative aspect-video h-full max-h-full w-full max-w-full overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950">
-                <div className="pointer-events-none absolute inset-0 grid place-items-center text-7xl font-black italic uppercase text-slate-800/40 lg:text-9xl">
-                  Frame {currentFrame}
-                </div>
+      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[1.9fr_1fr]">
+        <div className="flex min-h-0 flex-col gap-4">
+          <section className="surface-panel relative flex-1 overflow-hidden p-4">
+            <div className="relative flex h-full w-full items-center justify-center">
+              <div className="relative aspect-video h-full max-h-full w-full overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
+                {frameSrc ? (
+                  <img
+                    src={frameSrc}
+                    alt={`Frame ${currentFrame + 1}`}
+                    onLoad={() => setFrameImageState('ready')}
+                    onError={() => setFrameImageState('error')}
+                    className="absolute inset-0 h-full w-full object-contain"
+                    draggable={false}
+                  />
+                ) : null}
+
+                {frameImageState !== 'ready' ? (
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                    <div>
+                      <p className="eyebrow">
+                        {frameImageState === 'error'
+                          ? 'Frame unavailable'
+                          : frameImageState === 'loading'
+                            ? 'Loading frame'
+                            : 'Frame'}
+                      </p>
+                      <p className="font-mono text-4xl text-slate-700">{currentFrame + 1}</p>
+                      {frameImageState === 'error' ? (
+                        <p className="mt-2 text-xs text-rose-200">
+                          Could not load {frameFile} for this camera.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 <TrajectoryCanvas
                   tracks={tracks}
@@ -187,51 +298,26 @@ export const TrackingPage = () => {
                   seeds={seeds}
                   onAddSeed={addSeed}
                   interactive={seedInteractive}
-                  className="relative h-full w-full cursor-crosshair"
+                  className="relative z-20 h-full w-full cursor-crosshair"
                 />
               </div>
             </div>
 
-            <div className="absolute left-4 top-4 flex gap-2">
-              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
-                <Camera size={14} className="text-indigo-400" />
+            <div className="absolute left-6 top-6 flex flex-wrap gap-2">
+              <span className="ui-pill border-sky-400/30 text-sky-100">
                 {activeCamera?.label || 'No Camera Selected'}
-              </div>
-              <div className="rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 font-mono text-[10px] text-indigo-400 backdrop-blur-md">
+              </span>
+              <span className="ui-pill">
                 {currentFrame} / {frameCount}
-              </div>
+              </span>
             </div>
 
-            <div className="absolute right-4 top-4 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-              <button className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-md transition-colors hover:bg-indigo-500">
-                <Maximize2 size={18} />
-              </button>
-              <button className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-md transition-colors hover:bg-indigo-500">
-                <Settings2 size={18} />
-              </button>
+            <div className="absolute bottom-6 right-6 flex flex-wrap gap-2">
+              <span className="ui-pill border-sky-400/35 text-sky-100">Ball 1</span>
+              <span className="ui-pill border-lime-400/35 text-lime-100">Ball 2</span>
+              <span className="ui-pill border-orange-400/35 text-orange-100">Ball 3</span>
             </div>
-
-            <div className="absolute bottom-4 right-4 flex gap-4 rounded-xl border border-white/10 bg-black/60 px-4 py-2 backdrop-blur-md">
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-blue-500" />
-                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
-                  Ball 1
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-emerald-500" />
-                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
-                  Ball 2
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-amber-500" />
-                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-300">
-                  Ball 3
-                </span>
-              </div>
-            </div>
-          </div>
+          </section>
 
           <FrameScrubber
             currentFrame={currentFrame}
@@ -242,92 +328,68 @@ export const TrackingPage = () => {
           />
         </div>
 
-        <div className="custom-scrollbar flex min-h-0 flex-col gap-6 overflow-y-auto pr-2">
-          <div className="flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-lg">
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-              Active Camera
-            </h3>
+        <div className="custom-scrollbar flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+          <section className="surface-panel space-y-4 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl">Active Camera</h3>
+              <span className="ui-pill">{cameras.length}</span>
+            </div>
             <div className="space-y-2">
               {cameras.map((camera) => (
                 <button
                   key={camera.id}
                   onClick={() => setActiveCameraId(camera.id)}
-                  className={`w-full rounded-xl border p-3 transition-all ${
+                  className={`surface-soft w-full px-3 py-3 text-left transition ${
                     resolvedActiveCameraId === camera.id
-                      ? 'border-indigo-500/50 bg-indigo-500/10 text-indigo-400'
-                      : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600'
+                      ? 'border-sky-400/45 bg-sky-500/10'
+                      : 'hover:border-slate-600'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Camera size={16} />
-                      <span className="text-sm font-bold">{camera.label}</span>
-                    </div>
-                    {resolvedActiveCameraId === camera.id && (
-                      <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-                    )}
+                    <span className="text-sm font-semibold text-slate-100">{camera.label}</span>
+                    <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                      {camera.status}
+                    </span>
                   </div>
                 </button>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div className="flex flex-col gap-5 rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg">
+          <section className="surface-panel space-y-4 p-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                Tracking Logic
-              </h3>
-              <div className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-black italic text-emerald-500">
-                SAM-2
-              </div>
+              <h3 className="text-xl">Tracking Engine</h3>
+              <span className="ui-pill border-lime-400/35 text-lime-100">SAM2</span>
             </div>
 
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">
-                    Seeds Placed
-                  </span>
-                  <span className="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 font-mono text-xs text-white">
-                    {seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length} / 3
-                  </span>
-                </div>
-                <div className="text-[10px] italic leading-relaxed text-slate-500">
-                  * Place seeds on frame 0. Drag trajectory points to apply corrections after
-                  tracking.
-                </div>
-              </div>
-
-              <button
-                disabled={seeds.length === 0 || status === 'tracking'}
-                onClick={startTracking}
-                className={`w-full rounded-xl py-4 font-bold transition-all ${
-                  seeds.length > 0 && status !== 'tracking'
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-500'
-                    : 'cursor-not-allowed border border-slate-700 bg-slate-800 text-slate-500'
-                }`}
-              >
-                <span className="flex items-center justify-center gap-2">
-                  <Zap size={18} fill={seeds.length > 0 ? 'white' : 'none'} />
-                  Run Auto-Tracker
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {tracks.length > 0 && (
-            <div className="flex flex-col gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-              <div className="flex items-center gap-2 text-red-500">
-                <AlertCircle size={16} />
-                <h3 className="text-[10px] font-black uppercase tracking-widest">
-                  Confidence Alerts
-                </h3>
-              </div>
-              <p className="text-[10px] leading-tight text-red-200/60">
-                Points in red show low SAM2 confidence. Scrub to those frames and apply corrections.
+            <div className="surface-soft space-y-2 p-3">
+              <p className="eyebrow">Seed Coverage</p>
+              <p className="text-sm text-slate-300">
+                {seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length} / 3 for
+                active camera
+              </p>
+              <p className="text-xs text-slate-500">
+                Place seeds on frame 0. After tracking, drag low-confidence points to correct.
               </p>
             </div>
-          )}
+
+            <button
+              disabled={seeds.length === 0 || status === 'tracking'}
+              onClick={handleRunAutoTracker}
+              className="btn-main w-full"
+            >
+              Run Auto-Tracker
+            </button>
+          </section>
+
+          {tracks.length > 0 ? (
+            <section className="rounded-2xl border border-rose-400/35 bg-rose-500/10 p-4">
+              <p className="eyebrow text-rose-200">Confidence Alerts</p>
+              <p className="mt-2 text-xs text-rose-100">
+                Red rings mark low-confidence points. Scrub to those frames and drag to adjust.
+              </p>
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

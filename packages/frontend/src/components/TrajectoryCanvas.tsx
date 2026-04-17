@@ -12,7 +12,7 @@ interface TrajectoryCanvasProps {
   correctionEnabled?: boolean;
 }
 
-const BALL_COLORS = ['#3b82f6', '#10b981', '#f59e0b']; // Blue, Green, Amber
+const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
 export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
   tracks,

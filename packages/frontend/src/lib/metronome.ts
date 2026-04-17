@@ -1,12 +1,11 @@
 // packages/frontend/src/lib/metronome.ts
 
 export interface MetronomeConfig {
-  canvasWidth: number;
-  canvasHeight: number;
   dotRadius: number;
   dotColor: string;
   backgroundColor: string;
-  speedFraction: number; // dot travels this fraction of canvasWidth per second
+  trailColor: string;
+  speedFraction: number;
 }
 
 export class VisualMetronome {
@@ -24,13 +23,12 @@ export class VisualMetronome {
     this.ctx = ctx;
     
     this.config = {
-      canvasWidth: canvas.width,
-      canvasHeight: canvas.height,
-      dotRadius: 20,
-      dotColor: '#FFFFFF',
-      backgroundColor: '#000000',
+      dotRadius: 18,
+      dotColor: '#ff7244',
+      backgroundColor: '#050b14',
+      trailColor: 'rgba(76,195,255,0.2)',
       speedFraction: 0.25,
-      ...config
+      ...config,
     };
   }
 
@@ -41,17 +39,26 @@ export class VisualMetronome {
     const elapsedMs = timestamp - this.startTime;
     const elapsedS = elapsedMs / 1000.0;
 
-    const travelRange = this.config.canvasWidth - 2 * this.config.dotRadius;
-    const speed = this.config.canvasWidth * this.config.speedFraction;
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+    const travelRange = width - 2 * this.config.dotRadius;
+    const speed = width * this.config.speedFraction;
     const dotCycleS = travelRange / speed;
-    const cyclePosition = (elapsedS % dotCycleS);
-    
+    const cyclePosition = elapsedS % dotCycleS;
+
     const dotX = this.config.dotRadius + (cyclePosition / dotCycleS) * travelRange;
-    const dotY = this.config.canvasHeight / 2;
+    const dotY = height / 2;
 
     this.ctx.fillStyle = this.config.backgroundColor;
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    
+    this.ctx.fillRect(0, 0, width, height);
+
+    this.ctx.strokeStyle = this.config.trailColor;
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, dotY);
+    this.ctx.lineTo(width, dotY);
+    this.ctx.stroke();
+
     this.ctx.beginPath();
     this.ctx.arc(dotX, dotY, this.config.dotRadius, 0, 2 * Math.PI);
     this.ctx.fillStyle = this.config.dotColor;

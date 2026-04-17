@@ -16,6 +16,7 @@ interface TrackingState {
   addSeed: (seed: BallSeed) => boolean;
   removeSeed: (ballId: number, cameraId: string) => void;
   startTracking: () => void;
+  setStatus: (status: TrackingState['status'], progress?: number) => void;
   onTrackingUpdate: (tracks: BallTrack[], progress: number) => void;
   onTrackingComplete: (tracks: BallTrack[]) => void;
   applyCorrection: (correction: CorrectionKeyframe) => void;
@@ -71,6 +72,12 @@ export const useTrackingStore = create<TrackingState>((set) => ({
     })),
 
   startTracking: () => set({ status: 'tracking', progress: 0 }),
+
+  setStatus: (status, progress) =>
+    set((state) => ({
+      status,
+      progress: progress ?? state.progress,
+    })),
 
   onTrackingUpdate: (tracks, progress) =>
     set({

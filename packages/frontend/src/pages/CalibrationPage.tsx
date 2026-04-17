@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Ruler, Save, Target } from 'lucide-react';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -13,14 +12,24 @@ interface Point {
 
 const qualityTone = (error: number | null) => {
   if (error === null) return 'text-slate-300';
-  if (error <= 0.5) return 'text-emerald-400';
-  if (error <= 1.0) return 'text-amber-400';
-  return 'text-red-400';
+  if (error <= 0.5) return 'text-lime-300';
+  if (error <= 1.0) return 'text-amber-200';
+  return 'text-rose-200';
 };
 
 export const CalibrationPage = () => {
   const navigate = useNavigate();
-  const { experimentId, advancePhase } = useSessionStore();
+  const { experimentId, cameras, advancePhase } = useSessionStore();
+  const activeCamera = cameras.find((camera) => camera.status === 'live');
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (activeCamera?.stream && videoRef.current) {
+      videoRef.current.srcObject = activeCamera.stream;
+      videoRef.current.play().catch(() => undefined);
+    }
+  }, [activeCamera]);
+
   const {
     profiles,
     status,
@@ -46,7 +55,6 @@ export const CalibrationPage = () => {
       try {
         const response = await fetch('/api/calibration/profiles');
         if (!response.ok) return;
-
         const data = (await response.json()) as CalibrationProfile[];
         setProfiles(data);
       } catch {
@@ -97,9 +105,7 @@ export const CalibrationPage = () => {
   };
 
   const handleSaveProfile = async () => {
-    if (status !== 'complete') {
-      return;
-    }
+    if (status !== 'complete') return;
 
     const profileResult = {
       experimentId: experimentId ?? 'local',
@@ -135,24 +141,18 @@ export const CalibrationPage = () => {
     const y = event.clientY - rect.top;
 
     setRulerPoints((points) => {
-      if (points.length >= 2) {
-        return [{ x, y }];
-      }
+      if (points.length >= 2) return [{ x, y }];
       return [...points, { x, y }];
     });
   };
 
   const computedScale = useMemo(() => {
-    if (rulerPoints.length !== 2 || knownDistanceMm <= 0) {
-      return null;
-    }
+    if (rulerPoints.length !== 2 || knownDistanceMm <= 0) return null;
 
     const dx = rulerPoints[1].x - rulerPoints[0].x;
     const dy = rulerPoints[1].y - rulerPoints[0].y;
     const distancePx = Math.sqrt(dx * dx + dy * dy);
-    if (distancePx === 0) {
-      return null;
-    }
+    if (distancePx === 0) return null;
 
     return distancePx / knownDistanceMm;
   }, [rulerPoints, knownDistanceMm]);
@@ -160,137 +160,141 @@ export const CalibrationPage = () => {
   const calibrationReady = status === 'complete' || rulerScaleFactor !== null;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <header className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-        <h1 className="text-3xl font-bold text-white">Calibration</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          Run stereo calibration or use ruler fallback for single-camera mode.
+    <div className="mx-auto max-w-7xl space-y-6 rise-in">
+      <header className="surface-panel space-y-2 p-7">
+        <p className="eyebrow">Phase 02 - Calibration</p>
+        <h1 className="text-3xl sm:text-4xl">Tune Measurement Geometry</h1>
+        <p className="subtle-copy">
+          Run stereo calibration for full depth reconstruction, or define a reliable px/mm ruler
+          scale in fallback mode.
         </p>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Calibration Status</h2>
-            <span className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase tracking-wider text-slate-300">
-              {status}
-            </span>
+      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <section className="surface-panel space-y-5 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl">Calibration Status</h2>
+            <span className="ui-pill">{status}</span>
           </div>
 
-          <div className="h-2 overflow-hidden rounded-full border border-slate-700 bg-slate-800">
+          <div className="h-2 overflow-hidden rounded-full border border-slate-700 bg-slate-900/80">
             <div
-              className="h-full bg-indigo-500 transition-all"
+              className="h-full bg-gradient-to-r from-sky-400 to-orange-400 transition-all"
               style={{ width: `${progress * 100}%` }}
             />
           </div>
 
           {isBusy ? (
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+            <div className="surface-soft p-4">
               <LoadingSkeleton lines={4} />
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-4 text-sm">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <p className={`font-semibold ${qualityTone(reprojectionError)}`}>
               Reprojection Error:{' '}
               {reprojectionError === null ? '--' : `${reprojectionError.toFixed(3)} px`}
             </p>
             {reprojectionError !== null && reprojectionError > 1 ? (
-              <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-200">
-                Poor calibration quality. Retry or use ruler fallback.
+              <p className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-3 py-1 text-xs text-rose-100">
+                High error detected. Retry or use ruler fallback.
               </p>
             ) : null}
           </div>
 
           {error ? (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-100">
               {error}
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handleRunCalibration}
-              disabled={isBusy || !experimentId}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-            >
+          <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto]">
+            <button onClick={handleRunCalibration} disabled={isBusy || !experimentId} className="btn-main">
               {isBusy ? 'Running...' : 'Run Calibration'}
-            </button>
-            <button
-              onClick={handleSaveProfile}
-              disabled={status !== 'complete'}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Save size={14} /> Save Profile
             </button>
             <input
               value={profileName}
               onChange={(event) => setProfileName(event.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              className="field-shell"
               placeholder="Profile name"
             />
+            <button onClick={handleSaveProfile} disabled={status !== 'complete'} className="btn-alt">
+              Save Profile
+            </button>
           </div>
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <h2 className="text-lg font-semibold text-white">Saved Profiles</h2>
+        <section className="surface-panel space-y-3 p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl">Saved Profiles</h2>
+            <span className="ui-pill">{profiles.length}</span>
+          </div>
           {profiles.length === 0 ? (
-            <p className="text-sm text-slate-500">No profiles available yet.</p>
+            <p className="text-sm text-slate-500">No profiles captured yet.</p>
           ) : (
-            profiles.map((profile) => (
-              <button
-                key={profile.id}
-                onClick={() => loadProfile(profile)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-3 text-left text-sm text-slate-100 transition hover:bg-slate-700"
-              >
-                <p className="font-semibold">{profile.name}</p>
-                <p className="text-xs text-slate-400">
-                  {new Date(profile.createdAt).toLocaleString()}
-                  {profile.result.stereo ? ' Stereo' : ' Ruler'}
-                </p>
-              </button>
-            ))
+            <div className="custom-scrollbar max-h-[20rem] space-y-2 overflow-y-auto pr-1">
+              {profiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  onClick={() => loadProfile(profile)}
+                  className="surface-soft w-full px-3 py-3 text-left transition hover:border-sky-400/40"
+                >
+                  <p className="text-sm font-semibold text-slate-100">{profile.name}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {new Date(profile.createdAt).toLocaleString()}
+                  </p>
+                </button>
+              ))}
+            </div>
           )}
         </section>
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="inline-flex items-center gap-2 text-lg font-semibold text-white">
-            <Ruler size={18} className="text-indigo-400" /> Ruler Fallback
-          </h2>
+      <section className="surface-panel space-y-4 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow">Fallback Pipeline</p>
+            <h2 className="mt-1 text-2xl">Ruler Scale Capture</h2>
+          </div>
           <button
             onClick={() => {
-              if (computedScale) {
-                setRulerScale(computedScale);
-              }
+              if (computedScale) setRulerScale(computedScale);
             }}
             disabled={!computedScale}
-            className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="btn-alt"
           >
             Use Ruler Scale
           </button>
         </div>
 
-        <p className="text-sm text-slate-400">
-          Click two points on the calibration frame and provide known physical distance.
+        <p className="subtle-copy">
+          Click two points on the frame and enter the known physical distance in millimeters.
         </p>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
           <div
             onClick={handleRulerFrameClick}
-            className="relative aspect-video cursor-crosshair rounded-xl border border-slate-700 bg-slate-950"
+            className="relative aspect-video cursor-crosshair overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
           >
-            <div className="absolute inset-0 grid place-items-center text-5xl font-black uppercase text-slate-800/40">
-              <Target size={80} />
-            </div>
+            {activeCamera?.stream ? (
+              <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full object-cover" />
+            ) : (
+              <div className="absolute inset-0 grid place-items-center text-center">
+                <div>
+                  <p className="eyebrow">No Live Camera</p>
+                  <p className="mt-1 text-sm text-slate-400">Connect a phone feed for ruler marking.</p>
+                </div>
+              </div>
+            )}
+
             {rulerPoints.map((point, index) => (
               <div
                 key={`${point.x}-${point.y}-${index}`}
-                className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-indigo-500"
+                className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-orange-500"
                 style={{ left: point.x, top: point.y }}
               />
             ))}
+
             {rulerPoints.length === 2 ? (
               <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
                 <line
@@ -298,30 +302,26 @@ export const CalibrationPage = () => {
                   y1={rulerPoints[0].y}
                   x2={rulerPoints[1].x}
                   y2={rulerPoints[1].y}
-                  stroke="#818cf8"
+                  stroke="#ff7244"
                   strokeWidth="2"
                 />
               </svg>
             ) : null}
           </div>
 
-          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950 p-4">
-            <label className="text-xs uppercase tracking-wider text-slate-500">
-              Known Distance (mm)
-            </label>
+          <div className="surface-soft space-y-3 p-4">
+            <label className="text-xs uppercase tracking-[0.18em] text-slate-500">Known Distance (mm)</label>
             <input
               type="number"
               min={1}
               value={knownDistanceMm}
               onChange={(event) => setKnownDistanceMm(Number(event.target.value))}
-              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              className="field-shell"
             />
-            <p className="text-sm text-slate-300">
-              px/mm: {computedScale ? computedScale.toFixed(4) : '--'}
-            </p>
+            <p className="text-sm text-slate-300">px/mm: {computedScale ? computedScale.toFixed(4) : '--'}</p>
             {rulerScaleFactor ? (
-              <p className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
-                <CheckCircle2 size={14} /> Active scale {rulerScaleFactor.toFixed(4)} px/mm
+              <p className="rounded-xl border border-lime-400/35 bg-lime-400/10 px-3 py-2 text-xs text-lime-100">
+                Active scale {rulerScaleFactor.toFixed(4)} px/mm
               </p>
             ) : null}
           </div>
@@ -335,9 +335,9 @@ export const CalibrationPage = () => {
             advancePhase();
             navigate('/recording');
           }}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+          className="btn-main"
         >
-          Continue to Recording <ArrowRight size={16} />
+          Continue to Recording
         </button>
       </div>
     </div>

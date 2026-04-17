@@ -5,10 +5,15 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "concurrently -n \"signaling,frontend,cv\" -c \"blue,green,yellow\" \"npm run dev:signaling\" \"npm run dev:frontend\" \"npm run dev:cv\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
     "dev:signaling": "npm run dev --workspace=signaling",
-    "dev:cv": "python packages/cv-service/grpc_server.py",
+    "dev:cv": ".venv\\Scripts\\python packages/cv-service/grpc_server.py",
     "test:frontend": "npm test --workspace=frontend",
     "test:cv": "pytest packages/cv-service/tests",
     "test:signaling": "npm test --workspace=signaling"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

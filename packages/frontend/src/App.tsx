@@ -39,22 +39,40 @@ function ConnectionStatus() {
     return () => clearInterval(interval);
   }, []);
 
-  const colors = {
-    connected: 'bg-green-500',
-    reconnecting: 'bg-yellow-500',
-    disconnected: 'bg-red-500',
+  const tones = {
+    connected: {
+      dot: 'bg-emerald-400',
+      ring: 'border-emerald-400/40',
+      text: 'text-emerald-200',
+      label: 'online',
+    },
+    reconnecting: {
+      dot: 'bg-amber-300',
+      ring: 'border-amber-300/40',
+      text: 'text-amber-100',
+      label: 'recovering',
+    },
+    disconnected: {
+      dot: 'bg-rose-400',
+      ring: 'border-rose-400/40',
+      text: 'text-rose-100',
+      label: 'offline',
+    },
   };
+  const tone = tones[status];
 
   return (
     <>
       {status === 'disconnected' && (
-        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center py-2 text-sm font-bold z-[60]">
-          Server Offline - Please ensure the backend is running
+        <div className="fixed left-0 right-0 top-0 z-[60] border-b border-rose-500/35 bg-rose-900/75 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-rose-100 backdrop-blur-xl">
+          Signaling offline. Start backend services to continue.
         </div>
       )}
-      <div className="fixed top-4 right-4 flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-white text-xs font-medium z-50 shadow-lg border border-slate-700">
-        <div className={`w-2 h-2 rounded-full ${colors[status]} shadow-sm`} />
-        <span className="capitalize">{status}</span>
+      <div
+        className={`fixed right-4 top-4 z-50 flex items-center gap-2 rounded-full border bg-slate-950/75 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-xl backdrop-blur-xl ${tone.ring} ${tone.text}`}
+      >
+        <div className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
+        <span>{tone.label}</span>
       </div>
     </>
   );
@@ -102,11 +120,13 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
+      <div className="relative min-h-screen overflow-hidden selection:bg-orange-300/25">
+        <div className="pointer-events-none absolute -left-28 top-[-8rem] h-[24rem] w-[24rem] rounded-full bg-sky-400/10 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-[-12rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-orange-500/10 blur-3xl" />
         <ConnectionStatus />
         <ToastViewport />
 
-        <main className="container mx-auto px-4 py-8">
+        <main className="relative z-10 mx-auto w-full max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10">
           <Routes>
             <Route path="/" element={<Navigate to="/setup" replace />} />
             <Route

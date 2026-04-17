@@ -9,14 +9,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Download, FileSpreadsheet, FileText, Sigma, Zap } from 'lucide-react';
 import { useResultsStore } from '../stores/resultsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { downloadBlob, exportCSV, exportJSON, exportPDF } from '../lib/export';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import type { PhysicsResult } from '../types';
 
-const BALL_COLORS = ['#3b82f6', '#10b981', '#f59e0b'];
+const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
 const buildMockResult = (experimentId: string): PhysicsResult => ({
   experimentId,
@@ -160,33 +159,30 @@ export const ResultsPage = () => {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <header className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="mx-auto max-w-7xl space-y-6 rise-in">
+      <header className="surface-panel space-y-4 p-7">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-white">Results</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              Momentum, energy, and velocity outputs with uncertainty bands.
+            <p className="eyebrow">Phase 05 - Results</p>
+            <h1 className="mt-1 text-3xl sm:text-4xl">Collision Output Report</h1>
+            <p className="subtle-copy mt-2">
+              Momentum, energy and velocity bands with uncertainty propagation.
             </p>
           </div>
-          <button
-            onClick={handleComputePhysics}
-            disabled={status === 'computing'}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-          >
-            <Zap size={16} /> {status === 'computing' ? 'Computing...' : 'Compute Physics'}
+          <button onClick={handleComputePhysics} disabled={status === 'computing'} className="btn-main">
+            {status === 'computing' ? 'Computing...' : 'Compute Physics'}
           </button>
         </div>
       </header>
 
       {error ? (
-        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
+        <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-100">
           {error}
         </div>
       ) : null}
 
       {!physicsResult ? (
-        <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center text-slate-400">
+        <div className="surface-panel p-10 text-center text-slate-400">
           {status === 'computing' ? (
             <LoadingSkeleton lines={5} className="mx-auto max-w-xl text-left" />
           ) : (
@@ -196,37 +192,22 @@ export const ResultsPage = () => {
       ) : (
         <>
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handleExportCsv}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-800"
-            >
-              <FileSpreadsheet size={15} /> Export CSV
+            <button onClick={handleExportCsv} className="btn-alt py-2">
+              Export CSV
             </button>
-            <button
-              onClick={handleExportJson}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-800"
-            >
-              <FileText size={15} /> Export JSON
+            <button onClick={handleExportJson} className="btn-alt py-2">
+              Export JSON
             </button>
-            <button
-              onClick={handleExportPdf}
-              disabled={isExportingPdf}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-800 disabled:opacity-50"
-            >
-              <Download size={15} /> {isExportingPdf ? 'Rendering PDF...' : 'Export PDF'}
+            <button onClick={handleExportPdf} disabled={isExportingPdf} className="btn-alt py-2">
+              {isExportingPdf ? 'Rendering PDF...' : 'Export PDF'}
             </button>
           </div>
 
-          <div
-            ref={exportRef}
-            className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-6"
-          >
+          <div ref={exportRef} className="surface-panel space-y-6 p-6">
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">
-                  Momentum Conserved
-                </p>
-                <p className="mt-2 text-xl font-bold text-white">
+              <article className="metric-card">
+                <p className="eyebrow">Momentum Conserved</p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">
                   {formatWithUncertainty(
                     physicsResult.system.momentum_conserved_pct.value,
                     physicsResult.system.momentum_conserved_pct.uncertainty,
@@ -235,11 +216,9 @@ export const ResultsPage = () => {
                   %
                 </p>
               </article>
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">
-                  Coefficient of Restitution
-                </p>
-                <p className="mt-2 text-xl font-bold text-white">
+              <article className="metric-card">
+                <p className="eyebrow">Coefficient of Restitution</p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">
                   {formatWithUncertainty(
                     physicsResult.system.coeff_of_restitution.value,
                     physicsResult.system.coeff_of_restitution.uncertainty,
@@ -247,49 +226,44 @@ export const ResultsPage = () => {
                   )}
                 </p>
               </article>
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="text-xs uppercase tracking-wider text-slate-500">Collision Frame</p>
-                <p className="mt-2 text-xl font-bold text-white">
+              <article className="metric-card">
+                <p className="eyebrow">Collision Frame</p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">
                   {physicsResult.system.collision_frame_idx}
                 </p>
               </article>
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <p className="inline-flex items-center gap-1 text-xs uppercase tracking-wider text-slate-500">
-                  <Sigma size={12} /> Total KE Before
-                </p>
-                <p className="mt-2 text-xl font-bold text-white">
+              <article className="metric-card">
+                <p className="eyebrow">Total KE Before (J)</p>
+                <p className="mt-2 text-lg font-semibold text-slate-100">
                   {formatWithUncertainty(
                     physicsResult.system.ke_before_total.value,
                     physicsResult.system.ke_before_total.uncertainty,
                     4,
-                  )}{' '}
-                  J
+                  )}
                 </p>
               </article>
             </section>
 
-            <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-4 text-base font-semibold text-white">Velocity vs Time</h2>
-              <div className="space-y-6">
+            <section className="surface-soft p-4">
+              <h2 className="text-xl">Velocity vs Time</h2>
+              <div className="mt-4 space-y-6">
                 {chartSeries.map((series) => (
-                  <div key={`chart-${series.ballId}`} className="h-[220px] w-full">
-                    <p className="mb-2 text-sm font-semibold text-slate-300">
-                      Ball {series.ballId + 1}
-                    </p>
+                  <div key={`chart-${series.ballId}`} className="h-[230px] w-full">
+                    <p className="mb-2 text-sm font-semibold text-slate-200">Ball {series.ballId + 1}</p>
                     <ResponsiveContainer>
                       <LineChart
                         data={series.rows}
                         margin={{ top: 10, right: 12, left: 0, bottom: 4 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                        <CartesianGrid strokeDasharray="4 4" stroke="#25364e" />
                         <XAxis
                           dataKey="timeMs"
-                          stroke="#94a3b8"
+                          stroke="#8aa0c2"
                           tickFormatter={(value) => `${(value / 1000).toFixed(2)}s`}
                         />
-                        <YAxis stroke="#94a3b8" unit=" m/s" />
+                        <YAxis stroke="#8aa0c2" unit=" m/s" />
                         <Tooltip
-                          contentStyle={{ background: '#0f172a', border: '1px solid #334155' }}
+                          contentStyle={{ background: '#07101c', border: '1px solid #2a3a51' }}
                           labelFormatter={(value) => `t=${(Number(value) / 1000).toFixed(3)} s`}
                         />
                         <Legend />
@@ -298,7 +272,7 @@ export const ResultsPage = () => {
                           dataKey="velocity"
                           stroke={series.color}
                           dot={false}
-                          strokeWidth={2}
+                          strokeWidth={2.2}
                           name="velocity"
                           isAnimationActive={false}
                         />
@@ -330,10 +304,10 @@ export const ResultsPage = () => {
             </section>
 
             <section className="grid gap-6 lg:grid-cols-2">
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-white">Momentum Table</h3>
-                <table className="w-full text-sm text-slate-200">
-                  <thead className="text-xs uppercase tracking-wider text-slate-500">
+              <article className="surface-soft p-4">
+                <h3 className="text-lg">Momentum Table</h3>
+                <table className="mt-3 w-full text-sm text-slate-200">
+                  <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                     <tr>
                       <th className="py-2 text-left">Ball</th>
                       <th className="py-2 text-left">Before (kg*m/s)</th>
@@ -356,10 +330,10 @@ export const ResultsPage = () => {
                 </table>
               </article>
 
-              <article className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-white">Energy Table</h3>
-                <table className="w-full text-sm text-slate-200">
-                  <thead className="text-xs uppercase tracking-wider text-slate-500">
+              <article className="surface-soft p-4">
+                <h3 className="text-lg">Energy Table</h3>
+                <table className="mt-3 w-full text-sm text-slate-200">
+                  <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                     <tr>
                       <th className="py-2 text-left">Ball</th>
                       <th className="py-2 text-left">Before (J)</th>

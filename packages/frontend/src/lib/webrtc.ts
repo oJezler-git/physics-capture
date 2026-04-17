@@ -38,6 +38,7 @@ class PeerManager {
         wsClient.send({
           type: 'peer:ice',
           data: { ...event.candidate.toJSON(), peerId } as any,
+          to: peerId,
         });
       }
     };
@@ -45,16 +46,24 @@ class PeerManager {
     conn.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}`);
       entry.stream = event.streams[0];
+      console.log(`[DEBUG] Track stream:`, entry.stream);
 
       // Update camera in session store
       const cameras = useSessionStore.getState().cameras;
-      const camera = cameras.find((c) => c.peerId === peerId);
+      const camera = cameras.find((c) => c.peerId === peerId) || cameras.find((c) => c.id === peerId);
+      
+      console.log(`[DEBUG] Found camera to update:`, camera);
       if (camera) {
-        useSessionStore.getState().addCamera({
+        const updatedCamera = {
           ...camera,
           stream: entry.stream,
-          status: 'live',
-        });
+          status: 'live' as const,
+          peerId: peerId,
+        };
+        useSessionStore.getState().addCamera(updatedCamera);
+        console.log(`[DEBUG] SessionStore updated:`, updatedCamera);
+      } else {
+        console.warn(`[DEBUG] No camera found to update!`);
       }
     };
 
@@ -66,6 +75,7 @@ class PeerManager {
       wsClient.send({
         type: 'peer:answer',
         data: { ...answer, peerId } as any,
+        to: peerId,
       });
     } catch (err) {
       console.error(`[WebRTC] Error handling offer from ${peerId}`, err);

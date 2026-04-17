@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { BallSeed } from '../types';
 
-const BALL_COLORS = ['#3b82f6', '#10b981', '#f59e0b'];
+const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
 type SeedMode = 'click' | 'bbox';
 
@@ -181,15 +181,15 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   return (
     <div className="absolute inset-0">
-      <div className="absolute left-4 top-16 z-20 flex items-center gap-2 rounded-xl border border-white/15 bg-black/55 px-3 py-2 backdrop-blur-sm">
+      <div className="absolute left-4 top-16 z-20 flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-950/85 px-3 py-2 backdrop-blur-sm">
         <button
           type="button"
           onClick={() => setMode('click')}
           disabled={!interactive}
-          className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
+          className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
             mode === 'click'
-              ? 'bg-indigo-500 text-white'
-              : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+              ? 'bg-orange-500 text-white'
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
           Click
@@ -198,19 +198,21 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
           type="button"
           onClick={() => setMode('bbox')}
           disabled={!interactive}
-          className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition ${
+          className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
             mode === 'bbox'
-              ? 'bg-indigo-500 text-white'
-              : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+              ? 'bg-orange-500 text-white'
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
           BBox
         </button>
-        <span className="text-[10px] font-mono text-slate-200">{cameraSeeds.length} / 3</span>
+        <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-mono text-slate-200">
+          {cameraSeeds.length} / 3
+        </span>
       </div>
 
       {warning ? (
-        <div className="absolute bottom-4 left-4 z-20 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200">
+        <div className="absolute bottom-4 left-4 z-20 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
           {warning}
         </div>
       ) : null}
@@ -242,7 +244,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
         {draftRect ? (
           <div
-            className="absolute border-2 border-indigo-400 bg-indigo-500/10"
+            className="absolute border-2 border-orange-400 bg-orange-500/10"
             style={{
               left: `${(draftRect.x0 / frameWidth) * 100}%`,
               top: `${(draftRect.y0 / frameHeight) * 100}%`,
