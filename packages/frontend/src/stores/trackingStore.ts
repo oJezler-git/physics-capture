@@ -3,16 +3,15 @@ import type { BallSeed, BallTrack, CorrectionKeyframe } from '../types';
 
 interface TrackingState {
   frameCount: number;
-  currentFrame: number; // 0-indexed, scrubber position
-  seeds: BallSeed[]; // user-placed seeds
-  tracks: BallTrack[]; // SAM2 output per ball per camera
-  corrections: CorrectionKeyframe[]; // user corrections
+  currentFrame: number;
+  seeds: BallSeed[];
+  tracks: BallTrack[];
+  corrections: CorrectionKeyframe[];
   status: 'idle' | 'tracking' | 'complete' | 'awaiting_correction';
-  progress: number; // 0.0-1.0
+  progress: number;
 
-  // Actions
   setFrameCount: (n: number) => void;
-  setFrame: (n: number) => void;
+  setFrame: (n: number | ((prev: number) => number)) => void;
   addSeed: (seed: BallSeed, maxBalls?: number) => boolean;
   removeSeed: (ballId: number, cameraId: string) => void;
   startTracking: () => void;
@@ -34,35 +33,35 @@ export const useTrackingStore = create<TrackingState>((set) => ({
 
   setFrameCount: (n) => set({ frameCount: n }),
 
-  setFrame: (n) =>
-    set((state) => ({
-      currentFrame: Math.max(0, Math.min(n, state.frameCount - 1)),
-    })),
+  setFrame: (frameOrUpdater) =>
+    set((state) => {
+      const nextFrame = typeof frameOrUpdater === 'function' 
+        ? frameOrUpdater(state.currentFrame) 
+        : frameOrUpdater;
+      
+      const safeFrame = isNaN(nextFrame) ? 0 : nextFrame;
+      const bound = state.frameCount > 0 ? state.frameCount - 1 : 0;
+      
+      return {
+        currentFrame: Math.max(0, Math.min(safeFrame, bound)),
+      };
+    }),
 
   addSeed: (seed, maxBalls = 3) => {
     let accepted = false;
-
     set((state) => {
       const cameraSeeds = state.seeds.filter((entry) => entry.cameraId === seed.cameraId);
       const hasExistingBallSeed = cameraSeeds.some((entry) => entry.ballId === seed.ballId);
       const uniqueBallCount = new Set(cameraSeeds.map((entry) => entry.ballId)).size;
-
-      if (!hasExistingBallSeed && uniqueBallCount >= maxBalls) {
-        return state;
-      }
-
+      if (!hasExistingBallSeed && uniqueBallCount >= maxBalls) return state;
       accepted = true;
-
       return {
         seeds: [
-          ...state.seeds.filter(
-            (entry) => !(entry.ballId === seed.ballId && entry.cameraId === seed.cameraId),
-          ),
-          seed,
-        ],
+          ...state.seeds.filter(s => !(s.ballId === seed.ballId && s.cameraId === seed.cameraId)),
+          seed
+        ]
       };
     });
-
     return accepted;
   },
 
@@ -80,10 +79,7 @@ export const useTrackingStore = create<TrackingState>((set) => ({
     })),
 
   onTrackingUpdate: (tracks, progress) =>
-    set({
-      tracks,
-      progress,
-    }),
+    set({ tracks, progress }),
 
   onTrackingComplete: (tracks) =>
     set({
@@ -106,27 +102,16 @@ export const useTrackingStore = create<TrackingState>((set) => ({
         correction,
       ],
       tracks: state.tracks.map((track) => {
-        if (track.ballId !== correction.ballId || track.cameraId !== correction.cameraId) {
-          return track;
-        }
-
+        if (track.ballId !== correction.ballId || track.cameraId !== correction.cameraId) return track;
         return {
           ...track,
           points: track.points.map((point) => {
-            if (point.frameIdx !== correction.frameIdx) {
-              return point;
-            }
-
-            return {
-              ...point,
-              x: correction.x_new,
-              y: correction.y_new,
-              isCorrected: true,
-            };
+            if (point.frameIdx !== correction.frameIdx) return point;
+            return { ...point, x: correction.x_new, y: correction.y_new, isCorrected: true };
           }),
         };
       }),
-      status: 'tracking', // Usually triggers a re-track
+      status: 'tracking',
     })),
 
   reset: () =>
