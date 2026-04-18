@@ -36,13 +36,26 @@ export class WSClient {
   private socket: WebSocket | null = null;
   private url: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private messageQueue: OutboundMessage[] = [];
   private isConnected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private joinByClientId = new Map<string, Extract<OutboundMessage, { type: 'join' }>>();
 
   constructor(url: string = 'ws://localhost:3001') {
     this.url = url;
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        if (!this.isConnected) {
+          this.reconnectAttempts = 0;
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.connect();
+        }
+      });
+    }
   }
 
   get connected() {
@@ -75,6 +88,7 @@ export class WSClient {
           this.reconnectTimer = null;
         }
         window.dispatchEvent(new CustomEvent('ws:open'));
+        this.replayJoins();
         this.flushQueue();
       };
 
@@ -93,6 +107,7 @@ export class WSClient {
         if (this.socket !== socket) return;
         this.isConnected = false;
         this.socket = null;
+        window.dispatchEvent(new CustomEvent('ws:close', { detail: { code: event.code } }));
         console.warn(`[WS] Disconnected (code: ${event.code})`);
         useUiStore.getState().pushToast('warn', 'WebSocket disconnected. Reconnecting...');
         this.attemptReconnect();
@@ -113,29 +128,42 @@ export class WSClient {
   private attemptReconnect() {
     if (this.reconnectTimer) return;
 
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = Math.min(250 * Math.pow(2, this.reconnectAttempts), 8000);
-      console.log(
-        `[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+    this.reconnectAttempts++;
+    const delay = Math.min(250 * Math.pow(2, this.reconnectAttempts), 8000);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('ws:reconnect-scheduled', {
+          detail: { attempt: this.reconnectAttempts, delayMs: delay },
+        }),
       );
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        this.connect();
-      }, delay);
-    } else {
-      console.error('[WS] Max reconnect attempts reached');
     }
+    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   send(msg: OutboundMessage) {
+    if (msg.type === 'join') {
+      this.joinByClientId.set(msg.clientId, msg);
+    }
+
     if (this.isConnected && this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg));
     } else {
       console.warn('[WS] Not connected, queueing message', msg);
-      if (this.messageQueue.length < 20) {
+      if (msg.type !== 'join' && this.messageQueue.length < 20) {
         this.messageQueue.push(msg);
       }
+    }
+  }
+
+  private replayJoins() {
+    if (!this.isConnected || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+
+    for (const joinMsg of this.joinByClientId.values()) {
+      this.socket.send(JSON.stringify(joinMsg));
     }
   }
 

@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { wsClient } from '../lib/wsClient';
-import {
-  Smartphone,
-  Wifi,
-  WifiOff,
-  Circle,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-} from 'lucide-react';
 
 type RecordState = 'idle' | 'recording' | 'uploading' | 'done' | 'error';
 
@@ -26,7 +17,6 @@ export const PhonePage = () => {
 
   const [status, setStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [recordState, setRecordState] = useState<RecordState>('idle');
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [visibilityWarning, setVisibilityWarning] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -49,8 +39,21 @@ export const PhonePage = () => {
 
   const dbg = (msg: string) => {
     console.log('[Phone]', msg);
-    setDebugLog((prev) => [...prev.slice(-19), `${new Date().toISOString().slice(11, 23)} ${msg}`]);
+    setDebugLog((prev) => [...prev, `${new Date().toISOString().slice(11, 23)} ${msg}`]);
   };
+
+  const teardownPeerConnection = useCallback(() => {
+    if (peerConnectionRef.current) {
+      try {
+        peerConnectionRef.current.onicecandidate = null;
+        peerConnectionRef.current.onconnectionstatechange = null;
+        peerConnectionRef.current.close();
+      } catch {
+        // Ignore teardown errors during recovery.
+      }
+      peerConnectionRef.current = null;
+    }
+  }, []);
 
   const joinRoom = useCallback(() => {
     if (!room || !wsClient.connected || !phoneClientIdRef.current) return;
@@ -83,27 +86,42 @@ export const PhonePage = () => {
       cancelled = true;
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
-      peerConnectionRef.current?.close();
-      peerConnectionRef.current = null;
+      teardownPeerConnection();
       window.removeEventListener('ws:webrtc', handleWebRTC);
       window.removeEventListener('ws:record', handleRecordCommand);
     };
-  }, [room]);
+  }, [room, teardownPeerConnection]);
 
   useEffect(() => {
     if (!room) return;
 
     const onWsOpen = () => {
+      dbg('WS open event');
       joinRoom();
+    };
+    const onWsClose = () => {
+      dbg('WS close event');
+      setStatus('connecting');
+      teardownPeerConnection();
+    };
+    const onWsReconnectScheduled = (event: Event) => {
+      const detail = (event as CustomEvent<{ attempt?: number; delayMs?: number }>).detail;
+      dbg(
+        `WS reconnect scheduled attempt=${detail?.attempt ?? '?'} delay=${detail?.delayMs ?? '?'}ms`,
+      );
     };
 
     window.addEventListener('ws:open', onWsOpen);
+    window.addEventListener('ws:close', onWsClose);
+    window.addEventListener('ws:reconnect-scheduled', onWsReconnectScheduled);
     joinRoom();
 
     return () => {
       window.removeEventListener('ws:open', onWsOpen);
+      window.removeEventListener('ws:close', onWsClose);
+      window.removeEventListener('ws:reconnect-scheduled', onWsReconnectScheduled);
     };
-  }, [room, joinRoom]);
+  }, [room, joinRoom, teardownPeerConnection]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -178,6 +196,8 @@ export const PhonePage = () => {
   }, [status, stream]);
 
   const setupPeerConnection = async () => {
+    teardownPeerConnection();
+
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
@@ -192,6 +212,18 @@ export const PhonePage = () => {
           data: { ...event.candidate.toJSON(), peerId: phoneClientIdRef.current } as any,
           to: 'pc',
         });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        teardownPeerConnection();
+        if (wsClient.connected && stream) {
+          setTimeout(() => {
+            if (wsClient.connected && stream && !peerConnectionRef.current) {
+              void setupPeerConnection();
+            }
+          }, 300);
+        }
       }
     };
 
@@ -255,11 +287,6 @@ export const PhonePage = () => {
 
     try {
       const xhr = new XMLHttpRequest();
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
 
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
@@ -284,155 +311,43 @@ export const PhonePage = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black text-white flex flex-col overflow-hidden font-sans">
-      {/* Header */}
-      <div className="p-4 flex items-center justify-between bg-slate-900/80 backdrop-blur-md z-10 border-b border-white/10">
-        <div className="flex items-center gap-2">
-          <Smartphone size={20} className="text-indigo-400" />
-          <span className="font-bold tracking-tight">PHYC-CAP PHONE</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {status === 'connected' ? (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/20 rounded-full">
-              <Wifi size={14} className="text-emerald-400" />
-              <span className="text-[10px] font-bold text-emerald-400 uppercase">Live</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-red-500/20 rounded-full">
-              <WifiOff size={14} className="text-red-400" />
-              <span className="text-[10px] font-bold text-red-400 uppercase">Offline</span>
-            </div>
-          )}
-        </div>
+    <div className="fixed inset-0 bg-black text-slate-100 overflow-hidden font-mono">
+      <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+
+      <div className="absolute top-3 right-3 z-20">
+        <span
+          className={`text-xs px-3 py-1 rounded-full border backdrop-blur-md ${
+            status === 'connected'
+              ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100'
+              : status === 'connecting'
+                ? 'bg-amber-500/20 border-amber-400/60 text-amber-100'
+                : 'bg-rose-500/20 border-rose-400/60 text-rose-100'
+          }`}
+        >
+          {status}
+        </span>
       </div>
 
-      {/* Main Preview */}
-      <div className="flex-1 relative bg-slate-950 flex items-center justify-center">
-        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-
-        {/* Framing Guide Overlay */}
-        <div className="absolute inset-0 pointer-events-none border-[40px] border-black/20">
-          <div className="w-full h-full border-2 border-dashed border-white/30 rounded-lg flex items-start p-6">
-            <div className="bg-black/40 backdrop-blur-sm px-3 py-2 rounded border border-white/10">
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/70">
-                Framing Guide
-              </p>
-              <p className="text-xs text-white/90 mt-0.5">Keep sync dot in this area</p>
-            </div>
-          </div>
+      {visibilityWarning ? (
+        <div className="absolute top-12 right-3 z-20 text-xs px-2 py-1 rounded border border-amber-500/60 bg-amber-500/20 text-amber-100">
+          visibility_warning=true
         </div>
+      ) : null}
 
-        {/* Status Overlays */}
-        {recordState === 'recording' && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-600 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg animate-pulse">
-            <Circle size={12} fill="white" className="text-white" />
-            <span className="text-sm font-bold tracking-widest uppercase">Recording</span>
-          </div>
-        )}
-
-        {visibilityWarning ? (
-          <div className="absolute top-24 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-4 py-2 text-xs font-semibold text-amber-100">
-            Recording paused risk: keep this tab visible during capture.
-          </div>
-        ) : null}
-
-        {(recordState === 'uploading' || recordState === 'done' || recordState === 'error') && (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-8 z-20">
-            <div className="max-w-xs w-full space-y-6 text-center">
-              {recordState === 'uploading' && (
-                <>
-                  <Loader2 size={48} className="text-indigo-400 animate-spin mx-auto" />
-                  <div className="space-y-2">
-                    <h3 className="text-xl font-bold">Uploading Data</h3>
-                    <p className="text-slate-400 text-sm">
-                      Transferring high-speed capture to master session...
-                    </p>
-                  </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-indigo-500 h-full transition-all duration-300 ease-out"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  <span className="text-2xl font-mono font-bold">{uploadProgress}%</span>
-                </>
-              )}
-
-              {recordState === 'done' && (
-                <>
-                  <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto border border-emerald-500/50">
-                    <CheckCircle2 size={40} className="text-emerald-400" />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-2xl font-bold text-white">Capture Synced</h3>
-                    <p className="text-slate-400">Ready for next recording.</p>
-                  </div>
-                  <button
-                    onClick={() => setRecordState('idle')}
-                    className="w-full bg-slate-800 hover:bg-slate-700 py-3 rounded-xl font-bold transition-colors"
-                  >
-                    Done
-                  </button>
-                </>
-              )}
-
-              {recordState === 'error' && (
-                <>
-                  <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto border border-red-500/50">
-                    <AlertCircle size={40} className="text-red-400" />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-2xl font-bold text-white">Sync Failed</h3>
-                    <p className="text-red-400/80 text-sm">{errorMessage}</p>
-                  </div>
-                  <button
-                    onClick={uploadRecording}
-                    className="w-full bg-indigo-600 py-3 rounded-xl font-bold transition-colors"
-                  >
-                    Retry Upload
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Footer / Controls */}
-      <div className="p-8 bg-slate-900 border-t border-white/5 flex flex-col items-center gap-4">
-        {recordState === 'idle' && (
-          <>
-            <div className="w-16 h-16 rounded-full border-4 border-white/20 flex items-center justify-center">
-              <div className="w-12 h-12 bg-white/10 rounded-full" />
-            </div>
-            <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">
-              Awaiting Master Command
+      <div className="absolute z-20 left-3 right-3 bottom-3 sm:left-auto sm:w-[min(420px,calc(100vw-1.5rem))] lg:w-[min(340px,34vw)] max-h-[42vh] overflow-y-auto rounded-lg border border-slate-500/50 bg-slate-950/20 backdrop-blur-md p-2">
+        <p className="text-[10px] uppercase tracking-wide text-slate-300 mb-1">console</p>
+        {debugLog.length === 0 ? (
+          <p className="text-xs text-slate-500">No logs yet...</p>
+        ) : (
+          debugLog.map((line, i) => (
+            <p key={i} className="text-[11px] leading-4 text-slate-200 break-all">
+              {line}
             </p>
-          </>
+          ))
         )}
-
-        {status === 'error' && (
-          <div className="text-center space-y-2">
-            <p className="text-red-400 font-bold">System Error</p>
-            <p className="text-slate-500 text-xs">{errorMessage}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="text-indigo-400 text-sm underline pt-2"
-            >
-              Reload App
-            </button>
-          </div>
-        )}
-
-        {debugLog.length > 0 && (
-          <div className="w-full mt-2 rounded-lg bg-black/60 border border-slate-700 p-2 max-h-32 overflow-y-auto">
-            {debugLog.map((line, i) => (
-              <p key={i} className="text-[10px] font-mono text-slate-400 leading-4">
-                {line}
-              </p>
-            ))}
-          </div>
-        )}
+        {errorMessage ? (
+          <p className="text-[11px] leading-4 text-rose-300 break-all mt-1">error={errorMessage}</p>
+        ) : null}
       </div>
     </div>
   );
