@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { BallTrack } from '../types';
+import type { BallTrack, CorrectionKeyframe } from '../types';
 
 interface TrajectoryCanvasProps {
   width: number;
@@ -8,6 +8,7 @@ interface TrajectoryCanvasProps {
   currentFrame: number;
   cameraId: string;
   correctionEnabled?: boolean;
+  onCorrection?: (correction: CorrectionKeyframe) => void;
 }
 
 const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
@@ -19,6 +20,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
   currentFrame,
   cameraId,
   correctionEnabled = false,
+  onCorrection,
 }) => {
   // SVG points for each track
   const renderedTracks = useMemo(() => {

@@ -221,6 +221,7 @@ export const TrackingPage = () => {
           seeds: requestSeeds,
           start_frame_idx: trackStartFrameIdx,
           end_frame_idx: trackEndFrameIdx,
+          clientId: 'pc',
         }),
       });
 

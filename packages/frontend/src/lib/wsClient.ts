@@ -13,6 +13,7 @@ export type InboundMessage =
   | { type: 'calibration:failed'; data: { message: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
+  | { type: 'tracking:progress'; data: { progress: number } }
   | { type: 'tracking:complete'; data: { tracks: BallTrack[] } }
   | { type: 'tracking:correction_applied'; data: { ok: boolean } }
   | { type: 'physics:result'; data: PhysicsResult }
@@ -193,6 +194,9 @@ export class WSClient {
         break;
       case 'tracking:update':
         useTrackingStore.getState().onTrackingUpdate(msg.data.tracks, msg.data.progress);
+        break;
+      case 'tracking:progress':
+        useTrackingStore.getState().setStatus('tracking', msg.data.progress);
         break;
       case 'tracking:complete':
         useTrackingStore.getState().onTrackingComplete(msg.data.tracks);

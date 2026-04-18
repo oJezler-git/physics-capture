@@ -369,7 +369,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
 
 app.post("/api/track", async (req, res) => {
   try {
-    const { experiment_id, seeds, start_frame_idx, end_frame_idx, model_id } = req.body as {
+    const { experiment_id, seeds, start_frame_idx, end_frame_idx, model_id, clientId } = req.body as {
       experiment_id?: string;
       seeds?: Array<{
         ball_id: number;
@@ -381,6 +381,7 @@ app.post("/api/track", async (req, res) => {
       start_frame_idx?: number;
       end_frame_idx?: number;
       model_id?: string;
+      clientId?: string;
     };
 
     if (!experiment_id || !Array.isArray(seeds) || seeds.length === 0) {
@@ -423,6 +424,21 @@ app.post("/api/track", async (req, res) => {
 
       statusCount += 1;
       latestProgress = Math.max(latestProgress, status.progress ?? 0);
+
+      // Push real-time progress to client
+      if (clientId) {
+        const roomId = clientToRoom.get(clientId);
+        if (roomId) {
+          const room = rooms.get(roomId);
+          const target = room?.members.get(clientId);
+          if (target) {
+            target.ws.send(JSON.stringify({
+              type: "tracking:progress",
+              data: { progress: latestProgress }
+            }));
+          }
+        }
+      }
 
       for (const point of status.points ?? []) {
         if (
