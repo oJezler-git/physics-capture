@@ -9,7 +9,7 @@ import dgram from "dgram";
 import os from "os";
 import { fileURLToPath } from "url";
 import { extractFrames } from "./ffmpeg.js";
-import { trackBalls } from "./grpc-client.js";
+import { trackBalls, computePhysics } from "./grpc-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,7 +156,7 @@ app.post("/api/calibration/profiles", async (req, res) => {
   }
 });
 
-import { grpcClient, runCalibration } from "./grpc-client.js";
+import { runCalibration } from "./grpc-client.js";
 
 // ... (other imports)
 
@@ -217,9 +217,126 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
   }
 });
 
+app.post("/api/experiments/:experimentId/physics", async (req, res) => {
+  try {
+    const { experimentId } = req.params;
+    const massConfigs = Array.isArray(req.body?.massConfigs) ? req.body.massConfigs : [];
+
+    if (!experimentId) {
+      return res.status(400).json({ error: "Missing experiment id" });
+    }
+
+    if (massConfigs.length === 0) {
+      return res.status(400).json({ error: "Missing mass configs" });
+    }
+
+    const ball_configs = massConfigs
+      .filter(
+        (cfg: any) =>
+          Number.isFinite(cfg?.ballId) &&
+          Number.isFinite(cfg?.mass_g) &&
+          Number.isFinite(cfg?.uncertainty_g)
+      )
+      .map((cfg: any) => ({
+        ball_id: Number(cfg.ballId),
+        mass_kg: Number(cfg.mass_g) / 1000,
+        mass_uncertainty_kg: Number(cfg.uncertainty_g) / 1000,
+      }));
+
+    if (ball_configs.length === 0) {
+      return res.status(400).json({ error: "No valid mass configs provided" });
+    }
+
+    const grpcResult = await computePhysics({
+      experiment_id: experimentId,
+      ball_configs,
+      mode: "SINGLE_CAMERA_PLANAR",
+    } as any);
+
+    const massByBallId = new Map<number, { value: number; uncertainty: number }>();
+    for (const cfg of ball_configs) {
+      massByBallId.set(cfg.ball_id, {
+        value: cfg.mass_kg,
+        uncertainty: cfg.mass_uncertainty_kg,
+      });
+    }
+
+    const responsePayload = {
+      experimentId,
+      computedAt: Date.now(),
+      balls: (grpcResult?.balls ?? []).map((ball: any) => {
+        const mass = massByBallId.get(ball.ball_id) ?? { value: 0, uncertainty: 0 };
+        return {
+          ballId: ball.ball_id,
+          mass_kg: mass,
+          v_before: {
+            value: ball.v_before,
+            uncertainty: ball.v_before_uncertainty,
+          },
+          v_after: {
+            value: ball.v_after,
+            uncertainty: ball.v_after_uncertainty,
+          },
+          p_before: {
+            value: ball.momentum_before,
+            uncertainty: ball.momentum_before_uncertainty,
+          },
+          p_after: {
+            value: ball.momentum_after,
+            uncertainty: ball.momentum_after_uncertainty,
+          },
+          // Approximation until KE is exposed per-ball in proto.
+          ke_before: {
+            value: 0.7 * mass.value * Math.pow(ball.v_before ?? 0, 2),
+            uncertainty: 0.7 * mass.value * Math.pow(ball.v_before_uncertainty ?? 0, 2),
+          },
+          ke_after: {
+            value: 0.7 * mass.value * Math.pow(ball.v_after ?? 0, 2),
+            uncertainty: 0.7 * mass.value * Math.pow(ball.v_after_uncertainty ?? 0, 2),
+          },
+        };
+      }),
+      system: {
+        p_before_total: {
+          value: grpcResult?.system?.total_momentum_before ?? 0,
+          uncertainty: grpcResult?.system?.total_momentum_before_uncertainty ?? 0,
+        },
+        p_after_total: {
+          value: grpcResult?.system?.total_momentum_after ?? 0,
+          uncertainty: grpcResult?.system?.total_momentum_after_uncertainty ?? 0,
+        },
+        ke_before_total: {
+          value: grpcResult?.system?.ke_before ?? 0,
+          uncertainty: grpcResult?.system?.ke_before_uncertainty ?? 0,
+        },
+        ke_after_total: {
+          value: grpcResult?.system?.ke_after ?? 0,
+          uncertainty: grpcResult?.system?.ke_after_uncertainty ?? 0,
+        },
+        momentum_conserved_pct: {
+          value: grpcResult?.system?.momentum_conservation_error_pct ?? 0,
+          uncertainty: grpcResult?.system?.momentum_conservation_error_pct_uncertainty ?? 0,
+        },
+        coeff_of_restitution: {
+          value: grpcResult?.system?.coefficient_of_restitution ?? 0,
+          uncertainty: grpcResult?.system?.coefficient_of_restitution_uncertainty ?? 0,
+        },
+        collision_frame_idx: 0,
+      },
+      velocityTimeSeries: [],
+    };
+
+    res.json(responsePayload);
+  } catch (err: any) {
+    console.error("Physics endpoint error:", err);
+    const message = String(err?.message ?? "Failed to compute physics");
+    res.status(500).json({ error: message });
+  }
+});
+
 app.post("/api/track", async (req, res) => {
   try {
-    const { experiment_id, seeds } = req.body as {
+    const { experiment_id, seeds, start_frame_idx, end_frame_idx } = req.body as {
       experiment_id?: string;
       seeds?: Array<{
         ball_id: number;
@@ -228,14 +345,23 @@ app.post("/api/track", async (req, res) => {
         x: number;
         y: number;
       }>;
+      start_frame_idx?: number;
+      end_frame_idx?: number;
     };
 
     if (!experiment_id || !Array.isArray(seeds) || seeds.length === 0) {
       return res.status(400).json({ error: "Missing required tracking payload" });
     }
+    if (
+      start_frame_idx !== undefined &&
+      end_frame_idx !== undefined &&
+      end_frame_idx < start_frame_idx
+    ) {
+      return res.status(400).json({ error: "Invalid frame range: end_frame_idx < start_frame_idx" });
+    }
 
     console.log(
-      `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}`,
+      `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}, range=${start_frame_idx ?? 0}-${end_frame_idx ?? "end"}`,
     );
 
     const trackMap = new Map<
@@ -257,10 +383,21 @@ app.post("/api/track", async (req, res) => {
     let statusCount = 0;
 
     for await (const status of trackBalls({ experiment_id, seeds })) {
+      if (end_frame_idx !== undefined && status.frame > end_frame_idx) {
+        break;
+      }
+
       statusCount += 1;
       latestProgress = Math.max(latestProgress, status.progress ?? 0);
 
       for (const point of status.points ?? []) {
+        if (
+          (start_frame_idx !== undefined && status.frame < start_frame_idx) ||
+          (end_frame_idx !== undefined && status.frame > end_frame_idx)
+        ) {
+          continue;
+        }
+
         const key = `${point.camera_id}:${point.ball_id}`;
         if (!trackMap.has(key)) {
           trackMap.set(key, {

@@ -17,60 +17,6 @@ import type { PhysicsResult } from '../types';
 
 const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
-const buildMockResult = (experimentId: string): PhysicsResult => ({
-  experimentId,
-  computedAt: Date.now(),
-  balls: [
-    {
-      ballId: 0,
-      mass_kg: { value: 0.05, uncertainty: 0.001 },
-      v_before: { value: 1.2, uncertainty: 0.05 },
-      v_after: { value: -0.7, uncertainty: 0.06 },
-      p_before: { value: 0.06, uncertainty: 0.003 },
-      p_after: { value: -0.035, uncertainty: 0.003 },
-      ke_before: { value: 0.036, uncertainty: 0.003 },
-      ke_after: { value: 0.012, uncertainty: 0.001 },
-    },
-    {
-      ballId: 1,
-      mass_kg: { value: 0.05, uncertainty: 0.001 },
-      v_before: { value: -0.4, uncertainty: 0.04 },
-      v_after: { value: 0.9, uncertainty: 0.05 },
-      p_before: { value: -0.02, uncertainty: 0.002 },
-      p_after: { value: 0.045, uncertainty: 0.003 },
-      ke_before: { value: 0.004, uncertainty: 0.0005 },
-      ke_after: { value: 0.02, uncertainty: 0.002 },
-    },
-  ],
-  system: {
-    p_before_total: { value: 0.04, uncertainty: 0.004 },
-    p_after_total: { value: 0.01, uncertainty: 0.004 },
-    ke_before_total: { value: 0.04, uncertainty: 0.004 },
-    ke_after_total: { value: 0.032, uncertainty: 0.003 },
-    momentum_conserved_pct: { value: 97.1, uncertainty: 1.4 },
-    coeff_of_restitution: { value: 0.82, uncertainty: 0.03 },
-    collision_frame_idx: 126,
-  },
-  velocityTimeSeries: [
-    {
-      ballId: 0,
-      points: Array.from({ length: 20 }, (_, index) => ({
-        time_ms: index * 12,
-        v: 1.2 - index * 0.1,
-        v_uncertainty: 0.05,
-      })),
-    },
-    {
-      ballId: 1,
-      points: Array.from({ length: 20 }, (_, index) => ({
-        time_ms: index * 12,
-        v: -0.4 + index * 0.07,
-        v_uncertainty: 0.04,
-      })),
-    },
-  ],
-});
-
 const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
   `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
 
@@ -120,14 +66,10 @@ export const ResultsPage = () => {
       const result = (await response.json()) as PhysicsResult;
       onPhysicsResult(result);
     } catch (requestError) {
-      if (window.location.hostname === 'localhost') {
-        onPhysicsResult(buildMockResult(experimentId));
-      } else {
-        const message =
-          requestError instanceof Error ? requestError.message : 'Unable to compute physics';
-        onPhysicsFailed(message);
-        setError(message);
-      }
+      const message =
+        requestError instanceof Error ? requestError.message : 'Unable to compute physics';
+      onPhysicsFailed(message);
+      setError(message);
     }
   };
 
