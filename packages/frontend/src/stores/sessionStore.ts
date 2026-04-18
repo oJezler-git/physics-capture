@@ -29,18 +29,19 @@ export const useSessionStore = create<SessionState>((set) => ({
   addCamera: (cam) =>
     set((state) => {
       const existing = state.cameras.find((c) => c.id === cam.id);
+      const mergedStatus: CameraDevice['status'] =
+        cam.status === 'disconnected'
+          ? 'disconnected'
+          : cam.stream || existing?.stream
+            ? 'live'
+            : 'connecting';
       const nextCamera = existing
         ? {
             ...existing,
             ...cam,
             // Preserve an active stream when presence updates arrive without media.
             stream: cam.stream ?? existing.stream,
-            status:
-              cam.status === 'disconnected'
-                ? 'disconnected'
-                : cam.stream || existing.stream
-                  ? 'live'
-                  : cam.status,
+            status: mergedStatus,
           }
         : cam;
 
