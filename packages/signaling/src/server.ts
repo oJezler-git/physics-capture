@@ -125,6 +125,23 @@ app.get("/api/experiments", async (req, res) => {
   }
 });
 
+app.get("/api/experiments/:experimentId/metadata", (req, res) => {
+  const { experimentId } = req.params;
+  const experimentPath = path.resolve(EXPERIMENTS_DIR, experimentId);
+  const cam0Dir = path.join(experimentPath, "frames", "cam0");
+
+  if (!existsSync(cam0Dir)) {
+    return res.status(404).json({ error: "Frames directory not found" });
+  }
+
+  const frames = fs.readdirSync(cam0Dir).filter((f: string) => f.toLowerCase().endsWith(".jpg"));
+  res.json({
+    id: experimentId,
+    frameCount: frames.length,
+    resolution: "1280x720" // default for now, could detect from first image
+  });
+});
+
 app.get("/api/network/host-hint", async (req, res) => {
   try {
     const candidates = getPrivateIPv4Candidates();
@@ -468,6 +485,8 @@ app.post("/api/track", async (req, res) => {
   }
 });
 
+const servedFramesCount = new Map<string, number>();
+
 app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req, res) => {
   try {
     const { experimentId, cameraId, frameFile } = req.params;
@@ -479,6 +498,10 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       return res.status(400).json({ error: "Invalid camera id" });
     }
 
+    const key = `${experimentId}-${cameraId}`;
+    const count = (servedFramesCount.get(key) || 0) + 1;
+    servedFramesCount.set(key, count);
+
     // Support both numeric-only (new) and frame_ prefixed (old) formats
     let framePath = path.join(
       EXPERIMENTS_DIR,
@@ -487,6 +510,12 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       `cam${cameraId}`,
       frameFile,
     );
+
+    if (count <= 5) {
+      console.log(`[signal] [API] Serving frame: ${framePath}`);
+    } else if (count === 6) {
+      console.log(`[signal] [API] Serving frames for ${key} (further logs for this experiment hidden)`);
+    }
 
     // Backward compatibility check
     if (!existsSync(framePath) && /^\d{6}\.jpg$/i.test(frameFile)) {
