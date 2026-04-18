@@ -303,7 +303,6 @@ export const PhonePage = () => {
       // In production, this would be the actual API endpoint
       xhr.open('POST', `/api/upload/${experimentId}/phone`);
       xhr.send(formData);
-
     } catch (err: any) {
       setRecordState('error');
       setErrorMessage(err.message || 'Upload failed');
@@ -312,7 +311,13 @@ export const PhonePage = () => {
 
   return (
     <div className="fixed inset-0 bg-black text-slate-100 overflow-hidden font-mono">
-      <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="absolute inset-0 w-full h-full object-cover"
+      />
 
       <div className="absolute top-3 right-3 z-20">
         <span
