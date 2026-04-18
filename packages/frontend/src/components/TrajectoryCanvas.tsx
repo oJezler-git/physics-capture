@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { findNearestPoint, toFrame } from '../lib/trajectory';
+import { findNearestPoint, toNormalized } from '../lib/trajectory';
 import type { BallTrack, CorrectionKeyframe } from '../types';
 
 interface TrajectoryCanvasProps {
@@ -41,7 +41,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
     return { ...dragTargetRef.current, ...dragPosition, color };
   }, [dragPosition]);
 
-  const toFramePoint = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const toNormalizedPoint = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
 
@@ -49,7 +49,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
     const canvasX = event.clientX - rect.left;
     const canvasY = event.clientY - rect.top;
 
-    return toFrame(canvasX, canvasY, width, height, rect.width, rect.height);
+    return toNormalized(canvasX, canvasY, rect.width, rect.height);
   };
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -57,7 +57,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       return;
     }
 
-    const query = toFramePoint(event);
+    const query = toNormalizedPoint(event);
     if (!query) {
       return;
     }
@@ -71,7 +71,8 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
         })),
     );
 
-    const nearest = findNearestPoint(query, candidates, 24);
+    // 0.05 is ~5% of canvas width as click radius
+    const nearest = findNearestPoint(query, candidates, 0.05);
     if (!nearest) {
       return;
     }
@@ -88,7 +89,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       return;
     }
 
-    const point = toFramePoint(event);
+    const point = toNormalizedPoint(event);
     if (!point) {
       return;
     }
@@ -134,8 +135,10 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       ctx.globalAlpha = 0.3;
 
       track.points.forEach((point, i) => {
-        if (i === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
+        const px = point.x * width;
+        const py = point.y * height;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       });
       ctx.stroke();
 
@@ -146,18 +149,22 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
 
       const visiblePoints = track.points.filter((p) => p.frameIdx <= currentFrame);
       visiblePoints.forEach((point, i) => {
-        if (i === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
+        const px = point.x * width;
+        const py = point.y * height;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       });
       ctx.stroke();
 
       // Draw current position marker
       const currentPoint = track.points.find((p) => p.frameIdx === currentFrame);
       if (currentPoint) {
+        const px = currentPoint.x * width;
+        const py = currentPoint.y * height;
         ctx.globalAlpha = 1.0;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(currentPoint.x, currentPoint.y, 6, 0, Math.PI * 2);
+        ctx.arc(px, py, 6, 0, Math.PI * 2);
         ctx.fill();
 
         // Flag low confidence
@@ -165,18 +172,21 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
           ctx.strokeStyle = '#ef4444'; // red-500
           ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.arc(currentPoint.x, currentPoint.y, 10, 0, Math.PI * 2);
+          ctx.arc(px, py, 10, 0, Math.PI * 2);
           ctx.stroke();
         }
       }
     });
+
     if (correctedPoint) {
+      const px = correctedPoint.x * width;
+      const py = correctedPoint.y * height;
       ctx.globalAlpha = 1;
       ctx.fillStyle = correctedPoint.color;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(correctedPoint.x, correctedPoint.y, 7, 0, Math.PI * 2);
+      ctx.arc(px, py, 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -191,7 +201,7 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      className={`absolute inset-0 ${correctionEnabled ? 'cursor-grab pointer-events-auto' : 'pointer-events-none'}`}
+      className={`absolute inset-0 ${correctionEnabled ? 'cursor-grab pointer-events-auto' : 'pointer_events-none'}`}
     />
   );
 };

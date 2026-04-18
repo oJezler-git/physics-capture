@@ -56,6 +56,12 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   const [bboxDraft, setBboxDraft] = useState<BboxDraft | null>(null);
   const [isDraggingBbox, setIsDraggingBbox] = useState(false);
 
+  // Filter seeds by camera AND current frame so we only see markers on the "correct" frame
+  const visibleSeeds = useMemo(
+    () => (cameraId ? seeds.filter((seed) => seed.cameraId === cameraId && seed.frameIdx === currentFrame) : []),
+    [cameraId, seeds, currentFrame],
+  );
+
   const cameraSeeds = useMemo(
     () => (cameraId ? seeds.filter((seed) => seed.cameraId === cameraId) : []),
     [cameraId, seeds],
@@ -69,9 +75,9 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       }
     }
     return null;
-  }, [cameraSeeds]);
+  }, [cameraSeeds, maxBalls]);
 
-  function toFrameCoordinates(event: React.MouseEvent<HTMLDivElement>) {
+  function toNormalizedCoordinates(event: React.MouseEvent<HTMLDivElement>) {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return null;
 
@@ -79,8 +85,8 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
     const yRatio = clamp((event.clientY - rect.top) / rect.height, 0, 1);
 
     return {
-      x: xRatio * frameWidth,
-      y: yRatio * frameHeight,
+      x: xRatio,
+      y: yRatio,
     };
   }
 
@@ -91,7 +97,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
     }
 
     if (currentFrame !== seedFrameIdx) {
-      setWarning(`Seeds must be placed on frame ${seedFrameIdx + 1}.`);
+      setWarning(`Seeds must be placed on frame ${seedFrameIdx + 1}. Current: ${currentFrame + 1}`);
       return;
     }
 
@@ -99,6 +105,8 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       setWarning(`Maximum ${maxBalls} balls reached for this camera.`);
       return;
     }
+
+    console.log('[Seed] Placing seed:', { ballId: nextBallId, x: point.x, y: point.y, frameIdx: currentFrame });
 
     const accepted = onAddSeed({
       ballId: nextBallId,
@@ -119,16 +127,13 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   const handleClickSeed = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'click') return;
-
-    const point = toFrameCoordinates(event);
-    if (!point) return;
-
-    placeSeed(point);
+    const point = toNormalizedCoordinates(event);
+    if (point) placeSeed(point);
   };
 
   const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'bbox') return;
-    const point = toFrameCoordinates(event);
+    const point = toNormalizedCoordinates(event);
     if (!point) return;
 
     setIsDraggingBbox(true);
@@ -137,7 +142,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || !isDraggingBbox || !bboxDraft) return;
-    const point = toFrameCoordinates(event);
+    const point = toNormalizedCoordinates(event);
     if (!point) return;
 
     setBboxDraft((prev) => (prev ? { ...prev, x1: point.x, y1: point.y } : prev));
@@ -146,19 +151,12 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   const handleMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'bbox' || !bboxDraft) return;
 
-    const point = toFrameCoordinates(event);
-    const finalDraft = point
-      ? {
-          ...bboxDraft,
-          x1: point.x,
-          y1: point.y,
-        }
-      : bboxDraft;
-
+    const point = toNormalizedCoordinates(event);
+    const finalDraft = point ? { ...bboxDraft, x1: point.x, y1: point.y } : bboxDraft;
     const normalized = normalizeBbox(finalDraft);
 
-    const minWidth = 6;
-    const minHeight = 6;
+    const minWidth = 6 / frameWidth;
+    const minHeight = 6 / frameHeight;
     if (normalized.x1 - normalized.x0 < minWidth || normalized.y1 - normalized.y0 < minHeight) {
       setWarning('Draw a larger box to seed in bbox mode.');
       setBboxDraft(null);
@@ -189,11 +187,8 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
         <button
           type="button"
           onClick={() => setMode('click')}
-          disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
-            mode === 'click'
-              ? 'bg-orange-500 text-white'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            mode === 'click' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
           Tap Seed
@@ -201,17 +196,14 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
         <button
           type="button"
           onClick={() => setMode('bbox')}
-          disabled={!interactive}
           className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
-            mode === 'bbox'
-              ? 'bg-orange-500 text-white'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            mode === 'bbox' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
           Box Seed
         </button>
         <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-mono text-slate-200">
-          Seeds {cameraSeeds.length} / {maxBalls}
+          Seeds {visibleSeeds.length} present / {maxBalls} total
         </span>
       </div>
 
@@ -223,23 +215,23 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
       <div
         ref={containerRef}
-        className={`${className ?? ''} ${interactive ? 'pointer-events-auto' : 'pointer-events-none'}`}
+        className={`${className ?? ''} absolute inset-0 ${interactive ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
         onClick={handleClickSeed}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        style={{ zIndex: 30 }}
       >
-        {cameraSeeds.map((seed) => {
-          const left = (seed.x / frameWidth) * 100;
-          const top = (seed.y / frameHeight) * 100;
+        {visibleSeeds.map((seed) => {
+          const left = seed.x * 100;
+          const top = seed.y * 100;
           const color = BALL_COLORS[seed.ballId % BALL_COLORS.length];
 
           return (
             <div
-              key={`${seed.cameraId}-${seed.ballId}`}
-              className="absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/90 text-xs font-black text-white shadow-lg"
+              key={`${seed.cameraId}-${seed.ballId}-${seed.frameIdx}`}
+              className="absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/90 text-xs font-black text-white shadow-lg shadow-black/80"
               style={{ left: `${left}%`, top: `${top}%`, backgroundColor: color }}
-              title={`Ball ${seed.ballId + 1}`}
             >
               <div className="grid h-full w-full place-items-center">{seed.ballId + 1}</div>
             </div>
@@ -250,10 +242,10 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
           <div
             className="absolute border-2 border-orange-400 bg-orange-500/10"
             style={{
-              left: `${(draftRect.x0 / frameWidth) * 100}%`,
-              top: `${(draftRect.y0 / frameHeight) * 100}%`,
-              width: `${((draftRect.x1 - draftRect.x0) / frameWidth) * 100}%`,
-              height: `${((draftRect.y1 - draftRect.y0) / frameHeight) * 100}%`,
+              left: `${draftRect.x0 * 100}%`,
+              top: `${draftRect.y0 * 100}%`,
+              width: `${(draftRect.x1 - draftRect.x0) * 100}%`,
+              height: `${(draftRect.y1 - draftRect.y0) * 100}%`,
             }}
           />
         ) : null}

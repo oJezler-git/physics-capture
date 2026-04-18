@@ -1,0 +1,1825 @@
+# PhysicsCapture — Module Group A: Capture & Sync
+
+## Full Implementation Plan
+
+**Version:** 1.0  
+**Target Module Group:** A — Capture & Sync  
+**Submodules Covered:**
+
+1. Camera Capture Client (PWA)
+2. Local Recording via `MediaRecorder`
+3. Continuous Visual Kinematic Sync (The Visual Metronome)
+4. Sync Analysis (Python post-processing)
+
+**Treating as fixed external systems:** Calibration, Ball Tracking (SAM2), Physics Engine, 3D Reconstruction, gRPC layer, Results UI.
+
+---
+
+## 0. Relevant Context Extraction (MANDATORY)
+
+### 0.1 Upstream Dependencies
+
+| Dependency                   | Provider                           | What is consumed                            |
+| ---------------------------- | ---------------------------------- | ------------------------------------------- |
+| WebRTC signaling (SDP / ICE) | Node.js signaling server           | Session establishment for live preview only |
+| Experiment ID                | Node.js session manager            | Namespaces all file output                  |
+| Laptop screen (physical)     | React frontend `<canvas>` renderer | Renders the Visual Metronome dot            |
+| Extracted PNG frames         | Node.js `ffmpeg` pipeline          | Input to sync analysis Python module        |
+
+### 0.2 Downstream Consumers
+
+| Consumer                         | What it receives                                    |
+| -------------------------------- | --------------------------------------------------- |
+| Node.js backend                  | Raw `.webm` / `.mp4` video file via HTTP POST       |
+| Node.js `ffmpeg` pipeline        | Triggers on upload completion → produces PNG frames |
+| Python `sync/dot_tracker.py`     | PNG frame sequences for both cameras                |
+| Python `sync/timestamp_array.py` | Dot tracking results → produces `sync.json`         |
+| Physics Engine (`fitting.py`)    | `sync.json` master timestamp array                  |
+| All other Python CV modules      | True timestamps from `sync.json`                    |
+
+### 0.3 Required Data Formats (exact structure)
+
+**`sync.json` (output of this module group):**
+
+```json
+{
+  "schema_version": "1.0",
+  "experiment_id": "string",
+  "cameras": {
+    "cam0": {
+      "true_fps": "float64",
+      "phase_offset_frames": "float64",
+      "phase_offset_ms": "float64",
+      "frame_count": "uint32",
+      "fit_residual_rms_px": "float64",
+      "timestamp_ms": ["float64"]
+    },
+    "cam1": {
+      "true_fps": "float64",
+      "phase_offset_frames": "float64",
+      "phase_offset_ms": "float64",
+      "frame_count": "uint32",
+      "fit_residual_rms_px": "float64",
+      "timestamp_ms": ["float64"]
+    }
+  },
+  "sync_accuracy_ms": "float64",
+  "reference_camera": "string",
+  "dot_speed_px_per_frame": {
+    "cam0": "float64",
+    "cam1": "float64"
+  }
+}
+```
+
+**`timestamp_ms` array:** index `n` → true wall-clock millisecond offset from experiment start for frame `n`. Length = `frame_count`. dtype: float64. Units: ms. Origin: frame 0 of reference camera = 0.0 ms.
+
+### 0.4 Execution Environments
+
+| Submodule                 | Environment                               | Key constraint                                    |
+| ------------------------- | ----------------------------------------- | ------------------------------------------------- |
+| Camera Capture Client     | Browser PWA (iOS Safari / Chrome Android) | iOS caps `getUserMedia` at 30fps                  |
+| MediaRecorder             | Browser PWA                               | `video/webm;codecs=vp9`; iOS fallback `avc1`      |
+| Visual Metronome renderer | Browser (React on laptop)                 | Canvas2D; must drive at ≥60Hz screen refresh      |
+| Visual Metronome display  | Physical laptop screen                    | LCD refresh rate determines dot position accuracy |
+| Sync Analysis             | Python 3.11 (CPU or CUDA)                 | SAM2 PyTorch inference; scipy linear regression   |
+
+### 0.5 Hardware Constraints
+
+| Constraint                        | Value                    | Source                                            |
+| --------------------------------- | ------------------------ | ------------------------------------------------- |
+| Phone camera FPS (iOS Safari)     | 30fps (hard cap)         | `getUserMedia` PWA limitation                     |
+| Phone camera FPS (Android Chrome) | Up to 60fps              | Subject to device capability                      |
+| Target recording bitrate          | 100 Mbps                 | `videoBitsPerSecond: 100_000_000`                 |
+| Video codec (iOS)                 | `video/mp4;codecs=avc1`  | WebM not supported on iOS                         |
+| Video codec (Android/desktop)     | `video/webm;codecs=vp9`  | Preferred                                         |
+| Laptop screen refresh             | ≥60Hz (assumed)          | Controls dot position precision                   |
+| Local WiFi upload                 | ≥50 Mbps (LAN / hotspot) | 100 Mbps video → ~1–2min upload for 60s recording |
+| Live preview bitrate (WebRTC)     | ~500 kbps–2 Mbps         | Low-res only; not used for data                   |
+
+### 0.6 Timing / Accuracy Constraints
+
+| Target                      | Value           | Rationale                              |
+| --------------------------- | --------------- | -------------------------------------- |
+| Sync accuracy               | < 0.5ms         | Sub-frame at 30fps (1 frame = 33.3ms)  |
+| Phase offset precision      | < 0.1 frame     | Derived from linear fit residuals      |
+| True FPS accuracy           | < 0.01 fps      | Required to bound clock drift over 60s |
+| Dot tracking accuracy       | < 0.5px RMS     | Needed to achieve < 0.5ms sync         |
+| Maximum clock drift assumed | 1000 ppm (0.1%) | Worst-case phone clock                 |
+
+### 0.7 Explicit Assumptions
+
+1. **Both cameras record at nominally the same FPS** (e.g., both at "30fps"), but their actual clock rates differ by up to ±1000 ppm.
+2. **The laptop screen displays the sync dot continuously throughout the entire recording**, not just at start/end.
+3. **The sync dot is always visible in at least a 50×50 px region of each camera frame.** Physical framing is the user's responsibility; the system validates this during SAM2 tracking.
+4. **No frames are dropped silently by `MediaRecorder`.** If `MediaRecorder` drops frames, the linear fit will still converge because drop events cause detectable residual spikes (treated as outliers).
+5. **The dot moves at strictly constant speed in the laptop's display coordinate space.** Constant pixel/second is enforced by the renderer using `requestAnimationFrame` + elapsed-time arithmetic (not per-frame increments). This is verified via dot speed calibration in the Python step.
+6. **iOS `MediaRecorder` produces a decodable `.mp4` file with an accurate container timestamp stream.** The container timestamps are NOT used for physics (sync.json overrides them), but they must be monotonically increasing for `ffmpeg -vsync 0` to extract a clean PNG sequence.
+7. **"Experiment start" is defined as: the first frame where the sync dot is detected in both cameras.** This is computed post-hoc during sync analysis.
+8. **The sync dot recording extends 3 seconds before the ball roll and 3 seconds after.** At 30fps this is 90 pre-frames + N roll frames + 90 post-frames, giving ≥180 dot-visible frames for fitting.
+
+### 0.8 Missing / Ambiguous Details — Resolved Here
+
+| Issue                                                    | Resolution                                                                                                                                                                                                                               |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What is the dot's speed in px/sec?                       | Defined in §4.3: 25% of screen width per second. The Python analysis fits the actual speed; the display value only needs to be _constant_, not a specific value.                                                                         |
+| What is the dot's size?                                  | 20px radius white circle on black background. Chosen to be large enough for SAM2 to track but small enough not to obscure the scene.                                                                                                     |
+| What region of the laptop screen shows the dot?          | Bottom 120px strip, full width. This places it at the bottom edge of the scene visible to the cameras.                                                                                                                                   |
+| Does the dot wrap or bounce?                             | It moves left-to-right across the screen width, then instantly resets and repeats. The linear fit uses one uninterrupted left-to-right sweep per fitting window. Python detects the reset event and segments sweeps.                     |
+| What happens if the dot is occluded by the rolling ball? | Dot is positioned at the screen edge (bottom strip). Physical setup guidance instructs user to ensure the dot strip is below the ball roll plane. Occlusion during ball roll is tolerated — fitting uses pre- and post-roll frames only. |
+| How is `cam0` vs `cam1` determined?                      | Node.js assigns camera IDs 0 and 1 in order of connection. This is fixed at session start and recorded in `metadata.json`.                                                                                                               |
+
+### 0.9 Module Boundary
+
+**INSIDE this module group:**
+
+- `getUserMedia` setup and stream management on phone PWA
+- `MediaRecorder` lifecycle (start / dataavailable / stop)
+- HTTP multipart upload of recorded video to Node.js
+- Visual Metronome renderer (laptop `<canvas>`)
+- Sync analysis Python pipeline: SAM2 dot tracking, linear fit, `sync.json` generation
+
+**OUTSIDE this module group (treated as black boxes):**
+
+- Node.js `ffmpeg` frame extraction (defined in §7 integration point only)
+- Ball tracking SAM2 pipeline (separate invocation, different seeds)
+- WebRTC live preview stream (uses same `getUserMedia` stream but is a pass-through)
+- Camera calibration (consumes frames independently)
+- Physics engine (consumes `sync.json`)
+
+---
+
+## 1. Module Definition
+
+### 1.1 Precise Responsibility
+
+This module group is responsible for:
+
+1. **Acquiring video** from each phone at the highest quality the PWA environment allows, locally on the device, with zero network interference during capture.
+2. **Rendering a ground-truth timing reference** (the Visual Metronome) on the laptop screen, which is physically visible to both cameras throughout the recording.
+3. **Recovering the true per-frame timestamps** for every frame of every camera, correcting for inter-camera shutter phase offset and per-device clock drift, producing a single authoritative `sync.json` file.
+
+### 1.2 Non-Goals
+
+- Real-time synchronisation of cameras during recording (not required; all sync is post-hoc)
+- Frame-accurate start/stop triggers (cameras may start and stop at different moments; sync handles this)
+- Lossless video compression beyond 100 Mbps (not needed; compression artefacts are negligible at this bitrate)
+- Live frame transmission to PC during recording (the WebRTC preview stream serves framing only; no data is extracted from it)
+- Synchronisation accuracy below 0.5ms (not required by physics accuracy budget)
+
+### 1.3 Precise Inputs / Outputs
+
+#### Inputs
+
+| Name                   | Type                       | Units   | Shape  | Constraints                                                                        |
+| ---------------------- | -------------------------- | ------- | ------ | ---------------------------------------------------------------------------------- |
+| `camera_stream`        | `MediaStream`              | —       | scalar | Rear camera, `resizeMode: 'none'`                                                  |
+| `experiment_id`        | `string`                   | —       | scalar | UUID v4, provided by Node.js at session start                                      |
+| `recording_duration_s` | `float32`                  | seconds | scalar | Set by user; ≥ 10s recommended                                                     |
+| `frames_dir_cam{n}`    | `string` (filesystem path) | —       | scalar | `/experiments/{id}/frames/cam{n}/` — populated by ffmpeg before sync analysis runs |
+| `frame_count_cam{n}`   | `uint32`                   | frames  | scalar | Number of PNG files in `frames_dir_cam{n}`                                         |
+
+#### Outputs
+
+| Name                              | Type      | Units  | Shape  | Constraints                                        |
+| --------------------------------- | --------- | ------ | ------ | -------------------------------------------------- |
+| `sync.json`                       | JSON file | —      | —      | Schema defined in §0.3                             |
+| `timestamp_ms[cam_id][frame_idx]` | `float64` | ms     | `[N]`  | Monotonically increasing; frame 0 of cam0 = 0.0 ms |
+| `true_fps[cam_id]`                | `float64` | Hz     | scalar | Expected range: 28.0–62.0                          |
+| `phase_offset_ms[cam_id]`         | `float64` | ms     | scalar | Relative to reference camera (cam0 = 0.0)          |
+| `fit_residual_rms_px[cam_id]`     | `float64` | pixels | scalar | Quality metric; alert if > 1.5px                   |
+| `sync_accuracy_ms`                | `float64` | ms     | scalar | = `phase_offset_ms` uncertainty (1σ)               |
+
+---
+
+## 2. Internal Architecture
+
+The module group decomposes into five independently testable subcomponents:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PHONE PWA (Browser)                                            │
+│                                                                 │
+│  [A] CameraConstraintManager                                    │
+│      └─ Negotiates getUserMedia constraints with device         │
+│         Output: MediaStream                                     │
+│                                                                 │
+│  [B] MediaRecorderController                                    │
+│      └─ Manages recording lifecycle, collects Blobs             │
+│         Output: Blob (video/webm or video/mp4)                  │
+│                                                                 │
+│  [C] VideoUploader                                              │
+│      └─ Multipart POST to Node.js; emits progress events        │
+│         Output: {uploadedPath: string}                          │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  LAPTOP BROWSER (React)                                         │
+│                                                                 │
+│  [D] VisualMetronomeRenderer                                    │
+│      └─ Canvas2D dot animation at precise constant speed        │
+│         Output: (physical screen illumination only)             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  PYTHON CV SERVICE                                              │
+│                                                                 │
+│  [E] SyncAnalysisPipeline                                       │
+│      ├─ DotTracker: SAM2 tracks dot in each camera sequence     │
+│      ├─ LinearFitter: x = m·n + c per camera                   │
+│      ├─ PhaseOffsetExtractor: derives sub-frame offsets         │
+│      └─ TimestampArrayBuilder: emits sync.json                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2.1 Subcomponent [A]: CameraConstraintManager
+
+**Purpose:** Negotiate the best available `getUserMedia` constraints for the rear camera, detect actual achieved settings, and log them.
+
+**Inputs:**
+
+- None (reads device capabilities)
+
+**Outputs:**
+
+- `stream: MediaStream` — live camera stream
+- `actualSettings: MediaTrackSettings` — negotiated resolution, FPS, facing mode
+
+**Core Logic:**
+
+1. Probe `navigator.mediaDevices.getSupportedConstraints()` for available constraint keys.
+2. Request with ideal constraints (see §4.1). Browser/OS silently downgrades unsupported values.
+3. Call `stream.getVideoTracks()[0].getSettings()` to retrieve what was actually granted.
+4. Log and store `actualSettings` in session state (Zustand store). If `frameRate < 25` or `width < 1280`, emit a user-facing warning.
+
+**Failure Modes:**
+
+- `getUserMedia` denied (camera permission): Display error UI; cannot proceed.
+- Device has no rear camera (`facingMode: 'environment'` fails): Fallback to `facingMode: 'user'` with warning.
+- FPS below 25: Warning displayed; experiment can still proceed.
+
+### 2.2 Subcomponent [B]: MediaRecorderController
+
+**Purpose:** Manage the full recording lifecycle — start, data collection, stop — and assemble the recorded Blob.
+
+**Inputs:**
+
+- `stream: MediaStream` — from [A]
+- `startSignal: void` — from UI (user presses Record)
+- `stopSignal: void` — from UI (user presses Stop)
+
+**Outputs:**
+
+- `videoBlob: Blob` — complete video data
+- `mimeType: string` — actual codec used (may differ from requested)
+- `durationMs: number` — recording wall-clock duration in ms (from `performance.now()`)
+
+**Core Logic:**
+
+1. Select MIME type: prefer `video/webm;codecs=vp9`; fallback to `video/mp4;codecs=avc1` if unsupported.
+2. Construct `MediaRecorder` with `{ mimeType, videoBitsPerSecond: 100_000_000 }`.
+3. Collect `Blob` chunks from `ondataavailable` events; use `timeslice: 1000` (1-second chunks) to avoid memory spikes on long recordings.
+4. On `onstop`, concatenate all chunks into a single `Blob`.
+5. Record `startTime = performance.now()` at recording start; `durationMs = performance.now() - startTime` at stop.
+
+**Failure Modes:**
+
+- `MediaRecorder` constructor throws (`mimeType` not supported): Retry with fallback codec.
+- `ondataavailable` fires with zero-length Blob: Log warning; continue accumulating (transient).
+- Recording exceeds available device storage: Browser may terminate `MediaRecorder`. Detect via `onerror` event; surface error to user.
+
+### 2.3 Subcomponent [C]: VideoUploader
+
+**Purpose:** Upload the recorded video Blob to the Node.js backend as a multipart/form-data POST. Report progress.
+
+**Inputs:**
+
+- `videoBlob: Blob` — from [B]
+- `experimentId: string`
+- `cameraId: 0 | 1`
+- `mimeType: string`
+- `actualSettings: MediaTrackSettings`
+- `durationMs: number`
+
+**Outputs:**
+
+- `uploadedPath: string` — server-side file path of stored video (echoed by Node.js in response)
+- Progress events: `{ loaded: number, total: number }` — for UI progress bar
+
+**Core Logic:**
+
+1. Build `FormData` with fields: `experimentId`, `cameraId`, `mimeType`, `durationMs`, and the video Blob as `file`.
+2. Use `XMLHttpRequest` (not `fetch`) to support `onprogress` events.
+3. POST to `http://{serverHost}:3001/api/upload-video`.
+4. On `200 OK`, parse response JSON: `{ experimentId, cameraId, storedPath, frameCount }`.
+5. Emit `uploadComplete` event to Zustand store.
+
+**Failure Modes:**
+
+- Network timeout: Retry up to 3 times with 5s backoff.
+- Server returns non-200: Display error; offer manual retry button.
+- Upload interrupted: Browser reload loses the Blob. The phone must re-record. This is an acceptable limitation (local-only deployment).
+
+### 2.4 Subcomponent [D]: VisualMetronomeRenderer
+
+**Purpose:** Render a white dot moving left-to-right at a precisely constant pixel-per-second speed on the laptop screen, in a dedicated canvas strip, throughout the recording.
+
+**Inputs:**
+
+- `canvasElement: HTMLCanvasElement` — provided by React ref
+- `startSignal: void` — begins animation
+- `stopSignal: void` — freezes animation
+
+**Outputs:**
+
+- (Physical screen luminance only — no data output)
+- `dotState: { x: float64, frame: uint32, timestamp_ms: float64 }` — logged internally for debugging
+
+**Core Logic:**
+
+- See §4.3 for full algorithm.
+
+**Failure Modes:**
+
+- `requestAnimationFrame` drops frames (tab backgrounded, CPU load): The animation is time-based (not frame-count-based), so the dot position remains correct even if frames are skipped. The cameras record the actual screen state, not the intended state.
+- Screen refresh rate below 60Hz: Dot position jumps between frames are larger; sync accuracy degrades. Detect via FPS counter in renderer; warn if measured screen FPS < 55.
+
+### 2.5 Subcomponent [E]: SyncAnalysisPipeline
+
+**Purpose:** Recover the true per-frame timestamp for every frame of every camera, using the dot trajectories as a shared physical reference.
+
+**Inputs:**
+
+- `frames_dir: dict[str, Path]` — e.g. `{'cam0': Path('.../frames/cam0/'), 'cam1': Path('.../frames/cam1/')}`
+- `frame_files: dict[str, list[Path]]` — sorted PNG file lists per camera
+- `experiment_id: str`
+
+**Outputs:**
+
+- `sync.json` — written to `/experiments/{id}/results/sync.json`
+- `SyncResult` dataclass (in-memory) — same data, returned to caller
+
+**Core Logic:** See §4.4 for full algorithm.
+
+**Failure Modes:**
+
+- SAM2 fails to track dot (dot not visible, occluded, or too small): Raise `SyncDotNotFoundError`; log which camera and frame range failed.
+- Linear fit R² < 0.99: Raise `SyncFitQualityError`; log residuals and prompt user to re-record.
+- Only one camera's frames available: Raise `MissingCameraError`.
+
+---
+
+## 3. Data Contracts & Interfaces
+
+### 3.1 Function Signatures — TypeScript (PWA)
+
+```typescript
+// packages/frontend/src/lib/mediaRecorder.ts
+
+interface CameraSettings {
+  width: number; // pixels, uint32
+  height: number; // pixels, uint32
+  frameRate: number; // fps, float32
+  facingMode: string; // 'environment' | 'user'
+  deviceId: string;
+}
+
+interface RecordingResult {
+  videoBlob: Blob;
+  mimeType: string; // 'video/webm;codecs=vp9' | 'video/mp4;codecs=avc1'
+  durationMs: number; // float64, milliseconds
+  actualSettings: CameraSettings;
+}
+
+interface UploadResult {
+  experimentId: string;
+  cameraId: 0 | 1;
+  storedPath: string; // absolute server-side path
+  frameCount: number; // uint32, reported after ffmpeg extraction completes
+}
+
+async function acquireCamera(): Promise<{
+  stream: MediaStream;
+  settings: CameraSettings;
+}>;
+
+function createRecorder(stream: MediaStream): MediaRecorder;
+
+async function startRecording(recorder: MediaRecorder): Promise<void>;
+
+async function stopRecording(recorder: MediaRecorder): Promise<RecordingResult>;
+
+async function uploadVideo(
+  result: RecordingResult,
+  experimentId: string,
+  cameraId: 0 | 1,
+  serverHost: string,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<UploadResult>;
+```
+
+### 3.2 HTTP Upload API Contract (Node.js endpoint)
+
+**Request:**
+
+```
+POST /api/upload-video
+Content-Type: multipart/form-data
+
+Fields:
+  experiment_id  : string  (UUID v4)
+  camera_id      : '0' | '1'
+  mime_type      : string
+  duration_ms    : string  (float64 serialised as decimal string)
+  file           : Blob    (video file; filename set to cam{n}.webm or cam{n}.mp4)
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "experiment_id": "string",
+  "camera_id": 0,
+  "stored_path": "/experiments/{id}/raw/cam0.webm",
+  "ffmpeg_status": "pending"
+}
+```
+
+**Response (500):**
+
+```json
+{
+  "error": "string",
+  "code": "STORAGE_FULL | FFMPEG_FAILED | INVALID_EXPERIMENT"
+}
+```
+
+Node.js triggers `ffmpeg` extraction immediately after `stored_path` is written, then emits a WebSocket event to the UI when extraction completes:
+
+```json
+{
+  "type": "FFMPEG_COMPLETE",
+  "experiment_id": "string",
+  "camera_id": 0,
+  "frame_count": 1800
+}
+```
+
+### 3.3 Visual Metronome Canvas Protocol
+
+The metronome is rendered on a `<canvas>` element with these fixed properties:
+
+```typescript
+interface MetronomeConfig {
+  canvasWidth: number; // pixels — full screen width
+  canvasHeight: number; // pixels — fixed at 120px
+  dotRadius: number; // pixels — fixed at 20
+  dotColor: string; // '#FFFFFF'
+  backgroundColor: string; // '#000000'
+  speedFraction: number; // dot travels this fraction of canvasWidth per second — fixed at 0.25
+}
+```
+
+The canvas is positioned at `position: fixed; bottom: 0; left: 0; width: 100vw; height: 120px; z-index: 9999`. This ensures it is visible even during fullscreen-adjacent display.
+
+No data protocol — the "output" is physical screen photons.
+
+### 3.4 gRPC Interface (Node.js → Python) for Sync Analysis
+
+Defined in `proto/physics.proto`:
+
+```protobuf
+service PhysicsCapture {
+  rpc RunSyncAnalysis(SyncRequest) returns (stream SyncStatus);
+}
+
+message SyncRequest {
+  string experiment_id = 1;
+  repeated string camera_ids = 2;   // ["cam0", "cam1"]
+}
+
+message SyncStatus {
+  string stage = 1;       // "dot_tracking" | "linear_fit" | "timestamp_array" | "complete" | "error"
+  float  progress = 2;    // 0.0 – 1.0
+  string camera_id = 3;   // which camera is being processed
+  string error_msg = 4;   // non-empty on error
+}
+```
+
+`RunSyncAnalysis` streams progress updates during SAM2 tracking (which may take minutes). The final `SyncStatus` with `stage = "complete"` signals that `sync.json` has been written.
+
+### 3.5 `sync.json` Full Schema
+
+```json
+{
+  "$schema": "https://physicscapture.local/schemas/sync-v1.json",
+  "schema_version": "1.0",
+  "experiment_id": "3f4a8c21-...",
+  "generated_at_iso": "2025-09-01T14:32:00Z",
+  "reference_camera": "cam0",
+  "cameras": {
+    "cam0": {
+      "true_fps": 29.971,
+      "nominal_fps": 30,
+      "phase_offset_frames": 0.0,
+      "phase_offset_ms": 0.0,
+      "frame_count": 1802,
+      "fit_slope_px_per_frame": 19.843,
+      "fit_intercept_px": 12.3,
+      "fit_r_squared": 0.9998,
+      "fit_residual_rms_px": 0.41,
+      "timestamp_ms": [0.0, 33.37, 66.73, 100.1, "..."]
+    },
+    "cam1": {
+      "true_fps": 29.964,
+      "nominal_fps": 30,
+      "phase_offset_frames": 0.412,
+      "phase_offset_ms": 13.74,
+      "frame_count": 1800,
+      "fit_slope_px_per_frame": 19.839,
+      "fit_intercept_px": 20.1,
+      "fit_r_squared": 0.9997,
+      "fit_residual_rms_px": 0.52,
+      "timestamp_ms": [13.74, 47.11, 80.47, "..."]
+    }
+  },
+  "sync_accuracy_ms": 0.18,
+  "dot_speed_px_per_frame": {
+    "cam0": 19.843,
+    "cam1": 19.839
+  }
+}
+```
+
+**Time representation:** All `timestamp_ms` values are float64 milliseconds. The epoch is defined as: **frame 0 of the reference camera (`cam0`) = 0.0 ms**. All other timestamps are offsets from this epoch. Negative timestamps are valid (if cam1's shutter precedes cam0 frame 0).
+
+**Coordinate system:** Dot X-position is measured in pixels from the left edge of the frame. Origin = left edge = 0. Right edge = `frame_width - 1`. Y-axis is not used in sync analysis (dot is tracked as a 1D horizontal position).
+
+### 3.6 Python Internal Interfaces
+
+```python
+# packages/cv-service/sync/dot_tracker.py
+
+from dataclasses import dataclass
+from pathlib import Path
+import numpy as np
+
+@dataclass
+class DotTrackingResult:
+    camera_id: str               # 'cam0' | 'cam1'
+    frame_indices: np.ndarray    # shape (N,), dtype uint32
+    dot_x_positions: np.ndarray  # shape (N,), dtype float64, pixels
+    dot_y_positions: np.ndarray  # shape (N,), dtype float64, pixels
+    confidences: np.ndarray      # shape (N,), dtype float32, [0.0, 1.0]
+    total_frames: int            # uint32
+
+def track_dot(
+    frames_dir: Path,
+    camera_id: str,
+    initial_frame_idx: int,      # frame where dot is first visible
+    initial_dot_xy: tuple[float, float],  # (x, y) in pixels
+    confidence_threshold: float = 0.7
+) -> DotTrackingResult:
+    ...
+
+
+# packages/cv-service/sync/timestamp_array.py
+
+@dataclass
+class LinearFitResult:
+    slope: float       # float64, pixels per frame (= true dot speed)
+    intercept: float   # float64, pixels at frame 0
+    r_squared: float   # float64, [0.0, 1.0]
+    residual_rms: float  # float64, pixels
+
+@dataclass
+class SyncResult:
+    experiment_id: str
+    reference_camera: str        # 'cam0'
+    cameras: dict[str, 'CameraSync']
+    sync_accuracy_ms: float      # float64
+
+@dataclass
+class CameraSync:
+    camera_id: str
+    true_fps: float              # float64, Hz
+    nominal_fps: float           # float64, Hz (from metadata)
+    phase_offset_frames: float   # float64
+    phase_offset_ms: float       # float64
+    frame_count: int             # uint32
+    fit: LinearFitResult
+    timestamp_ms: np.ndarray     # shape (frame_count,), float64
+
+def fit_dot_trajectory(tracking: DotTrackingResult) -> LinearFitResult:
+    ...
+
+def compute_phase_offset(
+    fit_cam0: LinearFitResult,
+    fit_cam1: LinearFitResult,
+    dot_speed_px_per_frame_cam0: float
+) -> float:
+    ...
+
+def build_timestamp_array(
+    frame_count: int,
+    true_fps: float,
+    phase_offset_ms: float
+) -> np.ndarray:
+    ...
+
+def run_sync_analysis(
+    experiment_id: str,
+    frames_dirs: dict[str, Path],
+    output_path: Path,
+    progress_callback: Callable[[str, float], None] | None = None
+) -> SyncResult:
+    ...
+```
+
+---
+
+## 4. Algorithmic Implementation
+
+### 4.1 Camera Acquisition Algorithm ([A])
+
+```
+ALGORITHM: acquireCamera()
+
+1. Build constraint object:
+   constraints = {
+     video: {
+       facingMode: { exact: 'environment' },  // EXACT: fail fast if no rear camera
+       width:     { ideal: 3840 },
+       height:    { ideal: 2160 },
+       frameRate: { ideal: 60, max: 60 },
+       resizeMode: 'none'
+     }
+   }
+
+2. TRY: stream = await navigator.mediaDevices.getUserMedia(constraints)
+   ON OVERCONSTRAINED error:
+     Retry with facingMode: { ideal: 'environment' }  // not exact; allows front camera fallback
+   ON NotAllowedError:
+     Throw PermissionDeniedError (non-recoverable; show user instructions)
+
+3. track = stream.getVideoTracks()[0]
+   settings = track.getSettings()
+   // settings.width, settings.height, settings.frameRate are the actual negotiated values
+
+4. VALIDATE:
+   if settings.frameRate < 25:
+     Emit WARNING "Camera frame rate below 25fps. Sync accuracy may be reduced."
+   if settings.width < 1280 or settings.height < 720:
+     Emit WARNING "Camera resolution below 1280×720. Ball tracking may be less accurate."
+   if settings.facingMode != 'environment':
+     Emit WARNING "Using front-facing camera. Rear camera is preferred."
+
+5. Store settings in Zustand: cameraStore.setSettings(cameraId, settings)
+
+6. Return { stream, settings }
+```
+
+### 4.2 MediaRecorder Algorithm ([B])
+
+```
+ALGORITHM: recordVideo(stream, cameraId)
+
+INITIALIZATION:
+1. MIME type selection (in order of preference):
+   candidates = [
+     'video/webm;codecs=vp9',
+     'video/webm;codecs=vp8',
+     'video/mp4;codecs=avc1',
+     'video/mp4'
+   ]
+   mimeType = candidates.find(c => MediaRecorder.isTypeSupported(c))
+   IF mimeType is undefined: throw UnsupportedCodecError
+
+2. Construct recorder:
+   recorder = new MediaRecorder(stream, {
+     mimeType: mimeType,
+     videoBitsPerSecond: 100_000_000  // 100 Mbps
+   })
+
+3. chunks: Blob[] = []
+   recorder.ondataavailable = (event) => {
+     IF event.data.size > 0: chunks.push(event.data)
+   }
+
+ON startRecording():
+4. startTimeMs = performance.now()
+   recorder.start(1000)  // fires ondataavailable every 1 second
+   // 1-second timeslice: max memory usage = 100Mbps × 1s = ~12.5MB per chunk
+
+ON stopRecording():
+5. recorder.stop()
+   // ondataavailable fires one final time after stop() for any remaining data
+
+6. await new Promise(resolve => recorder.onstop = resolve)
+   durationMs = performance.now() - startTimeMs
+
+7. videoBlob = new Blob(chunks, { type: mimeType })
+   Return { videoBlob, mimeType, durationMs }
+```
+
+### 4.3 Visual Metronome Renderer Algorithm ([D])
+
+**Key design principle:** The dot position is calculated from elapsed wall-clock time (`performance.now()`), NOT from frame count. This means camera frame-rate variations on the laptop display side are irrelevant — the position is always correct at the moment of rendering.
+
+```
+ALGORITHM: runMetronome(canvas, config)
+
+CONSTANTS:
+  DOT_RADIUS = 20          // pixels
+  DOT_COLOR  = '#FFFFFF'
+  BG_COLOR   = '#000000'
+  SPEED      = config.canvasWidth * 0.25   // pixels/second
+  // At 1920px wide: SPEED = 480 px/s → full sweep in ~4 seconds
+
+STATE:
+  startTime: float64 = null  // performance.now() at animation start
+  animFrameId: int            // requestAnimationFrame handle
+  running: boolean = false
+
+FUNCTION renderFrame(timestamp: DOMHighResTimeStamp):
+  IF NOT running: return
+
+  IF startTime == null: startTime = timestamp
+
+  elapsedMs = timestamp - startTime  // DOMHighResTimeStamp is in ms
+  elapsedS = elapsedMs / 1000.0
+
+  // Dot sweeps left-to-right; wraps on reset
+  travelRange = config.canvasWidth - 2 * DOT_RADIUS
+  dotCycleS = travelRange / SPEED       // seconds for one full sweep
+  cyclePosition = (elapsedS % dotCycleS)
+  dotX = DOT_RADIUS + (cyclePosition / dotCycleS) * travelRange
+  // Result: dotX in [DOT_RADIUS, canvasWidth - DOT_RADIUS]
+
+  dotY = config.canvasHeight / 2
+
+  // Draw
+  ctx = canvas.getContext('2d')
+  ctx.fillStyle = BG_COLOR
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.beginPath()
+  ctx.arc(dotX, dotY, DOT_RADIUS, 0, 2 * Math.PI)
+  ctx.fillStyle = DOT_COLOR
+  ctx.fill()
+
+  animFrameId = requestAnimationFrame(renderFrame)
+
+FUNCTION start():
+  running = true
+  startTime = null
+  animFrameId = requestAnimationFrame(renderFrame)
+
+FUNCTION stop():
+  running = false
+  cancelAnimationFrame(animFrameId)
+```
+
+**Why `% dotCycleS` instead of bounce:** Wrapping (reset) produces a sharp non-linear discontinuity that is easy for the Python pipeline to detect and exclude. Bouncing (reflection) would produce a change in slope that is harder to segment robustly. The wrap-back to the left edge is instantaneous in screen time; any camera frame that captures this transition is excluded by the linear fit (it will be a large residual outlier).
+
+### 4.4 Sync Analysis Algorithm ([E])
+
+This is the core algorithm. It runs entirely in Python post-processing, after all frames have been extracted by `ffmpeg`.
+
+#### Step E1: Dot Seeding
+
+```
+ALGORITHM: seed_dot(frames_dir, camera_id)
+
+1. Load frame 0 (first extracted PNG):
+   frame0 = cv2.imread(str(frames_dir / 'frame_000001.png'))
+   // Convention: ffmpeg zero-pads to 6 digits, 1-indexed
+
+2. Crop to bottom 120px strip (where the metronome canvas is physically visible):
+   strip_y_start = frame0.shape[0] - 120
+   strip = frame0[strip_y_start:, :]
+
+3. Apply Gaussian blur (σ=3) to reduce noise.
+
+4. Threshold: convert to grayscale; threshold at 200/255 (dot is white on black).
+   // At 100 Mbps, even compressed video should retain the high-contrast dot cleanly
+
+5. Find largest connected white blob:
+   contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+   largest = max(contours, key=cv2.contourArea)
+
+6. Centroid of largest blob:
+   M = cv2.moments(largest)
+   cx = M['m10'] / M['m00']
+   cy = M['m01'] / M['m00'] + strip_y_start  // restore full-frame Y coordinate
+
+7. IF no blob found with area > 100 px²:
+   Scan frames 1..29 and retry. IF still not found:
+   Raise SyncDotNotFoundError(camera_id, "No sync dot detected in first 30 frames")
+
+8. Return (cx, cy) and frame_idx where dot was found
+```
+
+#### Step E2: SAM2 Dot Tracking
+
+```python
+ALGORITHM: track_dot(frames_dir, camera_id, initial_frame_idx, initial_dot_xy)
+
+1. Build SAM2 predictor (reuse global singleton if already loaded):
+   predictor = build_sam2_video_predictor("sam2_hiera_large.pt")
+
+2. Init state on frame directory:
+   inference_state = predictor.init_state(
+     video_path=str(frames_dir),
+     offload_video_to_cpu=True,    # manages VRAM; acceptable for offline use
+     async_loading_frames=True
+   )
+
+3. Seed with initial point:
+   predictor.add_new_points(
+     inference_state,
+     frame_idx=initial_frame_idx,
+     obj_id=1,                      # dot is object ID 1
+     points=[[initial_dot_xy[0], initial_dot_xy[1]]],
+     labels=[1]                     # 1 = foreground
+   )
+
+4. Propagate forward:
+   frame_indices = []
+   dot_x_positions = []
+   dot_y_positions = []
+   confidences = []
+
+   for frame_idx, obj_ids, masks in predictor.propagate_in_video(inference_state):
+     mask = masks[0]                  # binary mask for obj_id=1
+     confidence = float(mask.max())  # peak mask probability as confidence proxy
+
+     IF confidence < 0.5:
+       // Dot not visible this frame (occlusion or wrap event)
+       // Record as NaN — excluded from fit
+       dot_x_positions.append(float('nan'))
+       dot_y_positions.append(float('nan'))
+       confidences.append(confidence)
+       frame_indices.append(frame_idx)
+       continue
+
+     // Sub-pixel centroid from mask:
+     centroid_x, centroid_y = compute_weighted_centroid(mask)
+     dot_x_positions.append(centroid_x)
+     dot_y_positions.append(centroid_y)
+     confidences.append(confidence)
+     frame_indices.append(frame_idx)
+
+5. Reset inference state (free memory):
+   predictor.reset_state(inference_state)
+
+6. Return DotTrackingResult(
+     camera_id=camera_id,
+     frame_indices=np.array(frame_indices, dtype=np.uint32),
+     dot_x_positions=np.array(dot_x_positions, dtype=np.float64),
+     dot_y_positions=np.array(dot_y_positions, dtype=np.float64),
+     confidences=np.array(confidences, dtype=np.float32),
+     total_frames=len(frame_indices)
+   )
+
+SUBROUTINE: compute_weighted_centroid(mask: np.ndarray) -> (float, float):
+  // mask shape: (H, W), values in [0.0, 1.0]
+  ys, xs = np.mgrid[0:mask.shape[0], 0:mask.shape[1]]
+  total_weight = mask.sum()
+  cx = (xs * mask).sum() / total_weight
+  cy = (ys * mask).sum() / total_weight
+  return (cx, cy)
+  // This is a probabilistic centroid, equivalent to sub-pixel precision
+```
+
+#### Step E3: Linear Fit — Sweep Segmentation and RANSAC
+
+```
+ALGORITHM: fit_dot_trajectory(tracking: DotTrackingResult) -> LinearFitResult
+
+// The dot wraps (resets to left edge) multiple times per recording.
+// We must segment the trajectory into individual left-to-right sweeps,
+// then fit a GLOBAL linear model to the concatenated valid sweeps
+// using a consistent phase reference.
+
+INPUT:
+  tracking.frame_indices   // shape (N,), uint32
+  tracking.dot_x_positions // shape (N,), float64; NaN where dot not detected
+
+STEP 1: Remove NaN frames.
+  valid_mask = ~np.isnan(tracking.dot_x_positions)
+  valid_frames = tracking.frame_indices[valid_mask]
+  valid_x = tracking.dot_x_positions[valid_mask]
+
+STEP 2: Detect wrap events.
+// A wrap occurs when dot_x drops sharply (> 50% of frame_width) between consecutive frames.
+  diffs = np.diff(valid_x)
+  wrap_indices = np.where(diffs < -0.5 * EXPECTED_FRAME_WIDTH)[0]
+  // wrap_indices[i] is the index BEFORE the wrap transition
+
+STEP 3: Segment into individual sweeps.
+  sweep_boundaries = [0] + list(wrap_indices + 1) + [len(valid_frames)]
+  sweeps = []
+  for i in range(len(sweep_boundaries) - 1):
+    a, b = sweep_boundaries[i], sweep_boundaries[i+1]
+    IF b - a < 10: continue  // Discard sweeps shorter than 10 frames (transition artefacts)
+    sweeps.append({
+      'frames': valid_frames[a:b],
+      'x': valid_x[a:b]
+    })
+
+STEP 4: Build a unified frame-number ↔ x-position model.
+// Each sweep is monotonically increasing in x, so we can assign each frame
+// a "continuous x" value by adding the theoretical full-width-sweep offset
+// for each completed cycle. The slope of the global fit is then directly
+// the dot speed in px/frame.
+//
+// However, because actual frame numbers are already continuous integers,
+// the simplest approach is to fit x ~ m*n + c per sweep, check slope consistency,
+// then compute a weighted average slope.
+
+  slopes = []
+  intercepts = []
+  weights = []
+  for sweep in sweeps:
+    n = sweep['frames'].astype(float)
+    x = sweep['x']
+    // Ordinary Least Squares:
+    from scipy.stats import linregress
+    result = linregress(n, x)
+    slopes.append(result.slope)
+    intercepts.append(result.intercept)
+    weights.append(len(n))    // weight by sweep length (longer sweeps are more reliable)
+
+  // Consistency check: all slopes should agree within ±5%
+  slope_array = np.array(slopes)
+  slope_mean = np.average(slope_array, weights=weights)
+  slope_std = np.std(slope_array)
+  IF slope_std / slope_mean > 0.05:
+    Raise SyncFitQualityError(
+      f"Dot speed inconsistent across sweeps: std/mean = {slope_std/slope_mean:.3f}"
+    )
+
+STEP 5: Final global fit using RANSAC for outlier rejection.
+// Use scipy's Theil-Sen estimator (median-based, robust to ~29% outlier rate).
+// Outliers include: wrap-transition frames, occlusion frames with low confidence.
+
+  from sklearn.linear_model import TheilSenRegressor
+  model = TheilSenRegressor(random_state=42)
+  model.fit(valid_frames.reshape(-1, 1), valid_x)
+  fitted_x = model.predict(valid_frames.reshape(-1, 1))
+  residuals = valid_x - fitted_x
+  residual_rms = np.sqrt(np.mean(residuals**2))
+
+  // R²:
+  ss_res = np.sum(residuals**2)
+  ss_tot = np.sum((valid_x - np.mean(valid_x))**2)
+  r_squared = 1 - ss_res / ss_tot
+
+  IF r_squared < 0.99:
+    Raise SyncFitQualityError(f"Linear fit R² = {r_squared:.4f} < 0.99 — poor sync dot trajectory")
+
+STEP 6: Return LinearFitResult(
+  slope=model.coef_[0],           // float64 px/frame
+  intercept=model.intercept_,     // float64 px
+  r_squared=r_squared,            // float64
+  residual_rms=residual_rms       // float64 px
+)
+```
+
+#### Step E4: Phase Offset and True FPS Computation
+
+```
+ALGORITHM: compute_sync_parameters(fit_cam0, fit_cam1, nominal_fps)
+
+// DERIVATION:
+// The dot is moving at the SAME physical speed (in screen pixels per second)
+// for both cameras, since they both view the same laptop screen.
+// Therefore: fit_cam0.slope / true_fps_cam0 == fit_cam1.slope / true_fps_cam1
+// (both equal to dot_speed_px_per_second)
+//
+// Also: true_fps = slope / (screen_width_px * 0.25) * (actual_screen_hz)
+// BUT we do NOT need to know screen_hz. We compute true_fps differently:
+//
+// true_fps is computed from the FRAME COUNT over the KNOWN RECORDING DURATION:
+//   true_fps = frame_count / (duration_ms / 1000.0)
+// This is available from the upload metadata.
+//
+// The slope of the linear fit gives us: px/frame = px_per_second / fps
+// So: px_per_second = slope * true_fps (consistent across cameras)
+//
+// PHASE OFFSET:
+// At true time T, both cameras should see the dot at the same position.
+// For camera 0: x = m0 * n + c0,  where n = frame index
+// For camera 1: x = m1 * n + c1
+// At frame n0 of cam0, the true time is: T = n0 / fps0
+// At frame n1 of cam1, the true time is: T = n1 / fps1
+// For the same true time T: n0/fps0 = n1/fps1 → n1 = n0 * fps1/fps0
+// The dot position must match: m0*n0 + c0 = m1*n1 + c1
+// Substituting n1 = n0 * fps1/fps0:
+//   m0*n0 + c0 = m1 * n0 * fps1/fps0 + c1
+//   Since m0/fps0 ≈ m1/fps1 (same physical speed), m0 ≈ m1 * fps0/fps1
+//   → phase difference in frames: Δn = (c0 - c1) / m1 (approximately)
+// More precisely:
+
+INPUT:
+  fit_cam0: LinearFitResult
+  fit_cam1: LinearFitResult
+  fps_cam0: float64   // true FPS from frame_count / duration_ms
+  fps_cam1: float64
+
+1. Verify physical speed consistency:
+   speed_cam0 = fit_cam0.slope * fps_cam0   // px/second
+   speed_cam1 = fit_cam1.slope * fps_cam1   // px/second
+   speed_discrepancy = abs(speed_cam0 - speed_cam1) / speed_cam0
+   IF speed_discrepancy > 0.02:
+     Log WARNING f"Dot speed discrepancy: {speed_discrepancy*100:.2f}%"
+     // > 2% discrepancy suggests FPS measurement error or very different camera captures
+
+2. Compute phase offset:
+   // The intercept encodes when the dot crossed x=0 relative to frame 0.
+   // t_cam0_zero_crossing = -fit_cam0.intercept / fit_cam0.slope  (in frames)
+   // t_cam1_zero_crossing = -fit_cam1.intercept / fit_cam1.slope  (in frames)
+
+   t0_zero = -fit_cam0.intercept / fit_cam0.slope  // frame index when dot at x=0
+   t1_zero = -fit_cam1.intercept / fit_cam1.slope  // frame index when dot at x=0
+
+   // Convert to real time:
+   t0_zero_ms = t0_zero / fps_cam0 * 1000.0
+   t1_zero_ms = t1_zero / fps_cam1 * 1000.0
+
+   // Phase offset: how much earlier (positive) or later (negative) cam1 started
+   // relative to cam0, at the same physical dot position.
+   phase_offset_ms = t1_zero_ms - t0_zero_ms
+   phase_offset_frames_cam1 = phase_offset_ms / 1000.0 * fps_cam1
+
+3. Uncertainty on phase offset:
+   // Propagate from fit uncertainties. The uncertainty on the intercept-derived
+   // time is dominated by the fit residual RMS.
+   // σ(t_zero) ≈ residual_rms / slope (in frames) → convert to ms
+   sigma_t0_ms = (fit_cam0.residual_rms / fit_cam0.slope) / fps_cam0 * 1000.0
+   sigma_t1_ms = (fit_cam1.residual_rms / fit_cam1.slope) / fps_cam1 * 1000.0
+   sync_accuracy_ms = sqrt(sigma_t0_ms**2 + sigma_t1_ms**2)
+
+4. Return:
+   phase_offset_ms       // float64
+   phase_offset_frames_cam1  // float64
+   sync_accuracy_ms      // float64
+```
+
+#### Step E5: Master Timestamp Array Construction
+
+```
+ALGORITHM: build_timestamp_array(frame_count, true_fps, phase_offset_ms) -> np.ndarray
+
+// Produces an array of length frame_count where entry n gives
+// the true wall-clock millisecond offset from experiment start for frame n.
+
+1. frame_period_ms = 1000.0 / true_fps
+
+2. timestamps = np.arange(frame_count, dtype=np.float64) * frame_period_ms + phase_offset_ms
+
+3. VERIFY monotonicity:
+   ASSERT np.all(np.diff(timestamps) > 0.0), "Timestamp array must be strictly increasing"
+
+4. Return timestamps
+
+// For cam0 (reference): phase_offset_ms = 0.0 → timestamps = [0.0, 33.37, 66.73, ...]
+// For cam1: phase_offset_ms = 13.74 → timestamps = [13.74, 47.11, 80.47, ...]
+// This means cam1 frame 0 corresponds to true time 13.74ms after cam0 frame 0.
+```
+
+#### Step E6: `sync.json` Serialisation
+
+```python
+def write_sync_json(result: SyncResult, output_path: Path) -> None:
+    data = {
+        "schema_version": "1.0",
+        "experiment_id": result.experiment_id,
+        "generated_at_iso": datetime.utcnow().isoformat() + "Z",
+        "reference_camera": result.reference_camera,
+        "sync_accuracy_ms": result.sync_accuracy_ms,
+        "cameras": {}
+    }
+    for cam_id, cam_sync in result.cameras.items():
+        data["cameras"][cam_id] = {
+            "true_fps": cam_sync.true_fps,
+            "nominal_fps": cam_sync.nominal_fps,
+            "phase_offset_frames": cam_sync.phase_offset_frames,
+            "phase_offset_ms": cam_sync.phase_offset_ms,
+            "frame_count": cam_sync.frame_count,
+            "fit_slope_px_per_frame": cam_sync.fit.slope,
+            "fit_intercept_px": cam_sync.fit.intercept,
+            "fit_r_squared": cam_sync.fit.r_squared,
+            "fit_residual_rms_px": cam_sync.fit.residual_rms,
+            "timestamp_ms": cam_sync.timestamp_ms.tolist()
+            # .tolist() converts float64 numpy array to JSON-serialisable Python list
+        }
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=2)
+```
+
+---
+
+## 5. Execution Model
+
+### 5.1 Phone PWA (Subcomponents A, B, C)
+
+| Aspect             | Detail                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| Invocation type    | Async/event-driven                                                                            |
+| Trigger            | User taps "Record" button in Experiment Recording screen                                      |
+| Concurrency        | Single-threaded JavaScript; `MediaRecorder` runs on browser's media thread (separate from JS) |
+| Recording duration | Unbounded; stops on user tap or session timeout                                               |
+| Upload trigger     | Automatically on `stopRecording()` completion                                                 |
+| Upload concurrency | Sequential if two phones; both upload independently to Node.js                                |
+
+State machine for the phone PWA recording flow:
+
+```
+IDLE
+  → [User taps Record] → RECORDING
+RECORDING
+  → [ondataavailable] → accumulate chunk (stays in RECORDING)
+  → [User taps Stop] → STOPPING
+STOPPING
+  → [onstop fires] → UPLOADING
+UPLOADING
+  → [onprogress] → update progress bar (stays in UPLOADING)
+  → [upload complete] → DONE
+  → [upload error] → ERROR (user can retry)
+DONE / ERROR (terminal states)
+```
+
+### 5.2 Laptop Browser Metronome (Subcomponent D)
+
+| Aspect               | Detail                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| Invocation type      | `requestAnimationFrame` loop (asynchronous, display-sync'd)                                          |
+| Trigger              | Metronome starts when user enters Experiment Recording screen; stops on navigation away              |
+| Concurrency          | Single `requestAnimationFrame` chain; no workers needed                                              |
+| Timing model         | Wall-clock elapsed time from `performance.now()`; frame drops do not affect dot position correctness |
+| Real-time constraint | Soft: each `rAF` callback must complete in < 5ms (rendering only; no computation)                    |
+
+### 5.3 Python Sync Analysis (Subcomponent E)
+
+| Aspect                 | Detail                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| Invocation type        | Synchronous within gRPC handler; streaming progress updates via gRPC server streaming             |
+| Trigger                | Node.js calls `RunSyncAnalysis` gRPC after ffmpeg extraction completes for both cameras           |
+| Concurrency            | Single-process; SAM2 uses PyTorch multi-thread internally (controlled by `torch.set_num_threads`) |
+| Per-camera parallelism | Cameras processed sequentially (not in parallel) to avoid VRAM contention                         |
+| Estimated duration     | 1–5 minutes per camera for 60s recording at 30fps (1800 frames × ~100ms SAM2/frame)               |
+| Buffering              | No frame buffering required; frames read from disk on demand by SAM2                              |
+
+---
+
+## 6. State & Data Flow
+
+### 6.1 End-to-End Flow Through This Module Group
+
+```
+[USER PRESSES RECORD]
+         │
+         ▼
+[Phone PWA] acquireCamera()
+  └── getUserMedia → MediaStream                         (in memory)
+         │
+         ▼
+[Phone PWA] MediaRecorderController.start()
+  └── MediaRecorder → Blob chunks at 1s intervals       (in memory, device RAM)
+         │
+         ▼ [concurrently]
+[Laptop React] VisualMetronomeRenderer.start()
+  └── Canvas2D animation → laptop screen illumination   (physical only)
+         │
+         ▼ [user presses stop after experiment ends]
+[Phone PWA] MediaRecorderController.stop()
+  └── final Blob assembled                               (in memory)
+         │
+         ▼
+[Phone PWA] VideoUploader.upload()
+  └── HTTP POST multipart → Node.js                     (network transfer)
+         │
+         ▼
+[Node.js] multer stores file:
+  /experiments/{id}/raw/cam{n}.webm                     (persistent on disk)
+         │
+         ▼
+[Node.js] ffmpeg extraction:
+  ffmpeg -i cam{n}.webm -vsync 0 frames/cam{n}/frame_%06d.png
+  └── PNG sequence                                       (persistent on disk)
+         │
+         ▼ [WebSocket: FFMPEG_COMPLETE event to UI]
+[Node.js] calls gRPC RunSyncAnalysis
+         │
+         ▼
+[Python] SyncAnalysisPipeline.run_sync_analysis()
+  ├── DotTracker (cam0): SAM2 → DotTrackingResult       (in memory)
+  ├── DotTracker (cam1): SAM2 → DotTrackingResult       (in memory)
+  ├── LinearFitter (cam0): → LinearFitResult            (in memory)
+  ├── LinearFitter (cam1): → LinearFitResult            (in memory)
+  ├── PhaseOffsetExtractor: → phase_offset_ms           (in memory)
+  ├── TimestampArrayBuilder (cam0): → float64[N]        (in memory)
+  └── TimestampArrayBuilder (cam1): → float64[M]        (in memory)
+         │
+         ▼
+  write_sync_json():
+  /experiments/{id}/results/sync.json                   (persistent on disk)
+         │
+         ▼
+[gRPC stream] SyncStatus { stage: "complete" } → Node.js → WebSocket → UI
+```
+
+### 6.2 What is Retained vs Discarded
+
+| Data                            | Retained?                | Location                           |
+| ------------------------------- | ------------------------ | ---------------------------------- |
+| Raw video file (`.webm`/`.mp4`) | Yes (permanent)          | `/experiments/{id}/raw/`           |
+| Extracted PNG frames            | Yes (permanent)          | `/experiments/{id}/frames/cam{n}/` |
+| `MediaRecorder` Blob chunks     | Discarded after upload   | Phone RAM                          |
+| SAM2 inference state            | Discarded after tracking | Python RAM / VRAM                  |
+| `DotTrackingResult` arrays      | Discarded after fit      | Python RAM                         |
+| `LinearFitResult`               | Stored in `sync.json`    | Disk                               |
+| `timestamp_ms` arrays           | Stored in `sync.json`    | Disk                               |
+
+### 6.3 Clock / State Persistence
+
+- The metronome has no persistent state — it is stateless across sessions.
+- `sync.json` is the only persistent state produced by this module group.
+- `sync.json` is consumed (read-only) by the Physics Engine and Ball Tracking modules. They must never modify it.
+- If sync analysis is re-run (e.g., after user re-frames the dot seed), `sync.json` is overwritten atomically (write to temp file, then rename).
+
+---
+
+## 7. Integration Points
+
+### 7.1 Entry Points Into This Module Group
+
+| Entry Point                       | Caller                            | Mechanism               |
+| --------------------------------- | --------------------------------- | ----------------------- |
+| `acquireCamera()`                 | React Experiment Recording screen | Direct JS call on mount |
+| `recorder.start()`                | React Record button `onClick`     | Direct JS call          |
+| `recorder.stop()`                 | React Stop button `onClick`       | Direct JS call          |
+| `VideoUploader.upload()`          | Automatically after `stop()`      | Internal                |
+| `VisualMetronomeRenderer.start()` | React Experiment Recording screen | Direct JS call on mount |
+| `POST /api/upload-video`          | Phone PWA                         | HTTP                    |
+| `RunSyncAnalysis` gRPC            | Node.js (after ffmpeg completes)  | gRPC                    |
+
+### 7.2 Exit Points From This Module Group
+
+| Exit Point                                     | Consumer                                     | Data                     |
+| ---------------------------------------------- | -------------------------------------------- | ------------------------ |
+| `sync.json` written to disk                    | Physics Engine (`fitting.py`)                | Master timestamp array   |
+| `sync.json` written to disk                    | Ball Tracking (validation; timestamp lookup) | `timestamp_ms` per frame |
+| gRPC stream `SyncStatus { stage: "complete" }` | Node.js → WebSocket → React UI               | Triggers next UI step    |
+
+### 7.3 Exact Call Sequence (Happy Path)
+
+```
+1. React mounts Experiment Recording screen
+   → calls VisualMetronomeRenderer.start() [laptop canvas]
+   → calls acquireCamera() for each phone
+
+2. User presses Record
+   → Node.js WebSocket: "RECORDING_STARTED" broadcast to all phones
+   → Each phone: recorder.start(1000)
+
+3. [Recording in progress: dot animating on laptop screen, cameras capturing]
+
+4. User presses Stop
+   → Node.js WebSocket: "RECORDING_STOPPED" broadcast to all phones
+   → Each phone: recorder.stop()
+   → VisualMetronomeRenderer.stop()
+
+5. Each phone: VideoUploader.upload()
+   POST /api/upload-video → Node.js
+
+6. Node.js: stores file, spawns ffmpeg
+   ffmpeg -i cam{n}.webm -vsync 0 frames/cam{n}/frame_%06d.png
+   → on ffmpeg exit: WebSocket "FFMPEG_COMPLETE" { cameraId, frameCount }
+
+7. Node.js: when BOTH cameras complete ffmpeg extraction:
+   → gRPC call: RunSyncAnalysis({ experiment_id, camera_ids: ["cam0", "cam1"] })
+
+8. Python: run_sync_analysis()
+   → stream SyncStatus { stage: "dot_tracking", camera_id: "cam0", progress: 0..1 }
+   → stream SyncStatus { stage: "dot_tracking", camera_id: "cam1", progress: 0..1 }
+   → stream SyncStatus { stage: "linear_fit", ... }
+   → write sync.json
+   → stream SyncStatus { stage: "complete" }
+
+9. Node.js: forward SyncStatus events via WebSocket to React UI
+   React UI: display sync quality report (R², residual RMS, sync accuracy)
+
+10. React UI: transition to Ball Selection screen (next module group)
+```
+
+### 7.4 Error Propagation
+
+| Error                   | Origin          | Propagation                                                                   | User Action                                |
+| ----------------------- | --------------- | ----------------------------------------------------------------------------- | ------------------------------------------ |
+| `PermissionDeniedError` | `getUserMedia`  | Caught in `acquireCamera()`; UI shows camera permission instructions          | Grant permission and reload                |
+| `UnsupportedCodecError` | `MediaRecorder` | Caught in `createRecorder()`; UI shows browser not supported message          | Use Chrome or Safari                       |
+| HTTP upload failure     | Network         | `VideoUploader` → retry 3×; then error UI                                     | Check WiFi; tap Retry                      |
+| `ffmpeg` exit non-zero  | Node.js         | WebSocket `FFMPEG_FAILED` → React UI error                                    | Re-record (corrupted video)                |
+| `SyncDotNotFoundError`  | Python          | gRPC `SyncStatus { stage: "error", error_msg }` → Node → WebSocket → React UI | Re-record with dot visible                 |
+| `SyncFitQualityError`   | Python          | Same as above                                                                 | Re-record; check laptop screen orientation |
+| `MissingCameraError`    | Python          | Same as above                                                                 | Wait for both uploads to complete          |
+
+### 7.5 Timeouts
+
+| Operation                    | Timeout              | Action on Expiry                      |
+| ---------------------------- | -------------------- | ------------------------------------- |
+| Upload per camera            | 10 minutes           | Abort; show retry button              |
+| ffmpeg extraction            | 5 minutes per camera | Kill process; emit `FFMPEG_FAILED`    |
+| SAM2 dot tracking per camera | 30 minutes           | Kill; emit `SYNC_TIMEOUT`             |
+| gRPC call total              | 70 minutes           | gRPC deadline exceeded; log and retry |
+
+---
+
+## 8. Edge Cases & Failure Handling
+
+### 8.1 Dot Not Visible in Frame
+
+**Description:** Camera is positioned such that the laptop screen strip is not captured, or the strip is too dark (ambient light overrides).
+
+**Detection:** `SyncDotNotFoundError` during seeding (Step E1). SAM2 confidence consistently below 0.5 for > 50% of frames.
+
+**Recovery:** Return error with frame numbers. UI instructs user to re-position camera before re-recording.
+
+**Simulation:** Crop out bottom 120px of test PNG sequence and run seeding — should raise error.
+
+**Log emitted:** `SYNC_DOT_NOT_FOUND { camera_id, searched_frames: 30 }`
+
+### 8.2 Dot Wrap Coincides with Ball Roll
+
+**Description:** The dot wraps (resets to left edge) during the ball roll phase, causing a large residual spike in the linear fit in that region.
+
+**Detection:** Large residual outlier at a frame where the dot wraps. The TheilSen fit is robust to this.
+
+**Recovery:** Wrap events are naturally handled as outliers by TheilSen regression. No special action needed.
+
+**Log emitted:** `SYNC_WRAP_DETECTED { camera_id, frame_idx }` for each detected wrap.
+
+### 8.3 Camera Drops Frames Mid-Recording
+
+**Description:** `MediaRecorder` silently drops frames (e.g., due to CPU overload). This produces a gap in the video container timestamps but ffmpeg `-vsync 0` still extracts the frames sequentially.
+
+**Detection:** Residual spike in the linear fit at the drop location. The fit slope (true FPS) remains valid because it is computed from the majority of frames.
+
+**Effect on sync:** A dropped frame means one frame index corresponds to a larger-than-expected time delta. The master timestamp array will have an incorrect entry at that index.
+
+**Mitigation:** The physics engine uses true timestamps only for velocity fitting windows; a single dropped frame may cause one flagged low-confidence point (from ball tracking), which the user corrects manually.
+
+**Quantification:** At 30fps, a single dropped frame introduces a 33ms error at that specific frame. If the dropped frame is not within the velocity fitting window, there is zero impact on physics results.
+
+**Log emitted:** `POTENTIAL_FRAME_DROP { camera_id, frame_idx, residual_px }` when residual > 3σ.
+
+### 8.4 iOS MediaRecorder Produces Incorrect Container Timestamps
+
+**Description:** Known iOS Safari bug where `.mp4` container timestamps drift or reset mid-recording.
+
+**Detection:** `ffmpeg` extracts fewer frames than expected, or frame PNG files have unexpected gaps.
+
+**Recovery:** The sync algorithm does NOT rely on container timestamps at all — it uses only frame index (sequential integer) and the linear fit. Container timestamp bugs do not affect sync accuracy.
+
+**Log emitted:** `CONTAINER_TIMESTAMP_WARNING { camera_id, expected_duration_s, actual_duration_s }` if they differ by > 5%.
+
+### 8.5 Only One Camera Available (Single-Camera Mode)
+
+**Description:** User is running a single-camera planar experiment.
+
+**Detection:** `camera_ids` in `SyncRequest` contains only `["cam0"]`.
+
+**Recovery:** Run sync analysis on cam0 only. `sync.json` has only `cameras.cam0`. `phase_offset_ms` for cam0 is 0.0 by definition. Physics engine proceeds in single-camera mode.
+
+**No error emitted.** Single-camera mode is a first-class supported configuration.
+
+### 8.6 Laptop Tab Backgrounded During Recording (Metronome Freeze)
+
+**Description:** Browser throttles `requestAnimationFrame` when tab is not in focus. The dot freezes.
+
+**Detection:** Long horizontal stretch of constant x-position in the camera recording. SAM2 will still track the stationary dot, but the linear fit will have near-zero slope during that window.
+
+**Recovery:** The constant-position window is detected as a regime with slope ≈ 0, which is a large deviation from the global slope. TheilSen regression will discount this window. However, if the freeze duration exceeds 50% of the recording, fit quality degrades unacceptably.
+
+**Prevention:** Keep the laptop browser tab in focus. UI shows a warning overlay if the tab loses focus during recording.
+
+**Log emitted:** `METRONOME_FREEZE_DETECTED { duration_ms }` if > 500ms constant-x region detected.
+
+### 8.7 Clock Drift Exceeds 1000 ppm
+
+**Description:** Phone clock drifts more than 1ms per second relative to true time.
+
+**Detection:** The linear fit slope encodes the exact true FPS. If `|true_fps - nominal_fps| / nominal_fps > 0.002` (2000 ppm), log a warning.
+
+**Impact:** The master timestamp array automatically corrects for any measured drift, regardless of magnitude. Even 10000 ppm drift is fully corrected.
+
+**Log emitted:** `HIGH_CLOCK_DRIFT_DETECTED { camera_id, ppm: ... }`
+
+---
+
+## 9. Accuracy & Error Sources
+
+### 9.1 Sources of Sync Error
+
+| Source                         | Magnitude (estimate) | Mitigation                                                |
+| ------------------------------ | -------------------- | --------------------------------------------------------- |
+| SAM2 centroid error            | ±0.3–0.5 px          | Sub-pixel weighted centroid; SAM2 mask quality            |
+| Linear fit residuals           | ±0.3–0.5 px RMS      | TheilSen regression; long fitting window (>90 frames)     |
+| Camera lens rolling shutter    | ±0.1 ms per line     | Not corrected (CMOS phone cameras); treated as systematic |
+| Laptop screen refresh jitter   | ±0.5 ms              | Not corrected; dominated by above                         |
+| `performance.now()` resolution | ±0.1 ms (browsers)   | Sufficient; not a bottleneck                              |
+
+### 9.2 Error Propagation to Phase Offset
+
+```
+σ(phase_offset_ms) = σ(t_zero_ms_cam0)² + σ(t_zero_ms_cam1)²  [root-sum-squares]
+
+σ(t_zero_ms_cam{i}) = (residual_rms_px / slope_px_per_frame) / true_fps * 1000.0
+                     ≈ (0.5 / 20.0) / 30.0 * 1000.0
+                     = 0.025 frame / 30.0 fps * 1000.0
+                     = 0.83 ms  [per camera]
+
+σ(phase_offset_ms) = sqrt(0.83² + 0.83²) ≈ 1.17 ms  [worst case at 0.5px residual]
+
+At 0.3px residual (typical):
+σ(phase_offset_ms) = sqrt(0.5² + 0.5²) ≈ 0.70 ms
+
+With 90 frames per sweep (3s at 30fps) and the fit uses the intercept,
+the uncertainty is further reduced by the leverage of many frames:
+σ(intercept) = residual_rms * sqrt(Σn²/N) / (N * slope)  [OLS intercept uncertainty]
+This typically reduces to < 0.5ms in practice.
+```
+
+**Design target: sync accuracy < 0.5ms achievable with > 90 sync frames and < 0.3px residual RMS.**
+
+### 9.3 Rolling Shutter
+
+Phone cameras use CMOS rolling shutters. A 30fps 1080p phone typically has a row readout time of ~15–25ms, meaning the top and bottom of the frame are captured at different times within the ~33ms inter-frame period.
+
+**Impact on dot tracking:** The dot is in the bottom strip of the frame. All frames of both cameras capture the dot at the same fixed Y-position (bottom strip). Rolling shutter delay at the bottom of the frame is consistent and constant across all frames, so it introduces a fixed bias (not a random error) into the sync dot intercept.
+
+**Impact on physics:** The ball is tracked at varying Y-positions in the frame (since it moves). Rolling shutter introduces a position-dependent timing error of up to ~10ms for a ball at the top of the frame vs the dot at the bottom. This is a known systematic error; quantification is out of scope for this module but should be documented in the physics accuracy budget.
+
+### 9.4 Validation of Sync Accuracy
+
+The sync accuracy is empirically measurable from the `sync.json` itself:
+
+1. `fit_residual_rms_px` — lower is better; target < 0.5px
+2. `fit_r_squared` — target > 0.99
+3. `sync_accuracy_ms` — the propagated 1σ uncertainty on the phase offset; target < 0.5ms
+
+---
+
+## 10. Testing Strategy
+
+### 10.1 Unit Tests
+
+**[A] CameraConstraintManager:**
+
+- Mock `navigator.mediaDevices.getUserMedia` to return a stream with `frameRate: 30, width: 1920`.
+- Assert `actualSettings` populated correctly.
+- Test `OverconstrainedError` fallback: mock first call to throw, second to succeed.
+- Test `NotAllowedError`: assert `PermissionDeniedError` thrown and not caught internally.
+
+**[B] MediaRecorderController:**
+
+- Mock `MediaRecorder` global with a fake that fires `ondataavailable` with a 100-byte Blob, then `onstop`.
+- Assert final Blob size = sum of chunk sizes.
+- Assert `durationMs` > 0.
+- Test `UnsupportedCodecError`: mock `isTypeSupported` to return `false` for all candidates.
+
+**[C] VideoUploader:**
+
+- Mock `XMLHttpRequest` to return 200 with valid JSON after `onprogress`.
+- Assert `onProgress` callback called with increasing `loaded` values.
+- Test retry logic: mock 500 twice, then 200; assert 3 attempts made.
+
+**[D] VisualMetronomeRenderer:**
+
+- Mock `HTMLCanvasElement.getContext('2d')` to return a spy.
+- Call `renderFrame(timestamp)` with various timestamps.
+- Assert `arc()` called with x-values in `[DOT_RADIUS, canvasWidth - DOT_RADIUS]`.
+- Assert x is monotonically increasing within a cycle.
+- Assert wrap detection: x resets after `dotCycleS` seconds.
+
+**[E1] DotSeeder:**
+
+- Provide synthetic PNG with white circle at known position.
+- Assert seeded (cx, cy) within 2px of known position.
+- Provide PNG with no bright pixels; assert `SyncDotNotFoundError`.
+
+**[E2] SAM2 DotTracker:**
+
+- Provide 30 synthetic frames with a white dot at positions `x = 10*n` for `n=0..29`.
+- Mock SAM2 predictor to return binary masks with dot at correct positions.
+- Assert `dot_x_positions` ≈ `[0, 10, 20, ..., 290]` ± 0.5px.
+
+**[E3] LinearFitter:**
+
+- Input: `frame_indices = [0..99]`, `dot_x_positions = 10.0*n + 5.0 + noise(σ=0.2)`.
+- Assert `slope ≈ 10.0 ± 0.1`, `intercept ≈ 5.0 ± 0.5`.
+- Assert `r_squared > 0.999`.
+- Input with 5% outliers (simulated wrap events): assert slope still correct within 1%.
+
+**[E4] PhaseOffsetExtractor:**
+
+- Input: `fit_cam0 = {slope: 20.0, intercept: 0.0}`, `fit_cam1 = {slope: 19.95, intercept: 50.0}`, `fps_cam0 = 30.0`, `fps_cam1 = 29.92`.
+- Assert `phase_offset_ms` matches analytically computed expected value ± 0.1ms.
+
+**[E5] TimestampArrayBuilder:**
+
+- Input: `frame_count=10`, `true_fps=30.0`, `phase_offset_ms=13.74`.
+- Assert output = `[13.74, 47.11, 80.47, 113.84, ...]` ± 0.01ms.
+- Assert monotonically increasing.
+
+### 10.2 Integration Tests
+
+**Phone PWA → Node.js upload:**
+
+- Start a local Express server.
+- Construct a synthetic `Blob` (1 MB random bytes).
+- Run `VideoUploader.upload()`.
+- Assert file written to temp directory with correct size.
+
+**Node.js ffmpeg extraction:**
+
+- Provide a real 5-second `.webm` file (pre-recorded test fixture).
+- Run `ffmpeg` extraction pipeline.
+- Assert PNG files created, zero-padded filenames, all decodable by OpenCV.
+
+**Full Python sync pipeline:**
+
+- Provide two synthetic 90-frame PNG sequences with a white dot at known positions.
+- Cam0: x = 15.0\*n + 10.0 (slope=15, intercept=10)
+- Cam1: x = 14.98\*n + 25.0 (slope=14.98, intercept=25) — simulating slightly different FPS and phase offset
+- Run `run_sync_analysis()`.
+- Assert `sync.json` written.
+- Assert `cameras.cam1.phase_offset_ms` matches expected value (derived analytically from inputs) ± 0.5ms.
+- Assert `fit_r_squared > 0.999` for both cameras.
+
+### 10.3 Deterministic Synthetic Tests
+
+**Known-offset synthetic dataset:**
+
+- Generate two video sequences in Python using OpenCV:
+  - 1800 frames each (60s at 30fps)
+  - White dot at x = 480 \* (n / fps) mod canvas_width, rendered pixel-perfect
+  - Camera 1 starts 16.67ms (0.5 frame) later → phase offset = 0.5 frames
+- Run sync analysis.
+- Assert `phase_offset_ms ≈ 16.67 ± 0.5ms`.
+- Assert `sync_accuracy_ms < 0.5`.
+
+**Clock drift synthetic dataset:**
+
+- Generate cam0 at exactly 30.000fps, cam1 at 29.970fps (1000 ppm slow).
+- Run sync analysis.
+- Assert `true_fps_cam1 ≈ 29.970 ± 0.01fps`.
+
+### 10.4 Real-World Validation
+
+1. Record two phones simultaneously showing a stopwatch app (accurate to 10ms) in the same frame as the sync dot.
+2. Run sync analysis → get `timestamp_ms` arrays.
+3. Compare timestamps from sync.json against stopwatch digits read by OCR.
+4. Acceptable tolerance: < 2ms.
+
+---
+
+## 11. Implementation Plan (Step-by-Step Build Order)
+
+Each step is independently testable and produces an observable output.
+
+### Step 1: MediaRecorder capture on phone PWA
+
+**Deliverable:** Phone records a 10s video locally and saves the Blob to device memory.
+**Test:** Record → `console.log(blob.size)` shows non-zero size; play back in `<video>` element.
+**Files:** `packages/frontend/src/lib/mediaRecorder.ts` — subcomponents A and B.
+
+### Step 2: Video upload to Node.js
+
+**Deliverable:** Blob is POSTed to Node.js and written to `/experiments/{id}/raw/cam0.webm`.
+**Test:** `curl -X POST` with a test webm file; verify file appears on disk.
+**Files:** `packages/signaling/src/upload.ts`; Node.js route `POST /api/upload-video`.
+**Dependency:** Step 1.
+
+### Step 3: ffmpeg frame extraction on Node.js
+
+**Deliverable:** After upload, Node.js spawns ffmpeg; PNG sequence appears in `/experiments/{id}/frames/cam0/`.
+**Test:** Upload a 5-second test webm; verify ~150 PNG files created, each readable by `cv2.imread`.
+**Files:** `packages/signaling/src/ffmpeg.ts`.
+**Dependency:** Step 2.
+
+### Step 4: Visual Metronome renderer on laptop
+
+**Deliverable:** Canvas element in React shows white dot sweeping left-to-right at constant speed.
+**Test:** Visual inspection; measure dot position at `t=0`, `t=1s`, `t=2s` using browser dev tools canvas screenshot. Assert linearity.
+**Files:** `packages/frontend/src/components/VisualMetronome.tsx`, `packages/frontend/src/lib/metronome.ts`.
+**Dependency:** None (independent).
+
+### Step 5: SAM2 dot seeding (Python)
+
+**Deliverable:** Given a PNG frame directory, `seed_dot()` returns (cx, cy) within 2px of the actual dot position.
+**Test:** Unit test with synthetic PNG (§10.1 E1).
+**Files:** `packages/cv-service/sync/dot_tracker.py` — `seed_dot()` function only.
+**Dependency:** Step 3 (for real frames); synthetic frames for unit test.
+
+### Step 6: SAM2 dot tracking (Python)
+
+**Deliverable:** `track_dot()` returns `DotTrackingResult` with x-positions matching the dot trajectory.
+**Test:** Synthetic 90-frame PNG sequence (§10.3); assert positions ± 0.5px.
+**Files:** `packages/cv-service/sync/dot_tracker.py` — `track_dot()`.
+**Dependency:** Step 5.
+
+### Step 7: Linear fit (Python)
+
+**Deliverable:** `fit_dot_trajectory()` recovers slope and intercept from noisy dot position data, robust to wrap outliers.
+**Test:** Unit test (§10.1 E3); TheilSen with synthetic data.
+**Files:** `packages/cv-service/sync/timestamp_array.py` — `fit_dot_trajectory()`.
+**Dependency:** Step 6.
+
+### Step 8: Phase offset and true FPS (Python)
+
+**Deliverable:** `compute_sync_parameters()` recovers sub-frame phase offset from two fit results.
+**Test:** Unit test (§10.1 E4); deterministic synthetic test (§10.3).
+**Files:** `packages/cv-service/sync/timestamp_array.py` — `compute_sync_parameters()`.
+**Dependency:** Step 7.
+
+### Step 9: Master timestamp array and sync.json (Python)
+
+**Deliverable:** `run_sync_analysis()` writes a valid `sync.json` for a two-camera experiment.
+**Test:** Integration test (§10.2 Python pipeline); validate JSON schema; assert `timestamp_ms` monotonic.
+**Files:** `packages/cv-service/sync/timestamp_array.py` — `build_timestamp_array()`, `write_sync_json()`, `run_sync_analysis()`.
+**Dependency:** Steps 7 and 8.
+
+### Step 10: gRPC integration (Node.js → Python)
+
+**Deliverable:** Node.js calls `RunSyncAnalysis` after ffmpeg completes; Python streams progress events; UI shows sync quality report.
+**Test:** End-to-end integration test using two synthetic camera recordings.
+**Files:** `packages/signaling/src/grpc-client.ts`; `packages/cv-service/grpc_server.py`; `proto/physics.proto` — add `RunSyncAnalysis`.
+**Dependency:** Steps 3 and 9.
+
+### Step 11: Full end-to-end validation
+
+**Deliverable:** Two phones record the Visual Metronome; `sync.json` generated; `sync_accuracy_ms < 0.5` verified against stopwatch reference.
+**Test:** Real-world validation (§10.4).
+**Dependency:** Steps 1–10 all complete.
+
+---
+
+## 12. Performance Considerations
+
+### 12.1 Recording Phase (Phone PWA)
+
+| Metric                         | Value                                                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Memory per second of recording | ~12.5 MB (100 Mbps / 8 bits)                                                                                                      |
+| Memory for 60s recording       | ~750 MB — this is the practical maximum for phone RAM                                                                             |
+| Recommendation                 | For experiments > 30s, issue a warning; for > 120s, show a hard limit message                                                     |
+| Mitigation                     | 1-second `timeslice` on `MediaRecorder` avoids accumulating one giant Blob; however all chunks are still held in RAM until upload |
+
+### 12.2 Upload Phase
+
+| Metric                                   | Value                             |
+| ---------------------------------------- | --------------------------------- |
+| File size for 60s at 100 Mbps            | 750 MB                            |
+| Upload time on local WiFi at 100 Mbps    | ~60 seconds                       |
+| Upload time on laptop hotspot at 50 Mbps | ~120 seconds                      |
+| Upload time on venue WiFi (variable)     | Unknown — user should use hotspot |
+
+### 12.3 ffmpeg Extraction
+
+| Metric                                     | Value                                                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Time to extract 1800 frames (60s, 30fps)   | ~5–15 seconds (local NVMe disk)                                                                                                       |
+| Output PNG size per frame (1080p lossless) | ~3–6 MB → ~9 GB for 1800 frames                                                                                                       |
+| Disk space requirement (two cameras)       | ~18 GB per 60s experiment                                                                                                             |
+| Mitigation                                 | PNG extraction is required for SAM2; frames can be deleted after tracking if disk space is constrained (add cleanup step to Sprint 6) |
+
+### 12.4 SAM2 Dot Tracking
+
+| Metric                                   | Value                                                        |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| Time per frame (SAM2 large model, GPU)   | ~50–100ms                                                    |
+| Total time for 1800 frames (one camera)  | ~90–180 seconds                                              |
+| Total time for both cameras (sequential) | ~3–6 minutes                                                 |
+| VRAM required                            | ~8 GB (sam2_hiera_large)                                     |
+| Fallback if no GPU                       | sam2_hiera_small (~4 GB VRAM) or CPU (~500ms/frame, ~15 min) |
+
+### 12.5 Bandwidth (WebRTC Live Preview)
+
+The live preview stream is NOT used for data capture. Bitrate should be aggressively constrained to avoid contending with the upload:
+
+```javascript
+// In WebRTC sender constraints:
+sender.setParameters({
+  encodings: [{ maxBitrate: 500_000 }], // 500 kbps max
+});
+```
+
+---
+
+## 13. Observability
+
+### 13.1 Logging
+
+All log entries include: `{ timestamp_iso, experiment_id, camera_id, module, level, message, data }`.
+
+| Event                     | Level | Module          | Key Data Fields                                            |
+| ------------------------- | ----- | --------------- | ---------------------------------------------------------- |
+| Camera acquired           | INFO  | camera_manager  | `actualSettings: { width, height, frameRate, facingMode }` |
+| Camera acquisition failed | ERROR | camera_manager  | `errorType, attempts`                                      |
+| Recording started         | INFO  | media_recorder  | `cameraId, mimeType, startTimeMs`                          |
+| Recording stopped         | INFO  | media_recorder  | `cameraId, durationMs, blobSizeBytes, chunkCount`          |
+| Upload progress           | DEBUG | video_uploader  | `cameraId, loaded, total, progressPct`                     |
+| Upload complete           | INFO  | video_uploader  | `cameraId, storedPath, durationMs`                         |
+| Upload failed             | ERROR | video_uploader  | `cameraId, attempt, httpStatus, errorMsg`                  |
+| ffmpeg started            | INFO  | ffmpeg          | `cameraId, inputPath, outputDir`                           |
+| ffmpeg complete           | INFO  | ffmpeg          | `cameraId, frameCount, durationMs`                         |
+| ffmpeg failed             | ERROR | ffmpeg          | `cameraId, exitCode, stderr`                               |
+| Sync dot seeded           | INFO  | dot_tracker     | `cameraId, frameIdx, cx, cy`                               |
+| Sync dot not found        | ERROR | dot_tracker     | `cameraId, searchedFrames`                                 |
+| Dot tracking progress     | DEBUG | dot_tracker     | `cameraId, frameIdx, progress`                             |
+| Potential frame drop      | WARN  | dot_tracker     | `cameraId, frameIdx, residualPx`                           |
+| Metronome freeze detected | WARN  | dot_tracker     | `cameraId, durationMs`                                     |
+| Linear fit complete       | INFO  | timestamp_array | `cameraId, slope, intercept, rSquared, residualRmsPx`      |
+| Fit quality error         | ERROR | timestamp_array | `cameraId, rSquared, errorMsg`                             |
+| Phase offset computed     | INFO  | timestamp_array | `phaseOffsetMs, syncAccuracyMs`                            |
+| High clock drift          | WARN  | timestamp_array | `cameraId, ppm`                                            |
+| sync.json written         | INFO  | timestamp_array | `outputPath, cam0FrameCount, cam1FrameCount`               |
+
+### 13.2 Metrics (Prometheus-compatible, for future observability)
+
+```
+physicscapture_sync_accuracy_ms{experiment_id}        gauge — < 0.5 target
+physicscapture_fit_r_squared{experiment_id, camera_id} gauge — > 0.99 target
+physicscapture_fit_residual_rms_px{experiment_id, camera_id} gauge — < 0.5 target
+physicscapture_true_fps{experiment_id, camera_id}     gauge — expected 28–62
+physicscapture_phase_offset_ms{experiment_id}         gauge — sub-frame equivalent
+physicscapture_upload_duration_ms{experiment_id, camera_id} histogram
+physicscapture_ffmpeg_duration_ms{experiment_id, camera_id} histogram
+physicscapture_sam2_tracking_duration_ms{experiment_id, camera_id} histogram
+```
+
+### 13.3 Debug Hooks
+
+**Visual sync validation overlay (React UI):**
+After sync.json is written, the UI can display a sync quality panel:
+
+```
+Camera 0: 29.971 fps  |  R² = 0.9998  |  residual = 0.41px
+Camera 1: 29.964 fps  |  R² = 0.9997  |  residual = 0.52px
+Phase offset: 13.74 ms  |  Sync accuracy: ±0.18 ms  ✓
+```
+
+**Dot trajectory plot (matplotlib, debug only):**
+
+```python
+# packages/cv-service/sync/debug.py
+def plot_dot_trajectory(tracking: DotTrackingResult, fit: LinearFitResult):
+    plt.figure()
+    plt.plot(tracking.frame_indices, tracking.dot_x_positions, 'b.', label='SAM2')
+    n_range = np.linspace(tracking.frame_indices[0], tracking.frame_indices[-1], 1000)
+    plt.plot(n_range, fit.slope * n_range + fit.intercept, 'r-', label='Linear fit')
+    plt.xlabel('Frame index')
+    plt.ylabel('Dot X position (px)')
+    plt.title(f'{tracking.camera_id} — R²={fit.r_squared:.4f}, RMS={fit.residual_rms:.3f}px')
+    plt.legend()
+    plt.savefig(f'debug_{tracking.camera_id}_dot_trajectory.png')
+```
+
+**Raw timestamp dump:**
+
+```python
+# Debug: print first 10 timestamps per camera after sync.json generation
+for cam_id, cam_sync in result.cameras.items():
+    print(f"{cam_id} timestamps[0:10]: {cam_sync.timestamp_ms[:10].tolist()}")
+```
+
+---
+
+## 14. Future Improvements
+
+### 14.1 What Was Simplified
+
+| Simplification                                     | Reason                               | Future Upgrade Path                                                            |
+| -------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------ |
+| Cameras processed sequentially by SAM2             | Avoid VRAM contention                | Run on separate GPU processes if multi-GPU available                           |
+| Phase offset computed from intercept extrapolation | Simple; works well for linear motion | Use cross-correlation of dot trajectories for redundancy check                 |
+| Rolling shutter not corrected                      | Complex to measure; small effect     | Add per-camera rolling shutter parameter from device specs                     |
+| Single sync dot                                    | Simple to seed and track             | Two dots at different speeds would over-determine the clock model              |
+| TheilSen regression                                | Robust but slower than OLS           | RANSAC with OLS inner fit for speed (if analysis time is a bottleneck)         |
+| No real-time sync check                            | Post-hoc only                        | Add a real-time "dot detected" confidence indicator in the UI during recording |
+
+### 14.2 120fps Native App Path
+
+If 120fps capture becomes necessary (unlocks < 8ms frame period vs 33ms at 30fps), the phone client can be replaced with a Swift AVCaptureSession app. The interface contract is unchanged: the app uploads a single video file to `POST /api/upload-video`. The Visual Metronome and sync analysis pipeline require no modifications.
+
+### 14.3 Hardware Sync Option
+
+A future hardware sync flash (LED triggered by the laptop) could replace the Visual Metronome. The LED would produce a single bright frame in both camera sequences simultaneously. This would yield ~1-frame (33ms) accuracy without the linear fitting step — substantially less accurate than the current approach. The Visual Metronome achieves better accuracy with no additional hardware.
+
+---
+
+_Implementation plan version 1.0 — Capture & Sync module group_  
+_Derived from Overall Technical Plan v1.2_

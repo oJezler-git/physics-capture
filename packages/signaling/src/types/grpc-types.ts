@@ -37,6 +37,7 @@ export interface BallSeed {
 export interface TrackingRequest {
   experiment_id: string;
   seeds: BallSeed[];
+  model_id?: string;
 }
 
 export interface TrackedPoint {

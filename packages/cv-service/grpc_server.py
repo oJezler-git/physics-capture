@@ -65,6 +65,20 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
 
     async def TrackBalls(self, request, context):
         logger.info(f"TrackBalls called for experiment {request.experiment_id}")
+        
+        # Determine target model
+        requested_model = request.model_id or os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
+        
+        # Hot-swap tracker if model changed
+        if not hasattr(self, "current_model_id") or self.current_model_id != requested_model:
+            logger.info(f"[CV] Switching model from {getattr(self, 'current_model_id', 'None')} to {requested_model}")
+            try:
+                self.tracker = SAM2Tracker(model_id=requested_model)
+                self.current_model_id = requested_model
+            except Exception as e:
+                logger.error(f"[CV] Failed to load model {requested_model}: {e}")
+                # Fallback to existing or ignore - servicer stays alive
+        
         experiment_id = request.experiment_id
         seeds = request.seeds
         

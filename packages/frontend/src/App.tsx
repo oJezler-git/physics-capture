@@ -10,6 +10,7 @@ import { RecordingPage } from './pages/RecordingPage';
 import { TrackingPage } from './pages/TrackingPage';
 import { ResultsPage } from './pages/ResultsPage';
 import { PhonePage } from './pages/PhonePage';
+import { DebugPage } from './pages/DebugPage';
 import { useSessionStore } from './stores/sessionStore';
 import { useCalibrationStore } from './stores/calibrationStore';
 import { useTrackingStore } from './stores/trackingStore';
@@ -173,6 +174,7 @@ function App() {
               }
             />
             <Route path="/phone" element={<PhonePage />} />
+            <Route path="/debug" element={<DebugPage />} />
           </Routes>
         </main>
       </div>

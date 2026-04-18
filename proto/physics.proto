@@ -62,6 +62,7 @@ message CalibrationStatus {
 message TrackingRequest {
   string           experiment_id = 1;
   repeated BallSeed seeds        = 2;   // user click per ball per camera
+  optional string  model_id      = 3;
 }
 
 message BallSeed {

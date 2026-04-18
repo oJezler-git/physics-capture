@@ -105,6 +105,26 @@ const detectOutboundIPv4 = (timeoutMs = 500) =>
 // REST API for file handling
 app.use(express.json());
 
+// Global request logger
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.url}`);
+  next();
+});
+
+app.get("/api/experiments", async (req, res) => {
+  try {
+    console.log("[API] Listing experiments from:", EXPERIMENTS_DIR);
+    const entries = await fs.promises.readdir(EXPERIMENTS_DIR, { withFileTypes: true });
+    const experiments = entries
+      .filter((e) => e.isDirectory() && e.name !== "temp")
+      .map((e) => e.name);
+    res.json(experiments);
+  } catch (err) {
+    console.error("[API] Failed to list experiments:", err);
+    res.status(500).json({ error: "Failed to list experiments" });
+  }
+});
+
 app.get("/api/network/host-hint", async (req, res) => {
   try {
     const candidates = getPrivateIPv4Candidates();
@@ -155,6 +175,7 @@ app.post("/api/calibration/profiles", async (req, res) => {
     res.status(500).json({ error: "Failed to save profile" });
   }
 });
+
 
 import { runCalibration } from "./grpc-client.js";
 
@@ -331,7 +352,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
 
 app.post("/api/track", async (req, res) => {
   try {
-    const { experiment_id, seeds, start_frame_idx, end_frame_idx } = req.body as {
+    const { experiment_id, seeds, start_frame_idx, end_frame_idx, model_id } = req.body as {
       experiment_id?: string;
       seeds?: Array<{
         ball_id: number;
@@ -342,6 +363,7 @@ app.post("/api/track", async (req, res) => {
       }>;
       start_frame_idx?: number;
       end_frame_idx?: number;
+      model_id?: string;
     };
 
     if (!experiment_id || !Array.isArray(seeds) || seeds.length === 0) {
@@ -377,7 +399,7 @@ app.post("/api/track", async (req, res) => {
     let latestProgress = 0;
     let statusCount = 0;
 
-    for await (const status of trackBalls({ experiment_id, seeds })) {
+    for await (const status of trackBalls({ experiment_id, seeds, model_id })) {
       if (end_frame_idx !== undefined && status.frame > end_frame_idx) {
         break;
       }
@@ -453,16 +475,12 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
     if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
       return res.status(400).json({ error: "Invalid experiment id" });
     }
-
     if (!/^\d+$/.test(cameraId)) {
       return res.status(400).json({ error: "Invalid camera id" });
     }
 
-    if (!/^\d{6}\.jpg$/i.test(frameFile)) {
-      return res.status(400).json({ error: "Invalid frame filename" });
-    }
-
-    const framePath = path.resolve(
+    // Support both numeric-only (new) and frame_ prefixed (old) formats
+    let framePath = path.join(
       EXPERIMENTS_DIR,
       experimentId,
       "frames",
@@ -470,12 +488,24 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       frameFile,
     );
 
-    const expectedPrefix = path.resolve(EXPERIMENTS_DIR, experimentId, "frames");
-    if (framePath !== expectedPrefix && !framePath.startsWith(`${expectedPrefix}${path.sep}`)) {
-      return res.status(400).json({ error: "Invalid frame path" });
+    // Backward compatibility check
+    if (!existsSync(framePath) && /^\d{6}\.jpg$/i.test(frameFile)) {
+      const legacyPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "frames",
+        `cam${cameraId}`,
+        `frame_${frameFile}`
+      );
+      if (existsSync(legacyPath)) {
+        framePath = legacyPath;
+      }
     }
 
+    console.log("[API] Serving frame:", framePath);
+
     if (!existsSync(framePath)) {
+      console.warn("[API] Frame not found at:", framePath);
       return res.status(404).json({ error: "Frame not found" });
     }
 
@@ -583,6 +613,6 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Orchestration backend listening on port ${PORT}`);
+server.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`Orchestration backend listening on port ${PORT} at 0.0.0.0`);
 });

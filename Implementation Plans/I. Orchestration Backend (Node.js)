@@ -1,0 +1,1596 @@
+# Node.js Orchestration Backend — Full Implementation Plan
+
+**Module:** I. Orchestration Backend (Node.js)  
+**Plan version:** 1.0  
+**Source system plan version:** 1.2 (MediaRecorder migration, Visual Metronome sync)
+
+---
+
+## 0. Relevant Context Extraction
+
+### 0.1 Upstream Dependencies (Who Provides Inputs)
+
+| Upstream                                      | What it provides                                                                                               | Transport                                                                                          |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Phone PWA (React, iOS/Android Safari)         | SDP offers, ICE candidates (signaling), `.webm`/`.mp4` video file (post-recording), MediaStream (live preview) | WebSocket (signaling); HTTP multipart POST (file upload); WebRTC data channel (live preview relay) |
+| Desktop UI (React + Vite, same machine)       | SDP answers, ICE candidates (signaling), job submission commands, user ball seed coordinates                   | WebSocket                                                                                          |
+| Python CV Service (FastAPI + gRPC, localhost) | gRPC streaming status responses, gRPC physics results                                                          | gRPC over localhost TCP                                                                            |
+
+### 0.2 Downstream Consumers (Who Uses Outputs)
+
+| Downstream                   | What it consumes                                                        | Transport         |
+| ---------------------------- | ----------------------------------------------------------------------- | ----------------- |
+| Desktop UI                   | WebRTC live preview relay, tracking status, physics results, frame list | WebSocket; HTTP   |
+| Python CV Service            | Path to extracted PNG frame directory, experiment metadata, ball seeds  | gRPC              |
+| Filesystem (`/experiments/`) | Raw video files, extracted PNG sequences, metadata JSON, result JSON    | Disk I/O          |
+| `better-sqlite3` DB          | Experiment records, camera parameters, job status                       | In-process SQLite |
+
+### 0.3 Required Data Formats (Exact Structures)
+
+**Phone → Node upload POST:**
+
+```
+POST /upload/:experimentId/:cameraId
+Content-Type: multipart/form-data
+Field: video (binary, .webm or .mp4)
+```
+
+**ffmpeg output:** lossless PNG files at:
+
+```
+/experiments/{experimentId}/frames/cam{N}/frame_{%06d}.png
+```
+
+where `{%06d}` is 1-based, zero-padded to 6 digits (e.g. `frame_000001.png`).
+
+**gRPC messages:** defined in `proto/physics.proto` (see §3.3).
+
+**Experiment metadata JSON** (`metadata.json`):
+
+```json
+{
+  "experimentId": "string (UUID v4)",
+  "createdAt": "ISO 8601 string",
+  "cameras": [
+    {
+      "cameraId": 0,
+      "label": "string",
+      "uploadedFile": "cam0.webm",
+      "frameCount": 900,
+      "extractionCompleteAt": "ISO 8601 string"
+    }
+  ],
+  "balls": [{ "ballId": 0, "massGrams": 42.0, "massUncertaintyGrams": 1.0 }],
+  "sessionNotes": "string"
+}
+```
+
+### 0.4 Execution Environments
+
+| Environment                      | Role                                                         |
+| -------------------------------- | ------------------------------------------------------------ |
+| Node.js 20 LTS (PC)              | This module — all subcomponents                              |
+| Browser / PWA (iPhone)           | Sends SDP/ICE, streams live preview, records + uploads video |
+| Browser (Desktop Chrome/Safari)  | Receives live preview, submits jobs, shows results           |
+| Python 3.11 (localhost)          | Runs CV pipeline — external, connected via gRPC              |
+| `ffmpeg` (system binary, `PATH`) | Frame extraction — child process spawned by Node             |
+
+### 0.5 Hardware Constraints
+
+| Constraint           | Value                                                        | Implication                                                       |
+| -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Camera frame rate    | 30fps (iOS PWA cap)                                          | PNG sequence at ~30 frames/sec; 900 frames for a 30-sec recording |
+| Video bitrate        | 100 Mbps (MediaRecorder setting)                             | ~375 MB per 30-sec `.webm` file; single upload after recording    |
+| Network (phone → PC) | Local WiFi or laptop hotspot, LAN only                       | No internet. Throughput ~50–200 Mbps; upload takes 15–60 sec      |
+| PC storage           | Lossless PNG sequence for a 1080p/30fps 30-sec clip ≈ 2–5 GB | Extraction is disk-bound; `/experiments/` must have ≥ 20 GB free  |
+| ffmpeg               | Must be on `PATH`; version ≥ 4.4                             | Verified at startup                                               |
+| Concurrency          | Single-user local system                                     | No multi-tenancy required; job queue depth = 1–4 jobs             |
+
+### 0.6 Timing / Accuracy Constraints
+
+- **WebRTC signaling latency:** < 500ms round-trip (LAN). Not accuracy-sensitive.
+- **Live preview latency:** best-effort; acceptable 100–500ms. Used only for visual confirmation, not for timing.
+- **ffmpeg extraction:** must use `-vsync 0` (passthrough) to preserve all source frames exactly. Must NOT re-encode or drop frames.
+- **Frame file naming:** must be 1-based, zero-padded to 6 digits to match Python's glob pattern.
+- **Upload integrity:** Node must verify multipart upload is complete before invoking ffmpeg. Partial files must be rejected and cleaned up.
+
+### 0.7 Explicit Assumptions
+
+1. Only one active recording session at a time. The job queue handles serial processing.
+2. `ffmpeg` is installed and accessible at `PATH`. The server checks this at startup and refuses to start if not found.
+3. Up to **2 cameras** per experiment (extensible but not required to support more now).
+4. The Python CV service is already running (started by docker-compose) when Node starts gRPC calls.
+5. The desktop browser and Node server are on the same machine (localhost). Phone connects over LAN.
+6. The `simple-peer` library is used only in the **browser** (frontend). Node acts as the signaling relay, not as a WebRTC peer endpoint itself.
+7. WebSocket connections use the `ws` library, not socket.io.
+8. All timestamps stored in ISO 8601 UTC strings for readability in JSON; internally represented as Unix epoch milliseconds (`number`).
+9. The experiment DB (`better-sqlite3`) is a local file at `/experiments/experiments.db`. It is the single source of truth for experiment lifecycle state.
+10. No authentication, no TLS (LAN-only deployment).
+
+### 0.8 Missing / Ambiguous Details — Resolved Here
+
+| Ambiguity                                                     | Resolution                                                                                                                                                                 |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| How does Node know which camera a phone is uploading for?     | `cameraId` (0 or 1) is a URL path parameter: `POST /upload/:experimentId/:cameraId`                                                                                        |
+| Does Node wait for both cameras before triggering extraction? | Extraction runs per-camera immediately after each upload completes. Python CV job is only submitted after all expected cameras have finished extraction.                   |
+| How many WebSocket connections are expected?                  | One persistent connection per client (desktop UI, each phone). All multiplexed over a single `ws.Server`.                                                                  |
+| gRPC error handling on Python service unavailability          | If gRPC call fails to connect, job is marked FAILED in DB, error forwarded to UI via WebSocket. No automatic retry.                                                        |
+| Live preview: does Node re-encode or relay?                   | Node relays raw WebRTC signaling messages only (SDP, ICE). The browser-to-browser WebRTC data channel carries the MediaStream peer-to-peer; Node is NOT on the media path. |
+
+### 0.9 Module Boundaries
+
+**INSIDE this module:**
+
+- Express HTTP server + routing
+- WebSocket server (signaling relay + status relay)
+- WebRTC signaling state machine (room/session management, SDP/ICE relay)
+- multer-based file upload handler
+- ffmpeg child process manager
+- Job queue (in-memory + DB-backed)
+- gRPC client (to Python service)
+- `better-sqlite3` experiment database
+- File system layout enforcement (`/experiments/`)
+
+**OUTSIDE this module (treated as black boxes):**
+
+- React frontend (browser) — any SDP/ICE generation
+- Python CV service — any vision or physics computation
+- `ffmpeg` binary internals
+- Network transport (WiFi, TCP stack)
+
+---
+
+## 1. Module Definition
+
+### 1.1 Precise Responsibility
+
+The Node.js Orchestration Backend is the **single coordinator** between all system components. It:
+
+1. Relays WebRTC signaling messages so phones and desktop can establish peer connections for live preview.
+2. Receives post-recording video files from phones via HTTP.
+3. Invokes `ffmpeg` to extract lossless PNG frame sequences from uploaded videos.
+4. Queues and dispatches computer vision jobs to the Python service via gRPC.
+5. Relays job progress and results back to the desktop UI via WebSocket.
+6. Persists experiment lifecycle state and metadata in SQLite.
+
+### 1.2 Non-Goals
+
+- Node does **not** perform any CV computation.
+- Node does **not** re-encode video or generate thumbnails.
+- Node does **not** sit on the WebRTC media path (no media relay; pure signaling).
+- Node does **not** manage calibration logic; it stores calibration JSON files produced by Python.
+- Node does **not** implement authentication or TLS.
+
+### 1.3 Inputs / Outputs (Fully Typed)
+
+#### Inputs
+
+| Name               | Type          | Units | Shape    | Constraints                                                            |
+| ------------------ | ------------- | ----- | -------- | ---------------------------------------------------------------------- |
+| `experimentId`     | `string`      | —     | scalar   | UUID v4, 36 chars                                                      |
+| `cameraId`         | `uint8`       | —     | scalar   | 0 or 1                                                                 |
+| `videoFile`        | `Buffer`      | bytes | variable | `.webm` or `.mp4`; max 1 GB                                            |
+| `signalingMessage` | `JSON object` | —     | scalar   | `{ type, from, to, payload }` — see §3.2                               |
+| `jobRequest`       | `JSON object` | —     | scalar   | `{ experimentId, seeds }` — see §3.3                                   |
+| `ballConfig`       | `JSON array`  | —     | `[1–3]`  | `{ ballId: uint8, massGrams: float64, massUncertaintyGrams: float64 }` |
+
+#### Outputs
+
+| Name               | Type             | Units  | Shape           | Constraints                                   |
+| ------------------ | ---------------- | ------ | --------------- | --------------------------------------------- |
+| PNG frame files    | Binary files     | bytes  | `N × H × W × 3` | Lossless PNG; zero-padded filenames           |
+| `frameCount`       | `uint32`         | frames | scalar          | > 0; equals actual file count                 |
+| `jobStatusMessage` | `JSON object`    | —      | scalar          | `{ event, jobId, progress, data }` — see §3.4 |
+| `experimentRecord` | SQLite row       | —      | scalar          | See §3.5                                      |
+| `gRPCResponse`     | Protobuf message | —      | streaming       | `TrackingStatus` / `PhysicsResult`            |
+
+---
+
+## 2. Internal Architecture
+
+The backend is decomposed into **7 subcomponents**. Each is independently initialised and testable.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   Node.js Orchestration Backend              │
+│                                                              │
+│  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │
+│  │  HTTP Server │   │  WS Server   │   │  SignalingHub  │   │
+│  │  (Express 5) │   │  (ws)        │   │               │   │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬────────┘   │
+│         │                  │                   │            │
+│  ┌──────▼────────────────────────────────────▼─┐           │
+│  │              Message Router / Dispatcher      │           │
+│  └────┬──────────┬──────────┬──────────┬────────┘           │
+│       │          │          │          │                     │
+│  ┌────▼──┐  ┌────▼──┐  ┌───▼──┐  ┌───▼───┐                │
+│  │Upload │  │ffmpeg │  │ Job  │  │gRPC   │                │
+│  │Handler│  │Manager│  │Queue │  │Client │                │
+│  └────┬──┘  └────┬──┘  └───┬──┘  └───┬───┘                │
+│       │          │          │          │                     │
+│  ┌────▼──────────▼──────────▼──────────▼──┐                │
+│  │          Experiment DB (SQLite)          │                │
+│  └─────────────────────────────────────────┘                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 2.1 HTTP Server (Express 5)
+
+**Purpose:** Accept REST requests from phones and desktop UI.
+
+**Inputs:**
+
+- `POST /experiments` — create new experiment `{ balls: BallConfig[] }`
+- `POST /upload/:experimentId/:cameraId` — receive video file
+- `GET /experiments/:experimentId` — fetch experiment metadata
+- `GET /experiments/:experimentId/frames/:cameraId` — list extracted frame filenames
+- `POST /jobs` — submit CV job `{ experimentId, seeds }`
+- `GET /experiments` — list all experiments
+
+**Outputs:** JSON responses; 400/404/500 on error.
+
+**Core logic:** Standard Express routing. Uses `multer` for multipart parsing on upload route. All route handlers are `async`; errors propagate to a central error middleware.
+
+**Failure modes:**
+
+- File too large → 413
+- Experiment not found → 404
+- multer disk storage full → 500 + cleanup
+
+### 2.2 WebSocket Server (ws)
+
+**Purpose:** Multiplexed real-time channel for signaling and status messages.
+
+**Inputs:** JSON messages from any connected client (phone or desktop).
+
+**Outputs:** JSON messages broadcast or unicast to connected clients.
+
+**Core logic:**
+
+- All clients connect to `ws://localhost:3001` (or same port as HTTP with upgrade).
+- Each connection is identified by a client ID (UUID assigned on connect, sent in first message).
+- Messages are typed via a `{ type: string }` discriminant field.
+- Signaling messages are forwarded to `SignalingHub`.
+- Job status messages originate from `JobQueue` and are broadcast to desktop clients.
+
+**Failure modes:**
+
+- Client disconnect mid-session → `SignalingHub` removes peer from room; open jobs are not cancelled (phone may reconnect to upload).
+- Malformed JSON → connection receives `{ type: "error", message: "invalid JSON" }`, not disconnected.
+
+### 2.3 SignalingHub
+
+**Purpose:** Stateful relay for WebRTC SDP and ICE candidate exchange.
+
+**Inputs:**
+
+- `{ type: "join", roomId, clientId, role }` — role is `"phone"` or `"desktop"`
+- `{ type: "offer", from, to, sdp }` — SDP offer
+- `{ type: "answer", from, to, sdp }` — SDP answer
+- `{ type: "ice", from, to, candidate }` — ICE candidate
+
+**Outputs:** Forwarded messages unicast to the target client.
+
+**Core logic:**
+
+- Maintains `rooms: Map<roomId, { phone: WsClient[], desktop: WsClient[] }>`.
+- On "offer": validates sender is in room, forwards to all `desktop` clients in room.
+- On "answer": forwards to target `phone` client.
+- On "ice": forwards to target `clientId`.
+- Rooms are created lazily on first `join`; destroyed when all members disconnect.
+
+**Failure modes:**
+
+- Target client not connected → message silently dropped; sender receives `{ type: "peer-unavailable", to }`.
+
+### 2.4 Upload Handler
+
+**Purpose:** Receive post-recording video files from phones; persist to disk; trigger ffmpeg extraction.
+
+**Inputs:** Multipart form POST with single `video` field; path params `experimentId`, `cameraId`.
+
+**Outputs:**
+
+- Saved file: `/experiments/{experimentId}/raw/cam{cameraId}.webm`
+- DB update: camera upload status → `UPLOADED`
+- Triggers `FfmpegManager.extract(experimentId, cameraId)`
+
+**Core logic:**
+
+```
+1. Validate experimentId exists in DB (404 if not)
+2. Validate cameraId ∈ {0,1} (400 if not)
+3. multer writes to disk with deterministic filename
+4. On multer completion:
+   a. Update DB: set camera[cameraId].uploadStatus = "UPLOADED", uploadedAt = now()
+   b. Write/merge metadata.json
+   c. Call FfmpegManager.extract(experimentId, cameraId) [async, do not await here]
+5. Respond HTTP 202 Accepted immediately
+```
+
+**Failure modes:**
+
+- Partial upload (connection dropped) → multer `fileFilter` or error handler deletes temp file; DB not updated.
+- Disk full → multer error; respond 500; clean up partial file.
+
+### 2.5 FfmpegManager
+
+**Purpose:** Invoke `ffmpeg` to extract lossless PNG sequences from uploaded video files.
+
+**Inputs:**
+
+- `experimentId: string`
+- `cameraId: uint8`
+- Resolved path: `/experiments/{experimentId}/raw/cam{cameraId}.webm` (or `.mp4`)
+
+**Outputs:**
+
+- PNG files at `/experiments/{experimentId}/frames/cam{cameraId}/frame_{%06d}.png`
+- `frameCount: uint32`
+- DB update: `extractionStatus = "COMPLETE"`, `frameCount`
+- Emits `"extraction-complete"` event to `JobQueue`
+
+**Core logic:**
+
+```
+1. mkdir -p /experiments/{experimentId}/frames/cam{cameraId}/
+2. Spawn child_process:
+   ffmpeg -i <inputPath> -vsync 0 -f image2 frames/cam{N}/frame_%06d.png
+3. Pipe stderr to logger (ffmpeg progress output)
+4. On exit code 0:
+   a. Count PNG files: frameCount = glob(frames/cam{N}/*.png).length
+   b. Update DB: extractionStatus = "COMPLETE", frameCount
+   c. Emit "extraction-complete" { experimentId, cameraId, frameCount }
+5. On non-zero exit:
+   a. Update DB: extractionStatus = "FAILED", extractionError = stderr tail
+   b. Emit "extraction-failed" { experimentId, cameraId, error }
+```
+
+**Failure modes:**
+
+- `ffmpeg` not on PATH → detected at startup (see §11); server refuses to start.
+- Corrupted video file → ffmpeg exits non-zero; error captured; DB updated; UI notified.
+- Partial run interrupted → on restart, check DB state and re-run if `extractionStatus = "IN_PROGRESS"` for > 5 minutes.
+
+### 2.6 JobQueue
+
+**Purpose:** Serialise CV job submissions to the Python service; prevent parallel gRPC calls.
+
+**Inputs:**
+
+- `{ jobId, experimentId, seeds, ballConfig }` — from HTTP `POST /jobs`
+
+**Outputs:**
+
+- gRPC call submitted to `GrpcClient`
+- Status events emitted to WebSocket server for relay to UI
+
+**Core logic:**
+
+- Backed by an in-memory queue (array) + DB persistence.
+- At most 1 job executing at a time. If a job is active, new jobs are queued.
+- On job start: DB status → `RUNNING`, emit `{ type: "job-started", jobId }` to WS.
+- On gRPC stream message: emit `{ type: "job-progress", jobId, frame, progress, points }` to WS.
+- On gRPC stream end: DB status → `COMPLETE`, emit `{ type: "job-complete", jobId, results }` to WS.
+- On gRPC error: DB status → `FAILED`, emit `{ type: "job-failed", jobId, error }` to WS.
+
+**Failure modes:**
+
+- Python service unreachable → gRPC call returns UNAVAILABLE; job → FAILED immediately, UI notified.
+- Job cancelled by user (future) → graceful gRPC cancel + DB update.
+
+### 2.7 GrpcClient
+
+**Purpose:** Type-safe bridge between Node.js and the Python PhysicsCapture gRPC service.
+
+**Inputs:** Typed request messages per RPC method (see §3.3).
+
+**Outputs:** Typed streaming or unary response messages; errors as `GrpcError`.
+
+**Core logic:**
+
+- Loads `physics.proto` at startup via `@grpc/proto-loader`.
+- Creates single `PhysicsCapture` client stub targeting `localhost:50051` (or configurable via env).
+- Exposes three wrapper methods: `runCalibration()`, `trackBalls()`, `computePhysics()`.
+- All streaming RPCs expose an `AsyncIterator` interface for clean consumption by `JobQueue`.
+
+**Failure modes:**
+
+- Connection refused → surfaced as `GrpcError { code: UNAVAILABLE }`.
+- Proto load failure → fatal startup error.
+- Stream cancelled → iterator throws; propagated to `JobQueue`.
+
+### 2.8 ExperimentDB
+
+**Purpose:** Persist experiment lifecycle state; enable resume after crash/restart.
+
+**Inputs:** All CRUD operations from other subcomponents.
+
+**Outputs:** Typed row objects; query results.
+
+**Core logic:**
+
+- Single `better-sqlite3` database at `/experiments/experiments.db`.
+- Opened synchronously at startup. All operations are synchronous (better-sqlite3 is sync-only).
+- Schema: see §3.5.
+- Provides typed data-access functions (no raw SQL in other modules).
+
+---
+
+## 3. Data Contracts & Interfaces
+
+### 3.1 HTTP API
+
+```typescript
+// POST /experiments
+interface CreateExperimentRequest {
+  balls: Array<{
+    ballId: number; // uint8, 0–2
+    massGrams: number; // float64, > 0
+    massUncertaintyGrams: number; // float64, > 0, default 1.0
+  }>;
+  sessionNotes?: string;
+}
+interface CreateExperimentResponse {
+  experimentId: string; // UUID v4
+  createdAt: string; // ISO 8601 UTC
+}
+
+// POST /upload/:experimentId/:cameraId
+// Content-Type: multipart/form-data
+// Field: video (binary)
+// Response: 202 Accepted
+interface UploadAckResponse {
+  message: "upload received";
+  experimentId: string;
+  cameraId: number;
+}
+
+// POST /jobs
+interface SubmitJobRequest {
+  experimentId: string;
+  type: "tracking" | "physics" | "calibration";
+  seeds?: Array<{
+    cameraId: number; // 0 or 1
+    frameIdx: number; // uint32, 0-based
+    x: number; // float32, pixels
+    y: number; // float32, pixels
+    ballId: number; // 0–2
+  }>;
+}
+interface SubmitJobResponse {
+  jobId: string; // UUID v4
+  status: "queued" | "running";
+}
+```
+
+### 3.2 WebSocket Message Protocol
+
+All messages are UTF-8 encoded JSON. Every message has a `type: string` discriminant.
+
+```typescript
+// Client → Server (from phone or desktop)
+type ClientMessage =
+  | {
+      type: "identify";
+      clientId: string;
+      role: "phone" | "desktop";
+      experimentId: string;
+    }
+  | {
+      type: "join";
+      roomId: string;
+      clientId: string;
+      role: "phone" | "desktop";
+    }
+  | { type: "offer"; from: string; to: string; sdp: RTCSessionDescriptionInit }
+  | { type: "answer"; from: string; to: string; sdp: RTCSessionDescriptionInit }
+  | { type: "ice"; from: string; to: string; candidate: RTCIceCandidateInit };
+
+// Server → Client (status events to desktop)
+type ServerMessage =
+  | { type: "peer-joined"; roomId: string; clientId: string; role: string }
+  | { type: "peer-left"; roomId: string; clientId: string }
+  | { type: "peer-unavailable"; to: string }
+  | { type: "upload-received"; experimentId: string; cameraId: number }
+  | { type: "extraction-started"; experimentId: string; cameraId: number }
+  | {
+      type: "extraction-complete";
+      experimentId: string;
+      cameraId: number;
+      frameCount: number;
+    }
+  | {
+      type: "extraction-failed";
+      experimentId: string;
+      cameraId: number;
+      error: string;
+    }
+  | { type: "job-started"; jobId: string; experimentId: string }
+  | {
+      type: "job-progress";
+      jobId: string;
+      frame: number;
+      progress: number;
+      points: TrackedPointWS[];
+    }
+  | { type: "job-complete"; jobId: string; results: PhysicsResultWS }
+  | { type: "job-failed"; jobId: string; error: string }
+  | { type: "error"; message: string };
+
+interface TrackedPointWS {
+  ballId: number;
+  cameraId: number;
+  x: number; // float32, pixels
+  y: number; // float32, pixels
+  confidence: number; // float32, 0.0–1.0
+}
+```
+
+### 3.3 gRPC Interface
+
+The canonical definition lives in `proto/physics.proto`. The Node gRPC client is generated from it. Reproduced here for completeness:
+
+```protobuf
+syntax = "proto3";
+package physicscapture;
+
+service PhysicsCapture {
+  rpc RunCalibration (CalibrationRequest)  returns (stream CalibrationStatus);
+  rpc TrackBalls     (TrackingRequest)     returns (stream TrackingStatus);
+  rpc ComputePhysics (PhysicsRequest)      returns (PhysicsResult);
+}
+
+message CalibrationRequest {
+  string experiment_id = 1;
+  int32  camera_id     = 2;
+}
+message CalibrationStatus {
+  float  progress        = 1;
+  float  reprojection_error_px = 2;
+  bool   complete        = 3;
+  string error           = 4;
+}
+
+message TrackingRequest {
+  string            experiment_id = 1;
+  repeated BallSeed seeds         = 2;
+}
+message BallSeed {
+  int32 camera_id  = 1;
+  int32 frame_idx  = 2;   // 0-based
+  float x          = 3;   // pixels
+  float y          = 4;   // pixels
+  int32 ball_id    = 5;   // 0–2
+}
+message TrackingStatus {
+  int32                  frame           = 1;
+  float                  progress        = 2;   // 0.0–1.0
+  repeated TrackedPoint  points          = 3;
+  bool                   complete        = 4;
+  string                 error           = 5;
+}
+message TrackedPoint {
+  int32 ball_id    = 1;
+  int32 camera_id  = 2;
+  float x          = 3;
+  float y          = 4;
+  float confidence = 5;
+}
+
+message PhysicsRequest {
+  string experiment_id  = 1;
+  repeated BallMass masses = 2;
+}
+message BallMass {
+  int32 ball_id                 = 1;
+  float mass_kg                 = 2;
+  float mass_uncertainty_kg     = 3;
+}
+message PhysicsResult {
+  repeated BallResult balls  = 1;
+  SystemResult        system = 2;
+  string              error  = 3;
+}
+message BallResult {
+  int32 ball_id               = 1;
+  float v_before              = 2;   // m/s
+  float v_before_uncertainty  = 3;
+  float v_after               = 4;
+  float v_after_uncertainty   = 5;
+  float momentum_before       = 6;
+  float momentum_before_uncertainty = 7;
+  float momentum_after        = 8;
+  float momentum_after_uncertainty  = 9;
+}
+message SystemResult {
+  float total_momentum_before             = 1;
+  float total_momentum_before_uncertainty = 2;
+  float total_momentum_after              = 3;
+  float total_momentum_after_uncertainty  = 4;
+  float ke_before                         = 5;
+  float ke_after                          = 6;
+  float conservation_error_pct            = 7;
+  float restitution_coeff                 = 8;
+}
+```
+
+### 3.4 WebSocket Job Status Event Schema
+
+All `job-progress` messages include a `progress` field: `float32` in range `[0.0, 1.0]`, representing fraction of frames processed.
+
+### 3.5 SQLite Schema
+
+```sql
+-- experiments.db
+
+CREATE TABLE experiments (
+  id           TEXT PRIMARY KEY,   -- UUID v4
+  created_at   INTEGER NOT NULL,   -- Unix epoch ms
+  session_notes TEXT,
+  status       TEXT NOT NULL       -- 'CREATED' | 'PARTIAL_UPLOAD' | 'EXTRACTION' | 'READY' | 'PROCESSING' | 'COMPLETE' | 'FAILED'
+    CHECK(status IN ('CREATED','PARTIAL_UPLOAD','EXTRACTION','READY','PROCESSING','COMPLETE','FAILED'))
+);
+
+CREATE TABLE cameras (
+  experiment_id      TEXT NOT NULL REFERENCES experiments(id),
+  camera_id          INTEGER NOT NULL,  -- 0 or 1
+  label              TEXT,
+  upload_status      TEXT NOT NULL DEFAULT 'PENDING'  -- 'PENDING' | 'UPLOADED' | 'FAILED'
+    CHECK(upload_status IN ('PENDING','UPLOADED','FAILED')),
+  uploaded_at        INTEGER,           -- Unix epoch ms, null until uploaded
+  extraction_status  TEXT NOT NULL DEFAULT 'PENDING'  -- 'PENDING' | 'IN_PROGRESS' | 'COMPLETE' | 'FAILED'
+    CHECK(extraction_status IN ('PENDING','IN_PROGRESS','COMPLETE','FAILED')),
+  extraction_started_at INTEGER,
+  extraction_complete_at INTEGER,
+  frame_count        INTEGER,           -- null until extraction complete
+  extraction_error   TEXT,
+  PRIMARY KEY (experiment_id, camera_id)
+);
+
+CREATE TABLE balls (
+  experiment_id           TEXT NOT NULL REFERENCES experiments(id),
+  ball_id                 INTEGER NOT NULL,  -- 0, 1, 2
+  mass_grams              REAL NOT NULL,
+  mass_uncertainty_grams  REAL NOT NULL DEFAULT 1.0,
+  PRIMARY KEY (experiment_id, ball_id)
+);
+
+CREATE TABLE jobs (
+  id             TEXT PRIMARY KEY,   -- UUID v4
+  experiment_id  TEXT NOT NULL REFERENCES experiments(id),
+  type           TEXT NOT NULL,      -- 'tracking' | 'physics' | 'calibration'
+  status         TEXT NOT NULL DEFAULT 'QUEUED'
+    CHECK(status IN ('QUEUED','RUNNING','COMPLETE','FAILED','CANCELLED')),
+  created_at     INTEGER NOT NULL,
+  started_at     INTEGER,
+  completed_at   INTEGER,
+  error          TEXT,
+  result_json    TEXT               -- JSON string of PhysicsResult, null until complete
+);
+```
+
+### 3.6 Filesystem Layout
+
+```
+/experiments/
+  experiments.db             ← SQLite database
+  {experimentId}/
+    metadata.json            ← human-readable summary (mirrors DB state)
+    raw/
+      cam0.webm              ← uploaded video (cam0)
+      cam1.webm              ← uploaded video (cam1, if present)
+    frames/
+      cam0/
+        frame_000001.png     ← 1-based, 6-digit zero-padded, lossless PNG
+        frame_000002.png
+        ...
+      cam1/
+        ...
+    calibration/             ← written by Python service, read back by Node on request
+      cam0_intrinsics.json
+      cam1_intrinsics.json
+      stereo_extrinsics.json
+    results/
+      sync.json              ← written by Python: frame_index → true_ms
+      tracks.json            ← written by Python: ball positions per frame
+      velocities.json        ← written by Python
+      momentum.json          ← written by Python
+```
+
+---
+
+## 4. Algorithmic Implementation
+
+### 4.1 WebRTC Signaling Relay Algorithm
+
+The signaling hub implements a stateless relay; it does not parse SDP or ICE candidates — it forwards them.
+
+```
+STATE:
+  rooms: Map<roomId: string, {
+    members: Map<clientId: string, {
+      ws: WebSocket,
+      role: "phone" | "desktop"
+    }>
+  }>
+  clients: Map<clientId: string, roomId: string>  // reverse index
+
+ON message received from ws client:
+  1. Parse JSON → msg
+  2. If msg.type == "identify":
+       clientId = msg.clientId
+       ws.clientId = clientId  // attach to socket object
+       clients.set(clientId, msg.experimentId)
+       RETURN
+
+  3. If msg.type == "join":
+       roomId = msg.roomId
+       If rooms.has(roomId) == false: rooms.set(roomId, { members: new Map() })
+       room = rooms.get(roomId)
+       room.members.set(msg.clientId, { ws, role: msg.role })
+       clients.set(msg.clientId, roomId)
+       // Notify existing members
+       FOR each (existingId, existing) IN room.members WHERE existingId != msg.clientId:
+         send(existing.ws, { type: "peer-joined", roomId, clientId: msg.clientId, role: msg.role })
+         send(ws, { type: "peer-joined", roomId, clientId: existingId, role: existing.role })
+       RETURN
+
+  4. If msg.type IN ["offer", "answer", "ice"]:
+       roomId = clients.get(msg.from)
+       IF roomId == undefined: send(ws, { type: "error", message: "not in room" }); RETURN
+       room = rooms.get(roomId)
+       target = room.members.get(msg.to)
+       IF target == undefined:
+         send(ws, { type: "peer-unavailable", to: msg.to }); RETURN
+       send(target.ws, msg)  // forward verbatim
+       RETURN
+
+ON ws close:
+  clientId = ws.clientId
+  roomId = clients.get(clientId)
+  IF roomId:
+    room = rooms.get(roomId)
+    room.members.delete(clientId)
+    clients.delete(clientId)
+    // Notify remaining members
+    FOR each (id, member) IN room.members:
+      send(member.ws, { type: "peer-left", roomId, clientId })
+    // Clean up empty rooms
+    IF room.members.size == 0: rooms.delete(roomId)
+```
+
+### 4.2 File Upload + Extraction Pipeline
+
+```
+FUNCTION handleUpload(req, res):
+  1. experimentId = req.params.experimentId
+  2. cameraId = parseInt(req.params.cameraId)  // must be 0 or 1
+
+  3. VALIDATE:
+       IF NOT db.experimentExists(experimentId): return 404
+       IF cameraId NOT IN [0, 1]: return 400
+
+  4. multer runs disk storage:
+       destination = /experiments/{experimentId}/raw/
+       filename = cam{cameraId}.webm  (or .mp4 if mime is video/mp4)
+
+  5. ON multer complete:
+       db.updateCameraUpload(experimentId, cameraId, {
+         upload_status: "UPLOADED",
+         uploaded_at: Date.now()
+       })
+       updateMetadataJson(experimentId)
+       wsBroadcast({ type: "upload-received", experimentId, cameraId })
+
+  6. TRIGGER async (do not await):
+       ffmpegManager.extract(experimentId, cameraId)
+
+  7. RETURN HTTP 202: { message: "upload received", experimentId, cameraId }
+
+
+FUNCTION FfmpegManager.extract(experimentId, cameraId):
+  1. inputPath = resolveInputPath(experimentId, cameraId)
+     // checks for .webm first, then .mp4
+  2. outputDir = /experiments/{experimentId}/frames/cam{cameraId}/
+  3. fs.mkdirSync(outputDir, { recursive: true })
+
+  4. db.updateExtractionStatus(experimentId, cameraId, {
+       extraction_status: "IN_PROGRESS",
+       extraction_started_at: Date.now()
+     })
+  5. wsBroadcast({ type: "extraction-started", experimentId, cameraId })
+
+  6. cmd = ["ffmpeg", "-i", inputPath, "-vsync", "0", "-f", "image2",
+             path.join(outputDir, "frame_%06d.png")]
+     proc = child_process.spawn(cmd[0], cmd.slice(1), { stdio: ["ignore","pipe","pipe"] })
+     // stdout unused; stderr contains ffmpeg progress
+
+  7. stderrChunks = []
+     proc.stderr.on("data", chunk => {
+       stderrChunks.push(chunk)
+       log.debug("ffmpeg", chunk.toString())
+     })
+
+  8. AWAIT proc exit:
+       IF exitCode == 0:
+         pngFiles = fs.readdirSync(outputDir).filter(f => f.endsWith(".png")).sort()
+         frameCount = pngFiles.length
+         IF frameCount == 0:
+           GOTO extraction-failed("ffmpeg produced 0 frames")
+
+         db.updateExtractionStatus(experimentId, cameraId, {
+           extraction_status: "COMPLETE",
+           extraction_complete_at: Date.now(),
+           frame_count: frameCount
+         })
+         updateMetadataJson(experimentId)
+         wsBroadcast({ type: "extraction-complete", experimentId, cameraId, frameCount })
+         jobQueue.emit("extraction-complete", { experimentId, cameraId })
+         RETURN
+
+       ELSE:
+         stderrTail = Buffer.concat(stderrChunks).toString().slice(-2000)
+         db.updateExtractionStatus(experimentId, cameraId, {
+           extraction_status: "FAILED",
+           extraction_error: stderrTail
+         })
+         wsBroadcast({ type: "extraction-failed", experimentId, cameraId, error: stderrTail })
+```
+
+### 4.3 Job Queue Algorithm
+
+```
+STATE:
+  queue: Array<Job>          // ordered FIFO
+  activeJob: Job | null = null
+
+FUNCTION enqueue(jobRequest):
+  jobId = uuid()
+  job = {
+    id: jobId,
+    experimentId: jobRequest.experimentId,
+    type: jobRequest.type,
+    seeds: jobRequest.seeds,
+    status: "QUEUED",
+    createdAt: Date.now()
+  }
+  db.insertJob(job)
+  queue.push(job)
+  tryDispatch()
+  RETURN jobId
+
+
+FUNCTION tryDispatch():
+  IF activeJob != null: RETURN  // another job is running
+  IF queue.length == 0: RETURN
+  job = queue.shift()
+  activeJob = job
+
+  db.updateJob(job.id, { status: "RUNNING", started_at: Date.now() })
+  wsBroadcast({ type: "job-started", jobId: job.id, experimentId: job.experimentId })
+
+  // All extractions must be complete before dispatching
+  cameras = db.getCamerasForExperiment(job.experimentId)
+  notReady = cameras.filter(c => c.extraction_status != "COMPLETE")
+  IF notReady.length > 0:
+    wsBroadcast({ type: "job-failed", jobId: job.id,
+                  error: `Camera ${notReady[0].camera_id} extraction not complete` })
+    db.updateJob(job.id, { status: "FAILED", error: "extraction not complete" })
+    activeJob = null
+    tryDispatch()
+    RETURN
+
+  TRY:
+    IF job.type == "tracking":
+      AWAIT runTrackingJob(job)
+    ELSE IF job.type == "calibration":
+      AWAIT runCalibrationJob(job)
+    ELSE IF job.type == "physics":
+      AWAIT runPhysicsJob(job)
+  CATCH err:
+    handleJobError(job, err)
+  FINALLY:
+    activeJob = null
+    tryDispatch()  // process next job
+
+
+FUNCTION runTrackingJob(job):
+  stream = grpcClient.trackBalls({
+    experiment_id: job.experimentId,
+    seeds: job.seeds.map(s => ({
+      camera_id: s.cameraId,
+      frame_idx: s.frameIdx,
+      x: s.x, y: s.y,
+      ball_id: s.ballId
+    }))
+  })
+  FOR AWAIT msg OF stream:
+    IF msg.error:
+      THROW new Error(msg.error)
+    wsBroadcast({
+      type: "job-progress",
+      jobId: job.id,
+      frame: msg.frame,
+      progress: msg.progress,
+      points: msg.points.map(p => ({
+        ballId: p.ball_id, cameraId: p.camera_id,
+        x: p.x, y: p.y, confidence: p.confidence
+      }))
+    })
+    IF msg.complete: BREAK
+
+  db.updateJob(job.id, { status: "COMPLETE", completed_at: Date.now() })
+  wsBroadcast({ type: "job-complete", jobId: job.id })
+```
+
+### 4.4 gRPC Streaming Consumption Pattern
+
+`@grpc/grpc-js` returns a `ClientReadableStream`. We wrap it as an `AsyncIterator` for clean `for-await` consumption:
+
+```typescript
+function streamToAsyncIterator<T>(
+  stream: ClientReadableStream<T>,
+): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<T> {
+      const queue: T[] = [];
+      let done = false;
+      let error: Error | null = null;
+      let resolve: (() => void) | null = null;
+
+      stream.on("data", (msg: T) => {
+        queue.push(msg);
+        resolve?.();
+        resolve = null;
+      });
+      stream.on("end", () => {
+        done = true;
+        resolve?.();
+        resolve = null;
+      });
+      stream.on("error", (err: Error) => {
+        error = err;
+        resolve?.();
+        resolve = null;
+      });
+
+      return {
+        async next(): Promise<IteratorResult<T>> {
+          while (true) {
+            if (queue.length > 0) {
+              return { value: queue.shift()!, done: false };
+            }
+            if (error) throw error;
+            if (done) return { value: undefined as any, done: true };
+            await new Promise<void>((r) => {
+              resolve = r;
+            });
+          }
+        },
+      };
+    },
+  };
+}
+```
+
+### 4.5 Metadata JSON Maintenance
+
+`metadata.json` is a human-readable snapshot, not the source of truth (DB is). It is written to disk on every state change.
+
+```typescript
+async function updateMetadataJson(experimentId: string): Promise<void> {
+  const exp = db.getExperiment(experimentId);
+  const cameras = db.getCamerasForExperiment(experimentId);
+  const balls = db.getBallsForExperiment(experimentId);
+  const metadata = {
+    experimentId,
+    createdAt: new Date(exp.created_at).toISOString(),
+    status: exp.status,
+    cameras: cameras.map((c) => ({
+      cameraId: c.camera_id,
+      uploadStatus: c.upload_status,
+      uploadedAt: c.uploaded_at ? new Date(c.uploaded_at).toISOString() : null,
+      extractionStatus: c.extraction_status,
+      frameCount: c.frame_count ?? null,
+    })),
+    balls: balls.map((b) => ({
+      ballId: b.ball_id,
+      massGrams: b.mass_grams,
+      massUncertaintyGrams: b.mass_uncertainty_grams,
+    })),
+    sessionNotes: exp.session_notes ?? "",
+  };
+  const filePath = path.join(EXPERIMENTS_DIR, experimentId, "metadata.json");
+  await fs.promises.writeFile(
+    filePath,
+    JSON.stringify(metadata, null, 2),
+    "utf8",
+  );
+}
+```
+
+---
+
+## 5. Execution Model
+
+### 5.1 Invocation Type
+
+| Subcomponent     | Type                                                                      |
+| ---------------- | ------------------------------------------------------------------------- |
+| HTTP Server      | Event-driven (Node.js event loop); all route handlers are `async`         |
+| WebSocket Server | Event-driven; `ws.on("message")`                                          |
+| SignalingHub     | Synchronous relay inside WS message handler                               |
+| Upload Handler   | Async; awaits multer disk write                                           |
+| FfmpegManager    | Async; awaits child process exit via `Promise` wrapper                    |
+| JobQueue         | Event-driven; triggered by `"extraction-complete"` events or `POST /jobs` |
+| GrpcClient       | Async streaming; `AsyncIterator` wraps gRPC `ClientReadableStream`        |
+| ExperimentDB     | Synchronous (better-sqlite3 is sync-only)                                 |
+
+### 5.2 Trigger Conditions
+
+| Trigger                                          | Consequence                                                       |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| Phone connects to WS, sends `join`               | SignalingHub creates/joins room                                   |
+| Phone sends SDP offer                            | SignalingHub relays to desktop                                    |
+| `POST /upload/:experimentId/:cameraId` completes | multer writes file → DB update → ffmpeg spawn                     |
+| ffmpeg exits 0                                   | DB update → WS broadcast → `JobQueue.emit("extraction-complete")` |
+| `POST /jobs` received                            | Job inserted to queue → `tryDispatch()`                           |
+| `extraction-complete` event AND no active job    | `tryDispatch()` processes next queued job                         |
+| gRPC stream message                              | WS broadcast to desktop                                           |
+
+### 5.3 Concurrency Model
+
+Node.js is single-threaded. All concurrency is through the event loop. `child_process.spawn` runs `ffmpeg` in a separate OS process (does not block the event loop). Multiple uploads can proceed in parallel (each is an independent multer write), but `ffmpeg` extraction jobs for the same experiment are serialised (camera 0 and camera 1 may run concurrently since they are independent).
+
+The `JobQueue` is strictly serial: only one gRPC job active at a time.
+
+### 5.4 Timing Model
+
+There are no hard real-time constraints on this module. Latencies are:
+
+- WebRTC signaling: < 500ms LAN round-trip (best-effort).
+- Upload: 15–60 sec for 375 MB video over WiFi.
+- ffmpeg extraction: 30–120 sec for 900 frames at 1080p (I/O bound).
+- gRPC streaming: Python-bound; Node is not the bottleneck.
+- WebSocket status events: < 10ms from gRPC message receipt to WS send.
+
+---
+
+## 6. State & Data Flow
+
+### 6.1 End-to-End Flow Through This Module
+
+```
+1. Desktop creates experiment:
+   POST /experiments { balls }
+   → DB: INSERT experiment + balls
+   → Response: { experimentId }
+
+2. Phone joins signaling room:
+   WS: join { roomId=experimentId, clientId, role="phone" }
+   → SignalingHub: room created, "peer-joined" sent to desktop
+
+3. SDP/ICE exchange (relay only):
+   Phone WS offer → SignalingHub → Desktop WS
+   Desktop WS answer → SignalingHub → Phone WS
+   ICE candidates both directions
+
+4. [Recording happens on phone — no Node involvement]
+
+5. Phone uploads video:
+   POST /upload/{experimentId}/0  multipart video
+   → multer disk write: /experiments/{id}/raw/cam0.webm
+   → DB: camera.upload_status = "UPLOADED"
+   → WS broadcast: "upload-received"
+   → Async: ffmpeg spawned
+
+6. ffmpeg runs:
+   → PNG sequence written to /experiments/{id}/frames/cam0/
+   → DB: extraction_status = "COMPLETE", frame_count = N
+   → WS broadcast: "extraction-complete"
+   → Event emitted to JobQueue
+
+7. Desktop submits tracking job:
+   POST /jobs { experimentId, type:"tracking", seeds:[...] }
+   → DB: INSERT job (status="QUEUED")
+   → tryDispatch() → sends gRPC TrackBalls request
+
+8. gRPC streaming:
+   For each TrackingStatus message from Python:
+   → WS broadcast: "job-progress" { frame, progress, points }
+
+9. gRPC stream ends:
+   → DB: job.status = "COMPLETE"
+   → WS broadcast: "job-complete"
+
+10. Desktop submits physics job:
+    POST /jobs { experimentId, type:"physics" }
+    → gRPC ComputePhysics (unary)
+    → DB: job.result_json = PhysicsResult JSON
+    → WS broadcast: "job-complete" { results }
+```
+
+### 6.2 Intermediate Representations
+
+| Stage            | Representation                             | Location                              |
+| ---------------- | ------------------------------------------ | ------------------------------------- |
+| Pre-upload       | Binary video in phone memory               | Phone (external)                      |
+| Uploaded video   | `.webm`/`.mp4` binary                      | `/experiments/{id}/raw/`              |
+| Extracted frames | Lossless PNG files                         | `/experiments/{id}/frames/cam{N}/`    |
+| DB state         | SQLite rows                                | `/experiments/experiments.db`         |
+| Job status       | WS JSON messages                           | In-flight (not persisted)             |
+| Physics result   | JSON string in DB + `results/*.json` files | Written by Python, referenced by Node |
+
+### 6.3 What is Retained vs Discarded
+
+| Data                  | Retained?                           | Notes                                     |
+| --------------------- | ----------------------------------- | ----------------------------------------- |
+| Raw video             | Yes, indefinitely                   | Required for re-extraction or debugging   |
+| PNG frames            | Yes                                 | Required by Python on every re-run        |
+| ffmpeg stderr         | DB: last 2000 chars on failure only | Not stored on success                     |
+| WS signaling messages | No                                  | Pure relay; not logged                    |
+| gRPC stream messages  | No (forwarded to WS only)           | Full result stored as `result_json` in DB |
+| DB records            | Yes                                 | Permanent until manual deletion           |
+
+---
+
+## 7. Integration Points
+
+### 7.1 Phone PWA ↔ Node
+
+**Entry:** Phone opens WebSocket to `ws://localhost:3001` (or `ws://{laptop-ip}:3001`).
+
+**Sequence (signaling):**
+
+```
+1. Phone WS connect
+2. Phone sends: { type: "join", roomId: experimentId, clientId, role: "phone" }
+3. Node: SignalingHub creates room, notifies desktop
+4. Phone sends: { type: "offer", from: phone.clientId, to: desktop.clientId, sdp }
+5. Node: relays to desktop WS
+6. Desktop sends: { type: "answer", ... }
+7. Node: relays to phone WS
+8. ICE exchange: both directions via Node relay
+```
+
+**Sequence (upload):**
+
+```
+1. Phone POSTs: POST /upload/{experimentId}/0, multipart video
+2. Node: multer writes to disk, responds 202
+3. Node: triggers ffmpeg async
+4. Phone receives 202 → shows "Processing..." in UI
+```
+
+**Error propagation:** HTTP 4xx/5xx on upload errors. WS `{ type: "error" }` for signaling errors.
+
+**Timeouts:** multer upload: no explicit timeout (file could be large); relies on OS TCP keepalive. Phone UI should show progress indicator.
+
+### 7.2 Desktop UI ↔ Node
+
+**Entry:** Desktop opens WebSocket to same server. Sends HTTP REST to create experiments and jobs.
+
+**Sequence (job submission + result):**
+
+```
+1. Desktop: POST /jobs { experimentId, type:"tracking", seeds }
+2. Node: responds 200 { jobId, status:"queued" }
+3. Node: tryDispatch → gRPC call
+4. Node: WS broadcasts "job-started", then "job-progress" stream, then "job-complete"
+5. Desktop: renders tracking overlay
+```
+
+**Error propagation:** WS `{ type: "job-failed", error }`.
+**Retry logic:** None automatic. Desktop UI shows error + "Retry" button that re-calls POST /jobs.
+
+### 7.3 Node ↔ Python (gRPC)
+
+**Entry point:** `JobQueue.runTrackingJob()` / `runCalibrationJob()` / `runPhysicsJob()`
+
+**Exit point:** `stream.on("end")` or unary response
+
+**Call sequence:**
+
+```
+1. JobQueue constructs TrackingRequest { experiment_id, seeds }
+2. grpcClient.trackBalls(request) → ClientReadableStream
+3. streamToAsyncIterator(stream) → for-await loop
+4. Each TrackingStatus message → forwarded to WS
+5. Stream end → job marked COMPLETE
+```
+
+**gRPC connection configuration:**
+
+```typescript
+const client = new PhysicsCaptureClient(
+  "localhost:50051",
+  grpc.credentials.createInsecure(), // LAN only, no TLS
+  {
+    "grpc.keepalive_time_ms": 10000,
+    "grpc.keepalive_timeout_ms": 5000,
+    "grpc.keepalive_permit_without_calls": 1,
+  },
+);
+```
+
+**Error propagation:**
+
+- `UNAVAILABLE`: Python service not running → job → FAILED immediately, WS broadcast.
+- `DEADLINE_EXCEEDED`: Should not occur (no deadline set for tracking jobs; processing is slow by design).
+- `INTERNAL` from Python: Propagated as `job-failed` with error string.
+
+**Retry logic:** None. User must resubmit job. (Python should be started before experiment begins.)
+
+### 7.4 Node ↔ Filesystem
+
+**Entry:** All subcomponents that read/write experiment data.
+
+**Path resolution:**
+
+```typescript
+const EXPERIMENTS_DIR = process.env.EXPERIMENTS_DIR ?? "/experiments";
+
+function experimentDir(id: string): string {
+  return path.join(EXPERIMENTS_DIR, id);
+}
+function rawVideoPath(id: string, camId: number, ext: string): string {
+  return path.join(experimentDir(id), "raw", `cam${camId}.${ext}`);
+}
+function framesDir(id: string, camId: number): string {
+  return path.join(experimentDir(id), "frames", `cam${camId}`);
+}
+```
+
+**Directory creation:** `fs.mkdirSync(..., { recursive: true })` called before any write.
+
+---
+
+## 8. Edge Cases & Failure Handling
+
+### 8.1 Phone Disconnects Mid-Upload
+
+**Detection:** multer `req.on("aborted")` or TCP error.
+**Recovery:** multer partial file is deleted (multer `fileFilter` + error handler). DB state unchanged (still `PENDING`). Phone must retry upload.
+**Simulation:** Kill WiFi on phone mid-upload.
+**Log emitted:** `WARN upload_aborted experimentId cameraId bytesReceived`
+
+### 8.2 ffmpeg Not on PATH
+
+**Detection:** At server startup, `child_process.spawnSync("ffmpeg", ["-version"])`. If `error.code == "ENOENT"`, log FATAL and `process.exit(1)`.
+**Recovery:** User must install ffmpeg. Docker image includes it.
+**Log:** `FATAL ffmpeg_not_found "ffmpeg must be installed and on PATH"`
+
+### 8.3 ffmpeg Exits Non-Zero
+
+**Detection:** `proc.on("exit", code => { if (code !== 0) ... })`
+**Recovery:** DB → `extraction_status = "FAILED"`. WS broadcast `extraction-failed`. UI shows error + stderr tail. User can retry extraction via `POST /experiments/:id/reextract/:cameraId`.
+**Simulation:** Pass a corrupted webm file.
+**Log:** `ERROR ffmpeg_failed experimentId cameraId exitCode stderrTail`
+
+### 8.4 ffmpeg Produces Zero Frames
+
+**Detection:** After successful exit, `glob(framesDir).length === 0`.
+**Recovery:** Treated identically to non-zero exit.
+**Cause:** Video container was valid but had no video stream (audio-only, or codec not supported).
+**Log:** `ERROR ffmpeg_zero_frames experimentId cameraId`
+
+### 8.5 Python gRPC Service Unavailable
+
+**Detection:** gRPC call returns `StatusCode.UNAVAILABLE` immediately.
+**Recovery:** Job → `FAILED`. WS `job-failed`. User must start Python service and retry.
+**Simulation:** Stop Python container, submit job.
+**Log:** `ERROR grpc_unavailable jobId experimentId`
+
+### 8.6 Node Crash / Restart Mid-Extraction
+
+**Detection on restart:** At startup, query DB for any jobs with `extraction_status = "IN_PROGRESS"` and `extraction_started_at < now - 5 min`.
+**Recovery:** Re-spawn ffmpeg for those entries. (Idempotent: overwrite any partial PNGs.)
+**Log:** `WARN recovery_reextract experimentId cameraId`
+
+### 8.7 Node Crash / Restart Mid-Job
+
+**Detection on restart:** Query DB for jobs with `status = "RUNNING"`.
+**Recovery:** Set status to `FAILED` with `error = "server_restart"`. WS will notify on reconnect.
+**Rationale:** gRPC stream is dead after restart; Python may still be processing. For Sprint 1, we do not resume; user retries manually.
+
+### 8.8 Two Cameras, Second Upload Arrives Before First Extraction Completes
+
+**No issue:** Each camera's upload/extract is independent. `tryDispatch()` checks all extractions are complete before submitting to Python.
+
+### 8.9 WebSocket Client Reconnects
+
+**Handling:** Each WS connection is stateless on the server. Reconnecting client re-sends `identify` + `join`. SignalingHub adds them back. They can receive status updates from `POST /jobs` results by polling `GET /experiments/:id` on reconnect.
+
+---
+
+## 9. Accuracy & Error Sources
+
+The Node.js layer introduces **no timing errors** into the physics pipeline. It is not on the measurement path. However, correctness of frame extraction is critical:
+
+### 9.1 ffmpeg Frame Extraction Accuracy
+
+**Critical flag:** `-vsync 0` (passthrough mode). Without this flag, ffmpeg may drop duplicate frames or insert synthetic frames to achieve a target frame rate. With `-vsync 0`, every frame from the source video is extracted exactly once as a PNG, in order.
+
+**Verification:** The `frameCount` returned after extraction must be consistent with the video duration. For a 30-second recording at 30fps, expect ~900 frames ± 2. If `frameCount < expectedMin`, log a warning.
+
+Expected frame count estimation:
+
+```
+expectedMin = floor(fileSizeBytes / (100_000_000 / 8) * 30 * 0.95)
+```
+
+(rough sanity check only — duration from ffprobe is more accurate but adds complexity).
+
+**Frame numbering:** Files are named `frame_%06d.png` where the first frame is `frame_000001.png`. Python must use 1-based indexing when mapping frame filenames to frame indices. This convention must be documented in `metadata.json`.
+
+**PNG lossless guarantee:** ffmpeg's `image2` muxer with `.png` extension always writes lossless PNGs. No quality flags needed.
+
+### 9.2 Error Sources (This Module Only)
+
+| Source                                    | Magnitude               | Impact                     |
+| ----------------------------------------- | ----------------------- | -------------------------- | -------------------------------------- |
+| Frame file numbering off-by-one           | 1 frame = 33ms at 30fps | Would shift all timestamps | Mitigated by consistent 1-based naming |
+| Dropped frames in ffmpeg (if wrong flags) | Variable                | Breaks sync entirely       | Mitigated by `-vsync 0`                |
+| Disk I/O error during PNG write           | Rare                    | Corrupted frame            | Detected: `frameCount` mismatch        |
+
+---
+
+## 10. Testing Strategy
+
+### 10.1 Unit Tests
+
+**ExperimentDB:**
+
+- Insert experiment, read back; verify all fields.
+- Update camera extraction status; verify state transitions.
+- Insert duplicate primary key → expect error.
+- Run in-memory (`:memory:` path for tests).
+
+**SignalingHub:**
+
+- Join room → verify "peer-joined" sent to existing members.
+- Send offer to non-existent peer → verify "peer-unavailable" response.
+- Disconnect → verify "peer-left" sent, room cleaned up.
+- Test with mock `ws.WebSocket` objects (no real network).
+
+**FfmpegManager:**
+
+- Mock `child_process.spawn`. Simulate exit code 0 with 5 PNG files written to temp dir.
+- Verify `frameCount = 5`, DB updated, event emitted.
+- Simulate exit code 1. Verify DB `extraction_status = "FAILED"`, error stored.
+- Verify output path matches `frame_%06d.png` pattern.
+
+**JobQueue:**
+
+- Enqueue 3 jobs. Verify only 1 dispatched at a time.
+- Mock gRPC client. Verify status events emitted in order.
+- Simulate gRPC error. Verify job → FAILED, next job dispatched.
+
+**GrpcClient:**
+
+- `streamToAsyncIterator`: push 3 messages, then end → for-await receives all 3 in order.
+- Stream error → `for-await` throws.
+- Connection refused → `trackBalls` throws `UNAVAILABLE`.
+
+### 10.2 Integration Tests
+
+**Upload → Extraction:**
+
+- Start Express server with real multer.
+- POST a real small `.webm` file (< 1 MB synthetic).
+- Assert PNG files created in output dir.
+- Assert DB updated.
+- Assert WS `extraction-complete` message received.
+
+**Full job pipeline (with mock Python):**
+
+- Start a mock gRPC server that streams 10 `TrackingStatus` messages.
+- Submit job via POST /jobs.
+- Assert 10 WS `job-progress` messages received.
+- Assert DB job status = `COMPLETE`.
+
+### 10.3 Deterministic Synthetic Tests
+
+- `ffmpeg` extraction: use a 1-second synthetic test video (10 frames, 1920×1080, black). Assert `frameCount = 10`, file names `frame_000001.png` through `frame_000010.png`.
+- All tests use a temp directory for `/experiments/`; cleaned up after each test.
+
+### 10.4 Tolerances
+
+| Test                               | Pass Criterion                           |
+| ---------------------------------- | ---------------------------------------- |
+| Frame count for 30-sec 30fps video | 870 ≤ count ≤ 930                        |
+| WS message latency (gRPC → WS)     | < 50ms per message                       |
+| Job queue serialisation            | Zero concurrent active jobs in all tests |
+
+---
+
+## 11. Implementation Plan (Step-by-Step)
+
+Each step is independently testable and produces observable output.
+
+### Step 1 — Project Scaffold
+
+- Initialise `packages/signaling/` with `package.json`, TypeScript config, `tsconfig.json`.
+- Install: `express`, `ws`, `multer`, `better-sqlite3`, `@grpc/grpc-js`, `@grpc/proto-loader`, `uuid`.
+- Install devDeps: `typescript`, `ts-node`, `vitest`, `@types/express`, `@types/ws`, `@types/better-sqlite3`, `@types/multer`.
+- Create `src/server.ts` entry point. Start Express on port 3001. Start ws server on same port.
+- **Observable output:** `curl http://localhost:3001/health` returns `{ status: "ok" }`.
+
+### Step 2 — ExperimentDB
+
+- Implement `src/db.ts` with schema from §3.5.
+- Implement all typed data-access functions: `createExperiment`, `getExperiment`, `updateCameraUpload`, `updateExtractionStatus`, `insertJob`, `updateJob`, `listExperiments`.
+- Unit tests: all CRUD operations, state transitions.
+- **Observable output:** `vitest run db.test.ts` passes.
+
+### Step 3 — Experiment REST API (No ffmpeg yet)
+
+- `POST /experiments` → creates experiment + balls in DB.
+- `GET /experiments/:id` → returns experiment with cameras + balls.
+- `GET /experiments` → list all.
+- **Observable output:** `curl -X POST /experiments -d '{"balls":[{"ballId":0,"massGrams":42,"massUncertaintyGrams":1}]}'` returns `{ experimentId: "..." }`.
+
+### Step 4 — Upload Handler (No ffmpeg yet)
+
+- Configure multer disk storage.
+- `POST /upload/:experimentId/:cameraId` → writes file, updates DB, responds 202.
+- Unit test: POST with a small binary file, assert file written, DB updated.
+- **Observable output:** File appears at `/experiments/{id}/raw/cam0.webm`.
+
+### Step 5 — ffmpeg Startup Check + FfmpegManager
+
+- At server start: `spawnSync("ffmpeg", ["-version"])`, fatal exit if not found.
+- Implement `src/ffmpeg.ts`: `FfmpegManager.extract(experimentId, cameraId)`.
+- Wire into upload handler: trigger extraction after upload.
+- Integration test: upload real 1-second `.webm`, assert PNG sequence written.
+- **Observable output:** PNG files appear at `/experiments/{id}/frames/cam0/`.
+
+### Step 6 — WebSocket Server + SignalingHub
+
+- Implement `src/ws.ts`: `ws.Server` on same port as HTTP.
+- Implement `src/signaling.ts`: `SignalingHub` with room state machine.
+- Unit tests: join/leave, offer relay, peer-unavailable.
+- **Observable output:** Two browser tabs can exchange SDP/ICE via Node relay (verify with WebRTC test page).
+
+### Step 7 — gRPC Client
+
+- Compile `proto/physics.proto` via `@grpc/proto-loader`.
+- Implement `src/grpc-client.ts`: stub creation, `trackBalls()`, `computePhysics()`, `runCalibration()`.
+- Implement `streamToAsyncIterator`.
+- Unit test with mock gRPC server.
+- **Observable output:** `grpcClient.trackBalls(req)` streams messages from a running Python mock.
+
+### Step 8 — JobQueue
+
+- Implement `src/job-queue.ts`: FIFO queue, DB-backed, serial dispatch.
+- Wire gRPC client + WS broadcast.
+- `POST /jobs` route.
+- Integration test: submit job, mock gRPC, assert WS messages.
+- **Observable output:** Desktop WS client receives `job-progress` stream from submitted job.
+
+### Step 9 — End-to-End Smoke Test
+
+- Full flow: create experiment → upload video → extraction → submit tracking job → mock Python streams 100 frames → `job-complete`.
+- Assert: PNG files exist, DB in `COMPLETE` state, all WS events received.
+
+### Step 10 — Edge Case Hardening
+
+- Crash recovery (restart with `IN_PROGRESS` jobs) — as per §8.6.
+- ffmpeg zero-frames detection.
+- Upload abort handling.
+- gRPC reconnect attempt on startup.
+
+---
+
+## 12. Performance Considerations
+
+### 12.1 Time Complexity
+
+| Operation          | Complexity | Notes                               |
+| ------------------ | ---------- | ----------------------------------- |
+| Signaling relay    | O(1)       | Map lookup + WS send                |
+| Job queue dispatch | O(1)       | FIFO queue                          |
+| DB queries         | O(log N)   | SQLite B-tree; N = experiment count |
+
+### 12.2 Memory Usage
+
+| Component               | Estimated Memory                                 |
+| ----------------------- | ------------------------------------------------ |
+| Per WS connection       | ~50 KB (ws library overhead)                     |
+| SignalingHub room state | < 1 KB per room (2 peers)                        |
+| Job queue               | < 100 bytes per queued job                       |
+| multer in-memory buffer | **0** — disk storage mode; file streamed to disk |
+| ffmpeg stderr buffer    | < 10 KB per run                                  |
+| **Total Node process**  | **< 100 MB** (no media data in memory)           |
+
+### 12.3 Bandwidth Usage
+
+| Transfer                                     | Size                      | Duration                    |
+| -------------------------------------------- | ------------------------- | --------------------------- |
+| WS signaling messages                        | < 5 KB total              | Negligible                  |
+| Video upload (100 Mbps 30-sec)               | ~375 MB                   | 15–60 sec on WiFi           |
+| WS job-progress stream (900 frames, 3 balls) | ~900 × 200 bytes = 180 KB | Over Python processing time |
+
+**Critical:** `multer` uses disk storage (not `memoryStorage`). The 375 MB video is never fully in Node.js memory — it is streamed to disk by multer. This is mandatory.
+
+### 12.4 Disk Usage
+
+- Raw video: 375 MB per camera per experiment.
+- PNG sequence (1080p, 900 frames, lossless): ~3–6 GB per camera (this is the dominant cost).
+- Experiment directory total: ~7–13 GB for a 2-camera experiment.
+- `ffmpeg` write speed required: ≥ 100 MB/s (typical SATA SSD: 500 MB/s; NVMe: 2+ GB/s — not a bottleneck).
+
+### 12.5 Bottlenecks
+
+1. **ffmpeg PNG extraction** is I/O and CPU bound. Not Node's problem — it's a subprocess.
+2. **Python gRPC processing** is the dominant latency. Node is a passthrough.
+3. **WiFi upload** is the user-perceived latency. No improvement possible in this module.
+
+---
+
+## 13. Observability
+
+### 13.1 Logging (Structured JSON)
+
+Use a structured logger (e.g. `pino`). All log entries include `{ ts, level, module, experimentId?, cameraId?, jobId? }`.
+
+| Event                              | Level | Fields                                                 |
+| ---------------------------------- | ----- | ------------------------------------------------------ |
+| Server started                     | INFO  | `port`, `ffmpegVersion`                                |
+| ffmpeg not found                   | FATAL | —                                                      |
+| Upload received                    | INFO  | `experimentId`, `cameraId`, `fileSizeBytes`            |
+| Upload aborted                     | WARN  | `experimentId`, `cameraId`, `bytesReceived`            |
+| ffmpeg started                     | INFO  | `experimentId`, `cameraId`, `inputPath`                |
+| ffmpeg progress (every 100 frames) | DEBUG | `experimentId`, `cameraId`, `framesWritten`            |
+| ffmpeg complete                    | INFO  | `experimentId`, `cameraId`, `frameCount`, `durationMs` |
+| ffmpeg failed                      | ERROR | `experimentId`, `cameraId`, `exitCode`, `stderrTail`   |
+| Job queued                         | INFO  | `jobId`, `experimentId`, `type`                        |
+| Job started                        | INFO  | `jobId`, `experimentId`                                |
+| Job progress                       | DEBUG | `jobId`, `frame`, `progress`                           |
+| Job complete                       | INFO  | `jobId`, `durationMs`                                  |
+| Job failed                         | ERROR | `jobId`, `error`                                       |
+| gRPC unavailable                   | ERROR | `jobId`, `grpcStatus`                                  |
+| WS peer joined                     | DEBUG | `clientId`, `role`, `roomId`                           |
+| WS peer left                       | DEBUG | `clientId`, `roomId`                                   |
+
+### 13.2 Metrics (Prometheus-compatible, optional for Sprint 1)
+
+```
+physicscapture_upload_bytes_total{camera_id}        counter
+physicscapture_extraction_duration_seconds{camera_id} histogram
+physicscapture_extraction_frame_count{camera_id}    gauge
+physicscapture_job_duration_seconds{type}           histogram
+physicscapture_active_ws_connections                gauge
+physicscapture_grpc_errors_total{code}              counter
+```
+
+### 13.3 Debug Hooks
+
+- `GET /experiments/:id/frames/:cameraId` — lists all PNG filenames; can be used by UI for frame scrubber.
+- `GET /experiments/:id/jobs` — lists all jobs with status; useful for debugging queue state.
+- `GET /health` — returns `{ status, ffmpegFound, dbPath, activeJob, queueDepth }`.
+- Log level configurable via `LOG_LEVEL` env var (default `info`; set `debug` for development).
+
+---
+
+## 14. Future Improvements
+
+### 14.1 Simplified in This Version
+
+- **No job cancellation:** gRPC streams cannot be cancelled mid-flight in Sprint 1. A cancellation mechanism would require sending a gRPC `Cancel` signal and draining the stream.
+- **No upload resumption:** If upload is interrupted, the full file must be re-sent. Resumable uploads (chunked upload protocol) could be added later.
+- **No multi-user rooms:** SignalingHub assumes 1 phone + 1 desktop per room. Supporting N phones is a straightforward extension (loop over all `phone` members on offer relay).
+- **Serial job queue:** One job at a time. If Python service is upgraded to run parallel requests (e.g. separate workers), the queue could be widened.
+
+### 14.2 Potential Upgrades
+
+- **ffprobe integration:** Run `ffprobe` before extraction to get exact frame count, duration, and codec info. Currently done implicitly from PNG count.
+- **Streaming frame availability:** Notify UI of each PNG as it is written (via a filesystem watcher) rather than only on extraction complete. This would allow the frame scrubber to appear progressively.
+- **Experiment archival:** Zip experiment directory + DB export as `.physicscapture` file for sharing between laptops.
+- **WebRTC TURN relay:** For venue networks that block P2P WebRTC (strict symmetric NAT), add a TURN server. Not needed for hotspot LAN.
+- **gRPC retry with backoff:** If Python service is starting up when job is submitted (within first few seconds of docker-compose), a short retry loop would improve UX.
+
+```
+
+```

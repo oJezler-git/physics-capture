@@ -3,40 +3,42 @@ export interface Point2D {
   y: number;
 }
 
+/**
+ * Converts normalized coordinates (0-1) to pixel coordinates (e.g. for Canvas drawing)
+ */
 export function toCanvas(
-  frameX: number,
-  frameY: number,
-  imageWidth: number,
-  imageHeight: number,
+  normalizedX: number,
+  normalizedY: number,
   canvasWidth: number,
   canvasHeight: number,
 ): Point2D {
   return {
-    x: frameX * (canvasWidth / imageWidth),
-    y: frameY * (canvasHeight / imageHeight),
+    x: normalizedX * canvasWidth,
+    y: normalizedY * canvasHeight,
   };
 }
 
-export function toFrame(
+/**
+ * Converts pixel coordinates (e.g. from mouse click) to normalized coordinates (0-1)
+ */
+export function toNormalized(
   canvasX: number,
   canvasY: number,
-  imageWidth: number,
-  imageHeight: number,
   canvasWidth: number,
   canvasHeight: number,
 ): Point2D {
   return {
-    x: canvasX / (canvasWidth / imageWidth),
-    y: canvasY / (canvasHeight / imageHeight),
+    x: canvasX / canvasWidth,
+    y: canvasY / canvasHeight,
   };
 }
 
 export function findNearestPoint<T extends Point2D>(
   query: Point2D,
   points: T[],
-  maxDistancePx: number,
+  maxDistanceNormalized: number,
 ): T | null {
-  const maxDistanceSquared = maxDistancePx ** 2;
+  const maxDistanceSquared = maxDistanceNormalized ** 2;
   let closest: T | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
 

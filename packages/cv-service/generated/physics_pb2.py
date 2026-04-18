@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rphysics.proto\x12\x11physicscapture.v1\"?\n\x12\x43\x61librationRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12\x12\n\ncamera_ids\x18\x02 \x03(\x05\"\x9c\x01\n\x11\x43\x61librationStatus\x12\x11\n\tcamera_id\x18\x01 \x01(\x05\x12\x32\n\x05stage\x18\x02 \x01(\x0e\x32#.physicscapture.v1.CalibrationStage\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x1d\n\x15reprojection_error_px\x18\x04 \x01(\x02\x12\x0f\n\x07message\x18\x05 \x01(\t\"T\n\x0fTrackingRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12*\n\x05seeds\x18\x02 \x03(\x0b\x32\x1b.physicscapture.v1.BallSeed\"W\n\x08\x42\x61llSeed\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\tcamera_id\x18\x02 \x01(\x05\x12\x11\n\tframe_idx\x18\x03 \x01(\x05\x12\t\n\x01x\x18\x04 \x01(\x02\x12\t\n\x01y\x18\x05 \x01(\x02\"|\n\x0eTrackingStatus\x12\r\n\x05\x66rame\x18\x01 \x01(\x05\x12\x10\n\x08progress\x18\x02 \x01(\x02\x12/\n\x06points\x18\x03 \x03(\x0b\x32\x1f.physicscapture.v1.TrackedPoint\x12\x18\n\x10\x66rame_confidence\x18\x04 \x01(\x02\"\\\n\x0cTrackedPoint\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\tcamera_id\x18\x02 \x01(\x05\x12\t\n\x01x\x18\x03 \x01(\x02\x12\t\n\x01y\x18\x04 \x01(\x02\x12\x12\n\nconfidence\x18\x05 \x01(\x02\"\x8a\x01\n\x0ePhysicsRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12\x33\n\x0c\x62\x61ll_configs\x18\x02 \x03(\x0b\x32\x1d.physicscapture.v1.BallConfig\x12,\n\x04mode\x18\x03 \x01(\x0e\x32\x1e.physicscapture.v1.PhysicsMode\"K\n\nBallConfig\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x0f\n\x07mass_kg\x18\x02 \x01(\x02\x12\x1b\n\x13mass_uncertainty_kg\x18\x03 \x01(\x02\"n\n\rPhysicsResult\x12,\n\x05\x62\x61lls\x18\x01 \x03(\x0b\x32\x1d.physicscapture.v1.BallResult\x12/\n\x06system\x18\x02 \x01(\x0b\x32\x1f.physicscapture.v1.SystemResult\"\xf5\x01\n\nBallResult\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x10\n\x08v_before\x18\x02 \x01(\x02\x12\x1c\n\x14v_before_uncertainty\x18\x03 \x01(\x02\x12\x0f\n\x07v_after\x18\x04 \x01(\x02\x12\x1b\n\x13v_after_uncertainty\x18\x05 \x01(\x02\x12\x17\n\x0fmomentum_before\x18\x06 \x01(\x02\x12#\n\x1bmomentum_before_uncertainty\x18\x07 \x01(\x02\x12\x16\n\x0emomentum_after\x18\x08 \x01(\x02\x12\"\n\x1amomentum_after_uncertainty\x18\t \x01(\x02\"\xb4\x03\n\x0cSystemResult\x12\x1d\n\x15total_momentum_before\x18\x01 \x01(\x02\x12)\n!total_momentum_before_uncertainty\x18\x02 \x01(\x02\x12\x1c\n\x14total_momentum_after\x18\x03 \x01(\x02\x12(\n total_momentum_after_uncertainty\x18\x04 \x01(\x02\x12\x11\n\tke_before\x18\x05 \x01(\x02\x12\x1d\n\x15ke_before_uncertainty\x18\x06 \x01(\x02\x12\x10\n\x08ke_after\x18\x07 \x01(\x02\x12\x1c\n\x14ke_after_uncertainty\x18\x08 \x01(\x02\x12\'\n\x1fmomentum_conservation_error_pct\x18\t \x01(\x02\x12\x33\n+momentum_conservation_error_pct_uncertainty\x18\n \x01(\x02\x12\"\n\x1a\x63oefficient_of_restitution\x18\x0b \x01(\x02\x12.\n&coefficient_of_restitution_uncertainty\x18\x0c \x01(\x02*\x96\x01\n\x10\x43\x61librationStage\x12!\n\x1d\x43\x41LIBRATION_STAGE_UNSPECIFIED\x10\x00\x12\x15\n\x11\x44\x45TECTING_CORNERS\x10\x01\x12\x1a\n\x16\x43\x41LIBRATING_INTRINSICS\x10\x02\x12\x16\n\x12\x43\x41LIBRATING_STEREO\x10\x03\x12\x08\n\x04\x44ONE\x10\x04\x12\n\n\x06\x46\x41ILED\x10\x05*T\n\x0bPhysicsMode\x12\x1c\n\x18PHYSICS_MODE_UNSPECIFIED\x10\x00\x12\x18\n\x14SINGLE_CAMERA_PLANAR\x10\x01\x12\r\n\tSTEREO_3D\x10\x02\x32\x9f\x02\n\x0ePhysicsCapture\x12_\n\x0eRunCalibration\x12%.physicscapture.v1.CalibrationRequest\x1a$.physicscapture.v1.CalibrationStatus0\x01\x12U\n\nTrackBalls\x12\".physicscapture.v1.TrackingRequest\x1a!.physicscapture.v1.TrackingStatus0\x01\x12U\n\x0e\x43omputePhysics\x12!.physicscapture.v1.PhysicsRequest\x1a .physicscapture.v1.PhysicsResultB\x02P\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rphysics.proto\x12\x11physicscapture.v1\"?\n\x12\x43\x61librationRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12\x12\n\ncamera_ids\x18\x02 \x03(\x05\"\x9c\x01\n\x11\x43\x61librationStatus\x12\x11\n\tcamera_id\x18\x01 \x01(\x05\x12\x32\n\x05stage\x18\x02 \x01(\x0e\x32#.physicscapture.v1.CalibrationStage\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x1d\n\x15reprojection_error_px\x18\x04 \x01(\x02\x12\x0f\n\x07message\x18\x05 \x01(\t\"x\n\x0fTrackingRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12*\n\x05seeds\x18\x02 \x03(\x0b\x32\x1b.physicscapture.v1.BallSeed\x12\x15\n\x08model_id\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_model_id\"W\n\x08\x42\x61llSeed\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\tcamera_id\x18\x02 \x01(\x05\x12\x11\n\tframe_idx\x18\x03 \x01(\x05\x12\t\n\x01x\x18\x04 \x01(\x02\x12\t\n\x01y\x18\x05 \x01(\x02\"|\n\x0eTrackingStatus\x12\r\n\x05\x66rame\x18\x01 \x01(\x05\x12\x10\n\x08progress\x18\x02 \x01(\x02\x12/\n\x06points\x18\x03 \x03(\x0b\x32\x1f.physicscapture.v1.TrackedPoint\x12\x18\n\x10\x66rame_confidence\x18\x04 \x01(\x02\"\\\n\x0cTrackedPoint\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\tcamera_id\x18\x02 \x01(\x05\x12\t\n\x01x\x18\x03 \x01(\x02\x12\t\n\x01y\x18\x04 \x01(\x02\x12\x12\n\nconfidence\x18\x05 \x01(\x02\"\x8a\x01\n\x0ePhysicsRequest\x12\x15\n\rexperiment_id\x18\x01 \x01(\t\x12\x33\n\x0c\x62\x61ll_configs\x18\x02 \x03(\x0b\x32\x1d.physicscapture.v1.BallConfig\x12,\n\x04mode\x18\x03 \x01(\x0e\x32\x1e.physicscapture.v1.PhysicsMode\"K\n\nBallConfig\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x0f\n\x07mass_kg\x18\x02 \x01(\x02\x12\x1b\n\x13mass_uncertainty_kg\x18\x03 \x01(\x02\"n\n\rPhysicsResult\x12,\n\x05\x62\x61lls\x18\x01 \x03(\x0b\x32\x1d.physicscapture.v1.BallResult\x12/\n\x06system\x18\x02 \x01(\x0b\x32\x1f.physicscapture.v1.SystemResult\"\xf5\x01\n\nBallResult\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x10\n\x08v_before\x18\x02 \x01(\x02\x12\x1c\n\x14v_before_uncertainty\x18\x03 \x01(\x02\x12\x0f\n\x07v_after\x18\x04 \x01(\x02\x12\x1b\n\x13v_after_uncertainty\x18\x05 \x01(\x02\x12\x17\n\x0fmomentum_before\x18\x06 \x01(\x02\x12#\n\x1bmomentum_before_uncertainty\x18\x07 \x01(\x02\x12\x16\n\x0emomentum_after\x18\x08 \x01(\x02\x12\"\n\x1amomentum_after_uncertainty\x18\t \x01(\x02\"\xb4\x03\n\x0cSystemResult\x12\x1d\n\x15total_momentum_before\x18\x01 \x01(\x02\x12)\n!total_momentum_before_uncertainty\x18\x02 \x01(\x02\x12\x1c\n\x14total_momentum_after\x18\x03 \x01(\x02\x12(\n total_momentum_after_uncertainty\x18\x04 \x01(\x02\x12\x11\n\tke_before\x18\x05 \x01(\x02\x12\x1d\n\x15ke_before_uncertainty\x18\x06 \x01(\x02\x12\x10\n\x08ke_after\x18\x07 \x01(\x02\x12\x1c\n\x14ke_after_uncertainty\x18\x08 \x01(\x02\x12\'\n\x1fmomentum_conservation_error_pct\x18\t \x01(\x02\x12\x33\n+momentum_conservation_error_pct_uncertainty\x18\n \x01(\x02\x12\"\n\x1a\x63oefficient_of_restitution\x18\x0b \x01(\x02\x12.\n&coefficient_of_restitution_uncertainty\x18\x0c \x01(\x02*\x96\x01\n\x10\x43\x61librationStage\x12!\n\x1d\x43\x41LIBRATION_STAGE_UNSPECIFIED\x10\x00\x12\x15\n\x11\x44\x45TECTING_CORNERS\x10\x01\x12\x1a\n\x16\x43\x41LIBRATING_INTRINSICS\x10\x02\x12\x16\n\x12\x43\x41LIBRATING_STEREO\x10\x03\x12\x08\n\x04\x44ONE\x10\x04\x12\n\n\x06\x46\x41ILED\x10\x05*T\n\x0bPhysicsMode\x12\x1c\n\x18PHYSICS_MODE_UNSPECIFIED\x10\x00\x12\x18\n\x14SINGLE_CAMERA_PLANAR\x10\x01\x12\r\n\tSTEREO_3D\x10\x02\x32\x9f\x02\n\x0ePhysicsCapture\x12_\n\x0eRunCalibration\x12%.physicscapture.v1.CalibrationRequest\x1a$.physicscapture.v1.CalibrationStatus0\x01\x12U\n\nTrackBalls\x12\".physicscapture.v1.TrackingRequest\x1a!.physicscapture.v1.TrackingStatus0\x01\x12U\n\x0e\x43omputePhysics\x12!.physicscapture.v1.PhysicsRequest\x1a .physicscapture.v1.PhysicsResultB\x02P\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,32 +32,32 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'physics_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'P\001'
-  _globals['_CALIBRATIONSTAGE']._serialized_start=1673
-  _globals['_CALIBRATIONSTAGE']._serialized_end=1823
-  _globals['_PHYSICSMODE']._serialized_start=1825
-  _globals['_PHYSICSMODE']._serialized_end=1909
+  _globals['_CALIBRATIONSTAGE']._serialized_start=1709
+  _globals['_CALIBRATIONSTAGE']._serialized_end=1859
+  _globals['_PHYSICSMODE']._serialized_start=1861
+  _globals['_PHYSICSMODE']._serialized_end=1945
   _globals['_CALIBRATIONREQUEST']._serialized_start=36
   _globals['_CALIBRATIONREQUEST']._serialized_end=99
   _globals['_CALIBRATIONSTATUS']._serialized_start=102
   _globals['_CALIBRATIONSTATUS']._serialized_end=258
   _globals['_TRACKINGREQUEST']._serialized_start=260
-  _globals['_TRACKINGREQUEST']._serialized_end=344
-  _globals['_BALLSEED']._serialized_start=346
-  _globals['_BALLSEED']._serialized_end=433
-  _globals['_TRACKINGSTATUS']._serialized_start=435
-  _globals['_TRACKINGSTATUS']._serialized_end=559
-  _globals['_TRACKEDPOINT']._serialized_start=561
-  _globals['_TRACKEDPOINT']._serialized_end=653
-  _globals['_PHYSICSREQUEST']._serialized_start=656
-  _globals['_PHYSICSREQUEST']._serialized_end=794
-  _globals['_BALLCONFIG']._serialized_start=796
-  _globals['_BALLCONFIG']._serialized_end=871
-  _globals['_PHYSICSRESULT']._serialized_start=873
-  _globals['_PHYSICSRESULT']._serialized_end=983
-  _globals['_BALLRESULT']._serialized_start=986
-  _globals['_BALLRESULT']._serialized_end=1231
-  _globals['_SYSTEMRESULT']._serialized_start=1234
-  _globals['_SYSTEMRESULT']._serialized_end=1670
-  _globals['_PHYSICSCAPTURE']._serialized_start=1912
-  _globals['_PHYSICSCAPTURE']._serialized_end=2199
+  _globals['_TRACKINGREQUEST']._serialized_end=380
+  _globals['_BALLSEED']._serialized_start=382
+  _globals['_BALLSEED']._serialized_end=469
+  _globals['_TRACKINGSTATUS']._serialized_start=471
+  _globals['_TRACKINGSTATUS']._serialized_end=595
+  _globals['_TRACKEDPOINT']._serialized_start=597
+  _globals['_TRACKEDPOINT']._serialized_end=689
+  _globals['_PHYSICSREQUEST']._serialized_start=692
+  _globals['_PHYSICSREQUEST']._serialized_end=830
+  _globals['_BALLCONFIG']._serialized_start=832
+  _globals['_BALLCONFIG']._serialized_end=907
+  _globals['_PHYSICSRESULT']._serialized_start=909
+  _globals['_PHYSICSRESULT']._serialized_end=1019
+  _globals['_BALLRESULT']._serialized_start=1022
+  _globals['_BALLRESULT']._serialized_end=1267
+  _globals['_SYSTEMRESULT']._serialized_start=1270
+  _globals['_SYSTEMRESULT']._serialized_end=1706
+  _globals['_PHYSICSCAPTURE']._serialized_start=1948
+  _globals['_PHYSICSCAPTURE']._serialized_end=2235
 # @@protoc_insertion_point(module_scope)

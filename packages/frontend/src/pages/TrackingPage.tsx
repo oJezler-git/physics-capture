@@ -7,9 +7,6 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import type { CorrectionKeyframe } from '../types';
 
-const FRAME_WIDTH = 1280;
-const FRAME_HEIGHT = 720;
-
 export const TrackingPage = () => {
   const navigate = useNavigate();
   const { cameras, ballConfigs, advancePhase, experimentId } = useSessionStore();
@@ -37,6 +34,7 @@ export const TrackingPage = () => {
   const [seedFrameIdx, setSeedFrameIdx] = useState(0);
   const [trackStartFrameIdx, setTrackStartFrameIdx] = useState(0);
   const [trackEndFrameIdx, setTrackEndFrameIdx] = useState(0);
+  const [dims, setDims] = useState({ width: 1280, height: 720 });
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const maxBalls = useMemo(() => {
     const configured = ballConfigs.filter((config) => config.mass_g > 0).length;
@@ -72,6 +70,22 @@ export const TrackingPage = () => {
         ? 'Tracking complete'
         : 'Ready to seed';
   const progressPct = Math.round(progress * 100);
+
+  const flaggedFrames = useMemo(() => {
+    const frameSet = new Set<number>();
+    tracks.forEach((t) => {
+      t.points.forEach((p) => {
+        if (p.isFlagged && !p.isCorrected) frameSet.add(p.frameIdx);
+      });
+    });
+    return Array.from(frameSet).sort((a, b) => a - b);
+  }, [tracks]);
+
+  const goToNextFlagged = () => {
+    const next = flaggedFrames.find((f) => f > currentFrame);
+    if (next !== undefined) setFrame(next);
+    else if (flaggedFrames.length > 0) setFrame(flaggedFrames[0]);
+  };
 
   useEffect(() => {
     if (isPlaying && frameCount > 0) {
@@ -314,7 +328,11 @@ export const TrackingPage = () => {
                   <img
                     src={frameSrc}
                     alt={`Frame ${currentFrame + 1}`}
-                    onLoad={() => setFrameImageState('ready')}
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      setDims({ width: img.naturalWidth, height: img.naturalHeight });
+                      setFrameImageState('ready');
+                    }}
                     onError={() => setFrameImageState('error')}
                     className="absolute inset-0 h-full w-full object-contain"
                     draggable={false}
@@ -345,8 +363,8 @@ export const TrackingPage = () => {
                   tracks={tracks}
                   currentFrame={currentFrame}
                   cameraId={resolvedActiveCameraId || ''}
-                  width={FRAME_WIDTH}
-                  height={FRAME_HEIGHT}
+                  width={dims.width}
+                  height={dims.height}
                   correctionEnabled={correctionEnabled}
                   onCorrection={handleCorrection}
                 />
@@ -356,8 +374,8 @@ export const TrackingPage = () => {
                   currentFrame={currentFrame}
                   seedFrameIdx={seedFrameIdx}
                   maxBalls={maxBalls}
-                  frameWidth={FRAME_WIDTH}
-                  frameHeight={FRAME_HEIGHT}
+                  frameWidth={dims.width}
+                  frameHeight={dims.height}
                   seeds={seeds}
                   onAddSeed={(seed) => addSeed(seed, maxBalls)}
                   interactive={seedInteractive}
@@ -405,6 +423,7 @@ export const TrackingPage = () => {
             onFrameChange={setFrame}
             isPlaying={isPlaying}
             onPlayToggle={() => setIsPlaying((playing) => !playing)}
+            flaggedFrames={flaggedFrames}
           />
         </div>
 
@@ -540,10 +559,23 @@ export const TrackingPage = () => {
 
           {tracks.length > 0 ? (
             <section className="rounded-2xl border border-rose-400/35 bg-rose-500/10 p-4">
-              <p className="eyebrow text-rose-200">Confidence Alerts</p>
+              <div className="flex items-center justify-between">
+                <p className="eyebrow text-rose-200">Confidence Alerts</p>
+                <span className="ui-pill border-rose-400 text-rose-100">
+                  {flaggedFrames.length} issues
+                </span>
+              </div>
               <p className="mt-2 text-xs text-rose-100">
-                Red rings mark low-confidence points. Scrub to those frames and drag to adjust.
+                Red rings mark low-confidence points. Scrub to these frames and drag to adjust.
               </p>
+              {flaggedFrames.length > 0 && (
+                <button
+                  onClick={goToNextFlagged}
+                  className="btn-alt mt-3 w-full border-rose-500/50 py-2 hover:bg-rose-500/20"
+                >
+                  Jump to Problem Frame
+                </button>
+              )}
             </section>
           ) : null}
         </div>

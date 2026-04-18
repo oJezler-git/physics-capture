@@ -6,6 +6,7 @@ interface FrameScrubberProps {
   onFrameChange: (frame: number) => void;
   isPlaying?: boolean;
   onPlayToggle?: () => void;
+  flaggedFrames?: number[];
 }
 
 export const FrameScrubber: React.FC<FrameScrubberProps> = ({
@@ -14,6 +15,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
   onFrameChange,
   isPlaying,
   onPlayToggle,
+  flaggedFrames = [],
 }) => {
   const handleSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     onFrameChange(parseInt(event.target.value, 10));
@@ -57,21 +59,35 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
           </button>
         </div>
 
-        <div className="min-w-[220px] flex-1">
+        <div className="relative min-w-[220px] flex-1 py-4">
           <input
             type="range"
             min="0"
             max={Math.max(0, frameCount - 1)}
             value={currentFrame}
             onChange={handleSliderChange}
-            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-orange-500"
+            className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-orange-500"
           />
+          {/* Issue markers */}
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center px-[4px]">
+            {flaggedFrames.map((f) => {
+              const left = (f / Math.max(1, frameCount - 1)) * 100;
+              return (
+                <div
+                  key={`flag-${f}`}
+                  className="absolute h-4 w-1 bg-rose-500 opacity-60"
+                  style={{ left: `${left}%` }}
+                />
+              );
+            })}
+          </div>
         </div>
       </div>
 
       <div className="eyebrow flex flex-wrap gap-4 text-[9px]">
         <span>SPACE: PLAY/PAUSE</span>
         <span>LEFT/RIGHT: STEP FRAMES</span>
+        <span className="text-rose-400">RED DASHES: LOW CONFIDENCE</span>
       </div>
     </div>
   );

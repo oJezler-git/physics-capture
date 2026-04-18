@@ -1,0 +1,1613 @@
+# Module G — Frontend / UI Application
+
+## Full Implementation Plan
+
+**System:** PhysicsCapture  
+**Module:** G — Frontend / UI Application  
+**Plan version:** 1.0  
+**Stack:** React 18 + Vite + TypeScript (strict) · Zustand · Tailwind CSS · WebRTC (simple-peer) · Canvas2D · Recharts · protobufjs
+
+---
+
+## 0. Relevant Context Extraction
+
+### Upstream Dependencies (who provides inputs to this module)
+
+| Provider                           | Data                                                                  | Transport                                            |
+| ---------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
+| Node.js signaling server           | WebRTC SDP/ICE offers, experiment IDs, job status                     | WebSocket (`ws://localhost:3001`)                    |
+| Node.js file API                   | Upload ACK, ffmpeg progress, frame count                              | HTTP REST + WebSocket                                |
+| Python CV service (via Node relay) | Calibration quality scores, tracking progress stream, physics results | WebSocket relay (Node proxies gRPC stream → WS JSON) |
+| Phone PWA (peer)                   | Live camera `MediaStream` (preview only)                              | WebRTC data/media channel                            |
+| Local filesystem (via Node API)    | Extracted PNG frames (served as static files for scrubber)            | HTTP GET `/experiments/{id}/frames/{cam}/{n}.png`    |
+
+### Downstream Consumers (who uses outputs from this module)
+
+| Consumer                    | Data Sent                                                           | Transport                              |
+| --------------------------- | ------------------------------------------------------------------- | -------------------------------------- |
+| Node.js signaling server    | SDP answers, ICE candidates, record start/stop commands             | WebSocket                              |
+| Node.js file API            | Uploaded `.webm`/`.mp4` video blobs                                 | HTTP multipart POST                    |
+| Node.js → Python (via gRPC) | Ball seed clicks (camera_id, frame_idx, x, y), correction keyframes | REST POST `/api/track`, `/api/correct` |
+| Node.js → Python (via gRPC) | Calibration trigger (experiment_id)                                 | REST POST `/api/calibrate`             |
+
+### Required Data Formats (exact structures — see Section 3 for full schemas)
+
+- `ExperimentMeta`: session ID, camera list, ball configs
+- `CalibrationResult`: per-camera intrinsics, stereo extrinsics, reprojection error
+- `TrackingStatusMessage`: frame index, progress float, per-ball centroid array, confidence
+- `PhysicsResult`: per-ball velocities ± uncertainty, momentum, KE, CoR
+- `SyncDotConfig`: dot speed (px/s), dot radius (px), screen dimensions
+
+### Execution Environment
+
+- **Browser (PC desktop):** Chromium-based preferred; Safari acceptable. The React app runs on the same laptop that hosts Node + Python. Accessed at `http://localhost:5173` (dev) or `http://localhost:3000` (production, served by Node).
+- **Browser (Phone PWA):** Mobile Safari (iOS) or Chrome (Android). Accessed at `http://<laptop-ip>:3000`. Restricted to Screen 3 (phone recording sub-app) + QR join flow.
+- The frontend is **NOT** responsible for any server-side compute.
+
+### Hardware Constraints
+
+- **PC screen:** Drives the Visual Metronome canvas. Must achieve consistent `requestAnimationFrame` cadence (≥60 Hz). The sync dot's true velocity (px/frame) is a first-class calibration input.
+- **Cameras:** PC webcam (via `getUserMedia`) or phone cameras (via WebRTC). Phone cameras deliver 30fps (iOS Safari cap), 1080p target.
+- **Network:** LAN or laptop hotspot. WebRTC peer connections on the same LAN subnet. No TURN server assumed — STUN only. All HTTP traffic stays local.
+- **Canvas2D overlay:** Operates on `<canvas>` elements sized to the displayed video frame dimensions. Must not trigger layout reflow on every frame.
+
+### Timing / Accuracy Constraints
+
+- The Visual Metronome dot must move at a **known, constant, calibrated speed.** The ground truth is: _dot_x(frame) = start_x + speed_px_per_frame × frame_index_, where `speed_px_per_frame` is derived from the screen's actual refresh rate (measured at startup). Speed must be stable to < 0.1 px/frame jitter.
+- Frame scrubber must load and display PNG frames with < 200ms latency (LAN, not real-time critical).
+- Canvas overlay updates (trajectory drawing) must complete within a single animation frame (< 16ms for 60fps display).
+
+### Explicit Assumptions
+
+1. The frontend always runs on the **same machine** as Node.js and Python. `localhost` is always correct for API calls.
+2. The phone accesses the frontend via the laptop's LAN IP. A QR code encodes `http://<LAN_IP>:3000/phone`.
+3. No user authentication. Room codes are short alphanumeric strings (6 chars) generated server-side.
+4. Only one experiment is active at a time in the UI. Multi-tab support is explicitly out of scope.
+5. WebRTC is used **exclusively for live preview** during recording setup. Post-recording data transfer uses HTTP upload, not WebRTC data channels.
+6. The phone sub-app (Screen 3 phone-side) is a separate React route (`/phone`), not a separate codebase.
+7. Calibration profiles are stored in Node's SQLite DB and fetched by the frontend via REST.
+8. The Results screen derives all display values from `PhysicsResult` JSON — it does not perform any physics computation.
+9. Canvas overlays are rendered into a `<canvas>` element that is absolutely positioned over the `<video>` or `<img>` element. The canvas is the same intrinsic size as the frame dimensions (not the CSS display size). Hit-testing uses the same transform.
+
+### Ambiguities Resolved
+
+| Ambiguity                                                         | Resolution                                                                                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Does the phone sub-app show a live preview of its own camera?     | Yes — the phone shows its own `getUserMedia` stream in a small monitor preview to help the user frame the sync dot.              |
+| Can calibration be skipped?                                       | Yes — "Single camera / ruler" mode is the fallback. Calibration screen shows a "Skip / Use Ruler" button.                        |
+| Is the frame scrubber loading PNGs or seeking in a video element? | PNGs, loaded individually via `<img>` tags from the Node static file server. This is simpler and avoids video codec seek jitter. |
+| How many balls can be seeded per camera?                          | Maximum 3. The UI enforces this limit.                                                                                           |
+| When is the `MediaRecorder` started on the phone?                 | When the PC UI emits a `record:start` command over WebSocket. The phone does not start autonomously.                             |
+
+### Module Boundaries
+
+**INSIDE this module:**
+
+- All React components, pages, hooks, and stores
+- WebRTC peer connection lifecycle (offer/answer/ICE)
+- `MediaRecorder` orchestration on the phone PWA route
+- Visual Metronome canvas animation (sync dot)
+- Canvas2D trajectory overlay rendering
+- Frame scrubber logic (image preloading, navigation)
+- Ball click / bounding-box seed UI
+- Manual correction drag interaction
+- All Recharts graph and results display
+- Export (CSV, JSON, PDF generation in-browser)
+
+**OUTSIDE this module (treated as black boxes):**
+
+- WebRTC signaling protocol implementation (Node.js handles SDP relay)
+- Video frame extraction (Node.js + ffmpeg)
+- SAM2 tracking pipeline (Python)
+- Physics computation (Python)
+- Calibration computation (Python/OpenCV)
+- SQLite persistence (Node.js)
+
+---
+
+## 1. Module Definition
+
+### Precise Responsibility
+
+The Frontend module is the **sole human interface** for PhysicsCapture. It orchestrates a five-screen workflow, drives the visual sync mechanism, relays commands to backend services, displays streaming progress, and presents final results with uncertainty annotations.
+
+### Explicit Non-Goals
+
+- Does NOT compute any physics or CV outputs
+- Does NOT directly invoke ffmpeg or SAM2
+- Does NOT persist experiment data (delegates to Node.js)
+- Does NOT implement WebRTC STUN/TURN infrastructure
+- Does NOT support simultaneous multi-experiment sessions
+- Does NOT render 3D trajectory visualisations (Sprint 4 placeholder only in this plan)
+
+### Inputs (typed)
+
+| Name                | Type                        | Units          | Shape         | Constraints                                                   |
+| ------------------- | --------------------------- | -------------- | ------------- | ------------------------------------------------------------- |
+| `experimentId`      | `string` (UUID v4)          | —              | scalar        | Non-empty, assigned by Node on session creation               |
+| `cameraList`        | `CameraDevice[]`            | —              | [0..4]        | Max 4 cameras (1 PC + 3 phones)                               |
+| `calibrationResult` | `CalibrationResult \| null` | pixels RMS     | scalar object | null if uncalibrated                                          |
+| `trackingStatus`    | `TrackingStatusMessage`     | —              | stream        | One message per tracked frame                                 |
+| `physicsResult`     | `PhysicsResult`             | m/s, kg·m/s, J | scalar object | All values carry `±uncertainty`                               |
+| `frameCount`        | `uint32`                    | frames         | scalar        | ≥ 1                                                           |
+| `framePngUrl`       | `string`                    | —              | scalar        | `http://localhost:3001/experiments/{id}/frames/{cam}/{n}.png` |
+| `syncDotConfig`     | `SyncDotConfig`             | px, px/frame   | scalar object | Computed at startup from measured rAF cadence                 |
+
+### Outputs (typed)
+
+| Name                 | Type                        | Units  | Shape                            | Constraints                                  |
+| -------------------- | --------------------------- | ------ | -------------------------------- | -------------------------------------------- |
+| `ballSeeds`          | `BallSeed[]`                | pixels | [1..9] (3 balls × 3 cameras max) | frame_idx = 0 always                         |
+| `correctionKeyframe` | `CorrectionKeyframe`        | pixels | scalar                           | Must be an existing frame index              |
+| `recordCommand`      | `'start' \| 'stop'`         | —      | scalar                           | Sent over WebSocket to all connected phones  |
+| `massConfig`         | `BallMassConfig[]`          | grams  | [1..3]                           | mass > 0, uncertainty > 0                    |
+| `calibrationTrigger` | `CalibrationTriggerPayload` | —      | scalar                           | Sent when user clicks "Run Calibration"      |
+| `exportPayload`      | `Blob`                      | —      | scalar                           | CSV, JSON, or PDF depending on format chosen |
+
+---
+
+## 2. Internal Architecture
+
+The module is decomposed into the following independently testable subcomponents:
+
+### 2.1 Router & Shell
+
+**Purpose:** Top-level layout, route definitions, global WebSocket connection lifecycle.  
+**Inputs:** URL pathname  
+**Outputs:** Rendered page component, initialised WebSocket  
+**Core logic:**
+
+- React Router v6 routes: `/setup`, `/calibration`, `/recording`, `/tracking`, `/results`, `/phone`
+- Establishes a **single, persistent WebSocket** to `ws://localhost:3001` on mount. Reconnects on close with exponential backoff (max 5 attempts, 250ms → 8s delay).
+- Injects `wsClient` and `experimentStore` into all child routes via context.
+- Shows a persistent connection status badge (green/amber/red) in the top-right corner.
+
+**Failure modes:**
+
+- Node.js not running → shell shows "Server offline" banner; navigation to experiment screens is blocked.
+
+---
+
+### 2.2 Zustand State Stores
+
+Four stores, each independently importable. No cross-store subscriptions; stores communicate only via explicit actions.
+
+#### 2.2.1 `sessionStore`
+
+```typescript
+interface SessionState {
+  experimentId: string | null;
+  cameras: CameraDevice[]; // all registered cameras (PC + phones)
+  ballConfigs: BallMassConfig[]; // 1–3 balls, mass + uncertainty
+  phase: SessionPhase; // 'setup' | 'calibration' | 'recording' | 'tracking' | 'results'
+}
+```
+
+Actions: `createExperiment()`, `addCamera(cam)`, `removeCamera(id)`, `setBallConfig(index, config)`, `advancePhase()`.
+
+#### 2.2.2 `calibrationStore`
+
+```typescript
+interface CalibrationState {
+  profiles: CalibrationProfile[]; // saved profiles from DB
+  activeProfile: CalibrationProfile | null;
+  status: "idle" | "running" | "complete" | "failed";
+  reprojectionError: number | null; // pixels RMS, null if not yet computed
+  intrinsics: CameraIntrinsics[]; // per camera
+  stereoExtrinsics: StereoExtrinsics | null;
+  rulerScaleFactor: number | null; // px/mm; null if stereo calibration used
+}
+```
+
+Actions: `startCalibration()`, `onCalibrationProgress(msg)`, `onCalibrationComplete(result)`, `saveProfile(name)`, `loadProfile(id)`, `setRulerScale(pxPerMm)`.
+
+#### 2.2.3 `trackingStore`
+
+```typescript
+interface TrackingState {
+  frameCount: number;
+  currentFrame: number; // 0-indexed, scrubber position
+  seeds: BallSeed[]; // user-placed seeds
+  tracks: BallTrack[]; // SAM2 output per ball per camera
+  corrections: CorrectionKeyframe[]; // user corrections
+  status: "idle" | "tracking" | "complete" | "awaiting_correction";
+  progress: number; // 0.0–1.0
+}
+
+interface BallTrack {
+  ballId: number; // 0, 1, or 2
+  cameraId: number;
+  points: TrackPoint[]; // one per frame
+}
+
+interface TrackPoint {
+  frameIdx: number;
+  x: number; // pixels, float64
+  y: number; // pixels, float64
+  confidence: number; // 0.0–1.0
+  isFlagged: boolean; // confidence < 0.7
+  isCorrected: boolean;
+}
+```
+
+Actions: `addSeed(seed)`, `removeSeed(ballId, cameraId)`, `startTracking()`, `onTrackingUpdate(msg)`, `applyCorrection(correction)`, `setFrame(n)`.
+
+#### 2.2.4 `resultsStore`
+
+```typescript
+interface ResultsState {
+  physicsResult: PhysicsResult | null;
+  syncData: SyncData | null; // master timestamp array metadata
+  status: "idle" | "computing" | "complete" | "failed";
+}
+```
+
+Actions: `requestPhysics()`, `onPhysicsResult(result)`.
+
+---
+
+### 2.3 WebSocket Client (`lib/wsClient.ts`)
+
+**Purpose:** Manages the single persistent WebSocket connection. Routes inbound messages to store actions. Provides a typed `send()` function.
+
+**Core logic:**
+
+```typescript
+type InboundMessage =
+  | { type: "calibration:progress"; data: CalibrationProgressMsg }
+  | { type: "calibration:complete"; data: CalibrationResult }
+  | { type: "tracking:update"; data: TrackingStatusMessage }
+  | { type: "tracking:complete"; data: { tracks_path: string } }
+  | { type: "physics:result"; data: PhysicsResult }
+  | { type: "upload:progress"; data: { cameraId: number; percent: number } }
+  | { type: "peer:offer"; data: RTCSessionDescriptionInit }
+  | { type: "peer:ice"; data: RTCIceCandidateInit };
+
+type OutboundMessage =
+  | { type: "record:start"; experimentId: string }
+  | { type: "record:stop"; experimentId: string }
+  | { type: "peer:answer"; data: RTCSessionDescriptionInit }
+  | { type: "peer:ice"; data: RTCIceCandidateInit };
+```
+
+Message dispatch: on receive, parse JSON, match `type` field, call appropriate store action. Unknown types → warn to console, discard.
+
+**Failure modes:**
+
+- Message parse failure → log `[WS] parse error`, discard, do not crash
+- Send while disconnected → enqueue message (max 20), flush on reconnect
+
+---
+
+### 2.4 WebRTC Peer Manager (`lib/webrtc.ts`)
+
+**Purpose:** Manages `RTCPeerConnection` instances for live preview streams from phone cameras. One peer per phone.
+
+**Inputs:** WebSocket signaling messages (`peer:offer`, `peer:ice`), local camera constraints  
+**Outputs:** `MediaStream` per peer, to be fed into `<video>` elements  
+**Core logic:**
+
+```typescript
+interface PeerEntry {
+  peerId: string;
+  conn: RTCPeerConnection;
+  stream: MediaStream | null;
+}
+```
+
+- On `peer:offer` received → create `RTCPeerConnection`, `setRemoteDescription(offer)`, create answer, `setLocalDescription(answer)`, send `peer:answer` over WebSocket.
+- On `peer:ice` received → `addIceCandidate(candidate)`.
+- On `icecandidate` event → send `peer:ice` over WebSocket.
+- On `track` event → capture `MediaStream`, update `CameraDevice.stream` in `sessionStore`.
+
+ICE server config: `[{ urls: 'stun:stun.l.google.com:19302' }]` as fallback only. LAN connections should complete without STUN.
+
+**Failure modes:**
+
+- ICE failure → mark camera as `status: 'disconnected'`; show reconnect button in UI
+- Peer disconnects mid-session → degrade gracefully; recording can continue if `MediaRecorder` is already running on the phone
+
+---
+
+### 2.5 Visual Metronome (`components/VisualMetronome.tsx`)
+
+**Purpose:** Full-screen black canvas with a white sync dot that moves horizontally at constant speed. Active only on Screen 3 (Experiment Recording).
+
+**Inputs:** `SyncDotConfig`  
+**Outputs:** Rendered canvas animation; `SyncDotConfig` with calibrated `speed_px_per_frame`
+
+**Core logic — startup calibration:**
+
+```
+1. On mount, measure actual rAF cadence:
+   a. Record `performance.now()` at each rAF callback over 120 frames
+   b. Compute median inter-frame interval (ms) = rAF_interval
+   c. Derive: speed_px_per_frame = speed_px_per_second / (1000 / rAF_interval)
+   d. Store calibrated speed in SyncDotConfig and emit to sessionStore
+
+2. Animation loop (requestAnimationFrame):
+   a. frame_index++ (integer counter, monotonically increasing)
+   b. dot_x = (start_x + speed_px_per_frame * frame_index) % canvas_width
+   c. clearRect(0, 0, w, h)   // black background
+   d. fillStyle = 'white'; beginPath(); arc(dot_x, dot_y, dot_radius, 0, 2π); fill()
+   e. requestAnimationFrame(loop)
+
+3. On unmount: cancelAnimationFrame; reset frame_index
+```
+
+**Parameters:**
+
+| Field                 | Type           | Value                 | Derivation                                    |
+| --------------------- | -------------- | --------------------- | --------------------------------------------- |
+| `dot_radius`          | `uint32` px    | 20                    | Fixed; large enough to track clearly          |
+| `dot_y`               | `uint32` px    | `canvas_height * 0.1` | Top 10% of screen, always in camera frame     |
+| `speed_px_per_second` | `float64` px/s | 300                   | Calibrated on setup screen; user-configurable |
+| `rAF_interval`        | `float64` ms   | measured at runtime   | Median of 120-frame sample                    |
+
+**Constraint:** The canvas must be rendered **on the laptop screen**, not a projected view. The component uses `document.fullscreenElement` to enter full-screen when active to maximise contrast.
+
+**Failure modes:**
+
+- rAF jitter > 2ms median absolute deviation → warn user "display refresh unstable; sync accuracy may be reduced"
+- Canvas not fullscreen → show warning overlay prompting user to maximise
+
+---
+
+### 2.6 Camera Preview Grid (`components/CameraPreviewGrid.tsx`)
+
+**Purpose:** Renders live `<video>` elements for all active cameras. Used on Screens 1, 2, 3.
+
+**Inputs:** `CameraDevice[]` with `stream: MediaStream | null`  
+**Outputs:** Visual display only; no data output
+
+**Core logic:**
+
+- For PC webcam: call `getUserMedia({ video: { facingMode: 'user' }, audio: false })` once on mount; assign to `<video srcObject>`.
+- For phone cameras: `stream` is provided by `webrtcManager` as a `MediaStream`; assign to `<video srcObject>`.
+- Overlay a framing guide: a CSS border overlay showing the region where the sync dot should appear (top-left quadrant of frame). Green when dot is detected (post-calibration), amber otherwise.
+
+---
+
+### 2.7 Frame Scrubber (`components/FrameScrubber.tsx`)
+
+**Purpose:** Allows user to navigate through extracted PNG frames for a given camera. Used on Screen 4.
+
+**Inputs:** `cameraId: number`, `frameCount: number`, `experimentId: string`, `currentFrame: number`  
+**Outputs:** `onFrameChange(n: number)` callback
+
+**Core logic:**
+
+```
+1. Maintain a preload window: [currentFrame - 5, currentFrame + 15]
+2. For each frame in window: if not in cache, create new Image(), set src to frame URL
+3. On scrubber drag: call onFrameChange(n); display frame from cache if available
+4. Frame URL: `http://localhost:3001/experiments/{experimentId}/frames/cam{cameraId}/frame_{n.toString().padStart(6,'0')}.png`
+5. Loading state: show spinner if cache miss on currentFrame
+```
+
+Cache: `Map<number, HTMLImageElement>`. Max 50 entries. Eviction: remove entries furthest from `currentFrame`.
+
+**Failure modes:**
+
+- Network error fetching frame → show grey placeholder; retry once
+- `frameCount = 0` → disable scrubber, show "No frames extracted yet"
+
+---
+
+### 2.8 Canvas Trajectory Overlay (`components/TrajectoryCanvas.tsx`)
+
+**Purpose:** Renders tracked ball trajectories as coloured paths overlaid on the frame image. Handles manual correction drag interactions.
+
+**Inputs:** `BallTrack[]`, `currentFrame: number`, `imageWidth: number`, `imageHeight: number`, `canvasWidth: number`, `canvasHeight: number`, `onCorrection: (correction: CorrectionKeyframe) => void`  
+**Outputs:** Visual overlay; correction events via `onCorrection`
+
+**Coordinate transform:**
+
+```typescript
+// Canvas CSS size !== intrinsic frame size
+// All rendering uses logical (frame) coordinates; transform at draw time:
+const scaleX = canvasWidth / imageWidth;
+const scaleY = canvasHeight / imageHeight;
+function toCanvas(px: number, py: number): [number, number] {
+  return [px * scaleX, py * scaleY];
+}
+function toFrame(cx: number, cy: number): [number, number] {
+  return [cx / scaleX, cy / scaleY];
+}
+```
+
+**Rendering algorithm (per rAF or on currentFrame change):**
+
+```
+1. ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+2. For each ball track b in BallTrack[]:
+   a. Set strokeStyle = BALL_COLORS[b.ballId]   // ['#FF4136', '#2ECC40', '#0074D9']
+   b. Begin path
+   c. For each TrackPoint p where p.frameIdx <= currentFrame:
+      - moveTo if first point; else lineTo (toCanvas(p.x, p.y))
+   d. stroke()
+   e. Draw current position dot:
+      - arc at toCanvas(currentPoint.x, currentPoint.y), radius=6
+      - if p.isFlagged: strokeStyle='#FF851B', lineWidth=3 (orange ring)
+      - if p.isCorrected: additional checkmark indicator
+3. For each flagged point within ±2 frames of currentFrame:
+   - Draw pulsing orange circle (CSS animation via opacity)
+```
+
+**Manual correction drag:**
+
+```
+1. On mousedown / touchstart:
+   a. hitTest: find nearest TrackPoint to pointer within 20px (frame coords)
+   b. If found: enter drag mode (capture ball_id, frame_idx)
+
+2. On mousemove / touchmove (while dragging):
+   a. Compute new frame-coordinate position: toFrame(e.offsetX, e.offsetY)
+   b. Preview: draw ghost dot at new position
+
+3. On mouseup / touchend:
+   a. Emit onCorrection({ ballId, cameraId, frameIdx, x_new, y_new })
+   b. Exit drag mode
+```
+
+**Failure modes:**
+
+- `BallTrack[]` is empty → render nothing; no error
+- `currentFrame` out of bounds → clamp to [0, frameCount-1]
+
+---
+
+### 2.9 Ball Seed Picker (`components/BallSeedPicker.tsx`)
+
+**Purpose:** Allows user to click on frame 0 to place ball seeds (up to 3 per camera). Supports bounding-box draw mode.
+
+**Inputs:** `imageWidth`, `imageHeight`, `canvasWidth`, `canvasHeight`, `existingSeeds: BallSeed[]`, `onSeedAdded: (seed: BallSeed) => void`, `onSeedRemoved: (ballId: number) => void`  
+**Mode:** Overlaid on frame 0 of each camera.
+
+**Core logic:**
+
+```
+Click mode (default):
+1. On click at (cx, cy):
+   a. Convert to frame coords: (fx, fy) = toFrame(cx, cy)
+   b. Assign next available ballId (0, 1, 2)
+   c. If 3 seeds already placed → show toast "Maximum 3 balls reached"
+   d. Else: emit onSeedAdded({ cameraId, frameIdx: 0, ballId, x: fx, y: fy })
+
+Bounding box mode (toggle via toolbar button):
+1. On mousedown: record (x0, y0)
+2. On mousemove: draw dashed rectangle
+3. On mouseup: record (x1, y1); emit seed with { bbox: [x0,y0,x1,y1] } instead of point click
+
+Right-click on existing seed → emit onSeedRemoved(ballId)
+```
+
+**Rendering:** Overlay coloured numbered dots (1, 2, 3) at seed positions with `BALL_COLORS[ballId]`.
+
+---
+
+### 2.10 Results Display (`pages/ResultsPage.tsx`)
+
+**Purpose:** Renders the complete physics results view, including charts, tables, and export controls.
+
+**Inputs:** `PhysicsResult`, `SyncData | null`  
+**Outputs:** Export file triggers
+
+Subcomponents:
+
+- `VelocityChart`: Recharts `LineChart` with `ErrorBar` per ball
+- `MomentumTable`: HTML table, pre/post rows
+- `EnergyTable`: KE before/after, conservation %
+- `ScalarMetrics`: CoR, % momentum conserved
+- `ExportBar`: CSV, JSON, PDF buttons
+
+See Section 4.10 for rendering details.
+
+---
+
+### 2.11 Phone Sub-App (`pages/PhonePage.tsx`)
+
+**Purpose:** Provides the camera operator's interface on a phone. Accessed at `/phone?room={code}`.
+
+**Responsibilities:**
+
+- Display room code join confirmation
+- Show live self-preview (own camera)
+- Show framing guide overlay (is sync dot visible?)
+- Receive `record:start` / `record:stop` commands over WebSocket
+- Run `MediaRecorder` capture
+- Upload recorded video to Node.js after stop
+- Show upload progress bar
+
+**Inputs:** Room code (URL query param), WebSocket commands  
+**Outputs:** Uploaded `.webm`/`.mp4` via HTTP POST
+
+See Section 4.11 for full `MediaRecorder` logic.
+
+---
+
+## 3. Data Contracts & Interfaces
+
+### 3.1 TypeScript Type Definitions
+
+```typescript
+// --- Core domain types ---
+
+type SessionPhase =
+  | "setup"
+  | "calibration"
+  | "recording"
+  | "tracking"
+  | "results";
+
+interface CameraDevice {
+  id: string; // UUID, assigned on registration
+  type: "pc" | "phone";
+  label: string; // e.g. "iPhone 14 (side)"
+  stream: MediaStream | null;
+  status: "connecting" | "live" | "disconnected";
+  peerId: string | null; // WebRTC peer ID, null for PC webcam
+}
+
+interface BallMassConfig {
+  ballId: number; // 0, 1, or 2
+  mass_g: number; // grams, float64, > 0
+  uncertainty_g: number; // grams, float64, > 0, default 1.0
+}
+
+interface SyncDotConfig {
+  speed_px_per_second: number; // float64, > 0
+  speed_px_per_frame: number; // float64, derived from measured rAF interval
+  dot_radius_px: number; // uint32
+  dot_y_px: number; // uint32
+  rAF_interval_ms: number; // float64, measured
+  rAF_jitter_ms: number; // float64, median absolute deviation
+}
+
+interface BallSeed {
+  ballId: number; // 0, 1, 2
+  cameraId: number;
+  frameIdx: number; // always 0
+  x: number; // pixels, float64, in frame coordinates
+  y: number; // pixels, float64, in frame coordinates
+  bbox?: [number, number, number, number]; // [x0,y0,x1,y1], optional
+}
+
+interface CorrectionKeyframe {
+  ballId: number;
+  cameraId: number;
+  frameIdx: number; // uint32
+  x_new: number; // pixels, float64
+  y_new: number; // pixels, float64
+}
+
+// --- Calibration ---
+
+interface CameraIntrinsics {
+  cameraId: number;
+  fx: number;
+  fy: number; // focal lengths, pixels
+  cx: number;
+  cy: number; // principal point, pixels
+  k1: number;
+  k2: number;
+  p1: number;
+  p2: number;
+  k3: number; // distortion
+  reprojection_error_px: number; // RMS, float64
+}
+
+interface StereoExtrinsics {
+  R: number[][]; // 3×3 rotation matrix, float64
+  T: number[]; // 3-vector translation, mm, float64
+  reprojection_error_px: number;
+}
+
+interface CalibrationResult {
+  experimentId: string;
+  intrinsics: CameraIntrinsics[];
+  stereo: StereoExtrinsics | null;
+  rulerScaleFactor: number | null; // px/mm; null if stereo used
+  completedAt: number; // Unix timestamp ms
+}
+
+interface CalibrationProfile {
+  id: string;
+  name: string; // e.g. "Lab Bench A"
+  result: CalibrationResult;
+  createdAt: number;
+}
+
+// --- Tracking ---
+
+interface TrackPoint {
+  frameIdx: number;
+  x: number; // pixels, float64
+  y: number; // pixels, float64
+  confidence: number; // 0.0–1.0
+  isFlagged: boolean; // confidence < 0.7
+  isCorrected: boolean;
+}
+
+interface BallTrack {
+  ballId: number;
+  cameraId: number;
+  points: TrackPoint[];
+}
+
+// --- Physics Results ---
+
+interface UFloat {
+  value: number; // point estimate
+  uncertainty: number; // ±1σ
+}
+
+interface BallResult {
+  ballId: number;
+  mass_kg: UFloat;
+  v_before: UFloat; // m/s
+  v_after: UFloat; // m/s
+  p_before: UFloat; // kg·m/s
+  p_after: UFloat; // kg·m/s
+  ke_before: UFloat; // joules
+  ke_after: UFloat; // joules
+}
+
+interface SystemResult {
+  p_before_total: UFloat; // kg·m/s
+  p_after_total: UFloat; // kg·m/s
+  ke_before_total: UFloat; // J
+  ke_after_total: UFloat; // J
+  momentum_conserved_pct: UFloat; // %
+  coeff_of_restitution: UFloat; // dimensionless
+  collision_frame_idx: number;
+}
+
+interface PhysicsResult {
+  experimentId: string;
+  balls: BallResult[];
+  system: SystemResult;
+  velocityTimeSeries: VelocityTimeSeries[];
+  computedAt: number;
+}
+
+interface VelocityTimeSeries {
+  ballId: number;
+  points: Array<{
+    time_ms: number; // true timestamp from sync.json master array
+    v: number; // m/s
+    v_uncertainty: number; // ±1σ m/s
+  }>;
+}
+
+interface SyncData {
+  experimentId: string;
+  frameToMs: Record<number, number>; // frame_index → true_ms
+  phase_offset_ms: number[]; // per camera
+  true_fps: number[]; // per camera
+  fit_residual_ms: number[]; // RMS of linear fit, per camera
+}
+```
+
+### 3.2 WebSocket Message Protocol
+
+All messages are JSON. The WebSocket transport is `ws://localhost:3001`.
+
+**Outbound (Frontend → Node):**
+
+```typescript
+// Start recording on all phones
+{ type: 'record:start', experimentId: string }
+
+// Stop recording on all phones
+{ type: 'record:stop', experimentId: string }
+
+// WebRTC signaling
+{ type: 'peer:answer', peerId: string, data: RTCSessionDescriptionInit }
+{ type: 'peer:ice', peerId: string, data: RTCIceCandidateInit }
+```
+
+**Inbound (Node → Frontend):**
+
+```typescript
+// Phone joined session
+{ type: 'phone:joined', peerId: string, label: string }
+
+// WebRTC signaling from phone
+{ type: 'peer:offer', peerId: string, data: RTCSessionDescriptionInit }
+{ type: 'peer:ice', peerId: string, data: RTCIceCandidateInit }
+
+// Upload progress
+{ type: 'upload:progress', cameraId: number, peerId: string, percent: number }
+
+// ffmpeg extraction complete
+{ type: 'frames:ready', experimentId: string, cameraId: number, frameCount: number }
+
+// Calibration
+{ type: 'calibration:progress', stage: string, progress: number }
+{ type: 'calibration:complete', result: CalibrationResult }
+{ type: 'calibration:failed', reason: string }
+
+// Tracking
+{ type: 'tracking:update', data: TrackingStatusMessage }
+{ type: 'tracking:complete', experimentId: string }
+{ type: 'tracking:correction_applied', frameIdx: number }
+
+// Physics
+{ type: 'physics:result', data: PhysicsResult }
+{ type: 'physics:failed', reason: string }
+```
+
+### 3.3 REST API Contracts
+
+```
+POST   /api/experiments              → { experimentId: string }
+GET    /api/experiments/:id          → ExperimentMeta
+POST   /api/experiments/:id/calibrate  body: {}  → 202 Accepted
+POST   /api/experiments/:id/track    body: { seeds: BallSeed[] } → 202 Accepted
+POST   /api/experiments/:id/correct  body: CorrectionKeyframe → 202 Accepted
+POST   /api/experiments/:id/physics  body: { massConfigs: BallMassConfig[] } → 202 Accepted
+GET    /api/calibration/profiles     → CalibrationProfile[]
+POST   /api/calibration/profiles     body: { name: string, experimentId: string } → CalibrationProfile
+GET    /experiments/:id/frames/cam:c/frame_:n.png  → image/png (static file)
+
+# Video upload (from phone):
+POST   /api/upload/:experimentId/:cameraId  multipart/form-data  → { received: true }
+```
+
+### 3.4 Time Representation
+
+- All timestamps use **Unix time in milliseconds** (`number`, `float64`).
+- The `frameToMs` mapping in `SyncData` uses integer frame indices as keys.
+- The Visual Metronome's `frame_index` counter is a **local, monotonically increasing integer** starting at 0 on component mount. It has no relationship to wall-clock time; the Python sync pipeline derives true timestamps from the recorded dot trajectory.
+
+### 3.5 Coordinate System
+
+- **Frame coordinates:** origin at top-left of the image frame. X increases rightward, Y increases downward. Units: pixels (float64, sub-pixel precision).
+- **Canvas coordinates:** same convention; derived from frame coordinates via the scale transform defined in Section 2.8.
+- **World coordinates** (used in results display only): millimetres. X: rightward along ball travel axis; Y: upward. Derived by Python; frontend displays but does not compute.
+
+---
+
+## 4. Algorithmic Implementation
+
+### 4.1 Visual Metronome Calibration & Animation
+
+**Startup calibration (runs once on Screen 3 mount):**
+
+```
+Step 1: Collect rAF timing samples
+  let timestamps: number[] = []
+  let frameCount = 0
+  function sample(t: DOMHighResTimeStamp) {
+    timestamps.push(t)
+    frameCount++
+    if (frameCount < 121) requestAnimationFrame(sample)
+    else computeCalibration()
+  }
+  requestAnimationFrame(sample)
+
+Step 2: Compute median interval
+  intervals = [timestamps[1]-timestamps[0], ..., timestamps[120]-timestamps[119]]
+  sort(intervals)
+  rAF_interval_ms = intervals[60]   // median of 120 samples
+
+Step 3: Compute jitter (median absolute deviation)
+  median_val = intervals[60]
+  deviations = intervals.map(i => Math.abs(i - median_val))
+  sort(deviations)
+  rAF_jitter_ms = deviations[60]
+
+Step 4: Derive speed_px_per_frame
+  speed_px_per_frame = speed_px_per_second / (1000 / rAF_interval_ms)
+
+Step 5: Warn if jitter > 2ms
+  if (rAF_jitter_ms > 2) dispatch warning toast
+
+Step 6: Emit SyncDotConfig to sessionStore
+```
+
+**Main animation loop:**
+
+```
+let frame_index = 0
+const canvas_width = window.innerWidth
+const canvas_height = window.innerHeight
+const dot_y = canvas_height * 0.1
+const dot_r = 20
+
+function tick() {
+  const dot_x = (speed_px_per_frame * frame_index) % canvas_width
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, canvas_width, canvas_height)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.beginPath()
+  ctx.arc(dot_x, dot_y, dot_r, 0, Math.PI * 2)
+  ctx.fill()
+  frame_index++
+  rafId = requestAnimationFrame(tick)
+}
+rafId = requestAnimationFrame(tick)
+
+// On unmount:
+cancelAnimationFrame(rafId)
+frame_index = 0
+```
+
+**Critical invariant:** `frame_index` must never skip. If the browser throttles rAF (e.g. tab hidden), `frame_index` must be reset and the user must re-record. A `visibilitychange` listener fires a warning toast and pauses the loop.
+
+### 4.2 QR Code / Room Code Join Flow
+
+**PC side (Screen 1):**
+
+```
+1. POST /api/experiments → { experimentId }
+2. Derive room code: roomCode = experimentId.slice(0,6).toUpperCase()
+3. Render QR code encoding: `http://<LAN_IP>:3000/phone?room={roomCode}`
+   (Use qrcode library: npm i qrcode)
+4. Poll WebSocket for 'phone:joined' events; add to sessionStore.cameras on each
+5. Show "Waiting for phones..." spinner; turn green when ≥1 phone connected
+```
+
+**Phone side (PhonePage.tsx):**
+
+```
+1. Parse room code from URL: ?room=XXXXXX
+2. Connect to WS: ws://<same host>:3001?room={roomCode}&type=phone
+3. Show confirmation: "Connected to session XXXXXX"
+4. Request camera: getUserMedia({ video: { facingMode: 'environment', ... } })
+5. Show self-preview in <video> element
+6. Await 'record:start' or 'record:stop' commands
+```
+
+### 4.3 MediaRecorder Lifecycle (Phone)
+
+```
+State machine:
+  idle → recording → uploading → done
+
+On 'record:start' received:
+  1. stream = await getUserMedia(PHONE_VIDEO_CONSTRAINTS)
+  2. recorder = new MediaRecorder(stream, {
+       mimeType: 'video/webm;codecs=vp9',   // fallback: 'video/mp4'
+       videoBitsPerSecond: 100_000_000
+     })
+  3. chunks: Blob[] = []
+  4. recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
+  5. recorder.start(1000)   // 1s chunks (reduces memory spike; all assembled at end)
+  6. Update UI: show recording indicator (pulsing red dot + elapsed time)
+
+On 'record:stop' received:
+  1. recorder.stop()
+  2. On recorder.onstop:
+     a. blob = new Blob(chunks, { type: recorder.mimeType })
+     b. Upload blob:
+        formData = new FormData()
+        formData.append('video', blob, 'recording.webm')
+        xhr = new XMLHttpRequest()
+        xhr.upload.onprogress = (e) => updateProgress(e.loaded / e.total * 100)
+        xhr.open('POST', `/api/upload/${experimentId}/${cameraId}`)
+        xhr.send(formData)
+  3. Update UI: progress bar 0→100%
+  4. On upload complete: show "✓ Upload complete"
+```
+
+**Fallback for iOS Safari (does not support VP9):**
+
+```typescript
+const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+  ? "video/webm;codecs=vp9"
+  : "video/mp4";
+```
+
+### 4.4 Calibration Screen Flow
+
+```
+Screen 2 — Calibration:
+
+1. User selects a saved profile (optional):
+   a. GET /api/calibration/profiles
+   b. Render dropdown; on select: load profile into calibrationStore
+   c. "Use this profile" → skip to Screen 3
+
+2. Live calibration:
+   a. Show live camera previews (WebRTC streams)
+   b. "Detect Corners" button → POST /api/experiments/:id/calibrate (body: {})
+   c. Node relays → Python → OpenCV calibrateCamera
+   d. Progress via WebSocket: 'calibration:progress' messages
+      - stage: 'detecting_corners' | 'intrinsic_fit' | 'stereo_fit'
+      - progress: 0.0–1.0
+   e. On 'calibration:complete': update calibrationStore; show result metrics
+   f. Show reprojection error (colour coded: green < 0.3px, amber 0.3–1px, red > 1px)
+
+3. Single-camera ruler fallback:
+   a. "Use Ruler" toggle → show ruler tool on Screen 4
+   b. calibrationStore.rulerScaleFactor set after user marks two points
+
+4. Save profile:
+   a. User types name; POST /api/calibration/profiles
+```
+
+### 4.5 Ball Selection & Tracking Flow (Screen 4)
+
+```
+Phase A — Frame 0 seeding:
+
+1. Load frame 0 for each camera via FrameScrubber at index 0
+2. Render BallSeedPicker overlay on each frame
+3. User places 1–3 seeds per camera (click or bbox mode)
+4. Seeds appear in seedStore; coloured numbered dots shown
+
+Phase B — Launch tracking:
+
+1. User clicks "Track All Balls"
+2. POST /api/experiments/:id/track  body: { seeds: sessionStore.seeds }
+3. UI enters 'tracking' state: disable scrubber, show progress bar
+4. WebSocket stream: 'tracking:update' messages
+   - Render partial tracks as they arrive (append to trackingStore.tracks)
+   - Update progress bar (0→100%)
+5. On 'tracking:complete': enable scrubber; show full trajectory overlays
+
+Phase C — Review & correction:
+
+1. User scrubs through frames using FrameScrubber
+2. Flagged frames shown with orange ring on trajectory
+3. User drags flagged point to correct position
+4. On drag release: POST /api/experiments/:id/correct  body: CorrectionKeyframe
+5. WebSocket: 'tracking:correction_applied' → tracking re-propagates from keyframe
+6. Updated tracks arrive via 'tracking:update' stream; replace affected frames in store
+
+Phase D — Advance to results:
+
+1. "Compute Physics" button → POST /api/experiments/:id/physics
+   body: { massConfigs: sessionStore.ballConfigs }
+2. resultsStore.status = 'computing'
+3. On 'physics:result': populate resultsStore; navigate to Screen 5
+```
+
+### 4.6 Scrubber Synchronisation (Multi-Camera)
+
+When multiple cameras are present, all `FrameScrubber` instances share the same `currentFrame` value from `trackingStore`. Moving one scrubber moves all.
+
+```typescript
+// In trackingStore:
+setFrame(n: number) {
+  state.currentFrame = Math.max(0, Math.min(n, state.frameCount - 1))
+}
+
+// Each FrameScrubber:
+const currentFrame = useTrackingStore(s => s.currentFrame)
+const setFrame = useTrackingStore(s => s.setFrame)
+```
+
+Frame counts may differ slightly between cameras (upload timing). The scrubber's max is `Math.min(...perCameraFrameCounts)`.
+
+### 4.7 Hit Testing for Manual Correction
+
+```typescript
+function findNearestPoint(
+  px: number, // pointer x in frame coords
+  py: number, // pointer y in frame coords
+  tracks: BallTrack[],
+  currentFrame: number,
+  maxDistancePx: number = 20,
+): { ballId: number; frameIdx: number } | null {
+  let best: { ballId: number; frameIdx: number } | null = null;
+  let bestDist = maxDistancePx;
+
+  for (const track of tracks) {
+    // Search ±2 frames around currentFrame
+    for (const point of track.points) {
+      if (Math.abs(point.frameIdx - currentFrame) > 2) continue;
+      const dx = point.x - px;
+      const dy = point.y - py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { ballId: track.ballId, frameIdx: point.frameIdx };
+      }
+    }
+  }
+  return best;
+}
+```
+
+### 4.8 Velocity Chart Rendering
+
+```typescript
+// Transform PhysicsResult to Recharts data format:
+function toChartData(series: VelocityTimeSeries): RechartsDataPoint[] {
+  return series.points.map(p => ({
+    time_ms: p.time_ms,
+    v: p.v,
+    v_low: p.v - p.v_uncertainty,
+    v_high: p.v + p.v_uncertainty,
+  }))
+}
+
+// Recharts component:
+<LineChart data={chartData} width={600} height={300}>
+  <XAxis dataKey="time_ms" label="Time (ms)" />
+  <YAxis label="Velocity (m/s)" />
+  <Line dataKey="v" stroke={BALL_COLORS[ballId]} dot={false} />
+  <ErrorBar dataKey="v" direction="y"
+    lowDataKey="v_low" highDataKey="v_high"
+    stroke={BALL_COLORS[ballId]} opacity={0.4} />
+  <ReferenceLine x={collisionFrameMs} stroke="#999" strokeDasharray="4 4" label="Collision" />
+</LineChart>
+```
+
+`collisionFrameMs` is derived from `system.collision_frame_idx` via `syncData.frameToMs`.
+
+### 4.9 Export Logic
+
+**CSV export:**
+
+```typescript
+function exportCSV(result: PhysicsResult): Blob {
+  const rows: string[][] = [
+    [
+      "Ball",
+      "v_before (m/s)",
+      "v_before_unc",
+      "v_after (m/s)",
+      "v_after_unc",
+      "p_before (kg.m/s)",
+      "p_after (kg.m/s)",
+      "KE_before (J)",
+      "KE_after (J)",
+    ],
+    ...result.balls.map((b) => [
+      String(b.ballId + 1),
+      b.v_before.value.toFixed(4),
+      b.v_before.uncertainty.toFixed(4),
+      b.v_after.value.toFixed(4),
+      b.v_after.uncertainty.toFixed(4),
+      b.p_before.value.toFixed(4),
+      b.p_after.value.toFixed(4),
+      b.ke_before.value.toFixed(4),
+      b.ke_after.value.toFixed(4),
+    ]),
+    [
+      "SYSTEM",
+      "",
+      "",
+      "",
+      "",
+      result.system.p_before_total.value.toFixed(4),
+      result.system.p_after_total.value.toFixed(4),
+      result.system.ke_before_total.value.toFixed(4),
+      result.system.ke_after_total.value.toFixed(4),
+    ],
+  ];
+  const csv = rows.map((r) => r.join(",")).join("\n");
+  return new Blob([csv], { type: "text/csv" });
+}
+```
+
+**PDF export:** Use `jspdf` + `html2canvas`. Render the ResultsPage DOM subtree to canvas; insert into PDF. This avoids a server round-trip.
+
+```typescript
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+
+async function exportPDF(containerRef: RefObject<HTMLDivElement>) {
+  const canvas = await html2canvas(containerRef.current!);
+  const pdf = new jsPDF({ orientation: "portrait", unit: "px", format: "a4" });
+  pdf.addImage(
+    canvas.toDataURL("image/png"),
+    "PNG",
+    0,
+    0,
+    pdf.internal.pageSize.width,
+    0,
+  );
+  pdf.save(`physics_results_${Date.now()}.pdf`);
+}
+```
+
+**JSON export:** `JSON.stringify(result, null, 2)` wrapped in a `Blob`.
+
+### 4.10 Results Table Formatting
+
+All `UFloat` values are displayed as: `{value.toFixed(3)} ± {uncertainty.toFixed(3)} {unit}`
+
+Colour coding for momentum conservation:
+
+- `|momentum_conserved_pct.value - 100| < 2%` → green ✓
+- `2–5%` → amber ⚠
+- `> 5%` → red ✗
+
+### 4.11 Phone Sub-App — Framing Guide
+
+While waiting for `record:start`, the phone shows its own camera preview. An overlay indicates whether the sync dot is in the expected region.
+
+**Framing check (visual only — no ML):**
+
+- Draw a dashed rectangle in the top-left quadrant of the preview
+- Text label: "Ensure laptop screen dot is visible here"
+- The actual sync verification is done by Python post-recording; this is guidance only
+
+---
+
+## 5. Execution Model
+
+| Component             | Invocation                   | Trigger                                     | Concurrency                               |
+| --------------------- | ---------------------------- | ------------------------------------------- | ----------------------------------------- |
+| Router & Shell        | Continuous                   | App load                                    | Single-threaded (React render loop)       |
+| WebSocket Client      | Async, event-driven          | App load; reconnect on close                | Single connection; message queue          |
+| WebRTC Peer Manager   | Async, event-driven          | `phone:joined` WS message                   | One `RTCPeerConnection` per phone (max 3) |
+| Visual Metronome      | rAF loop                     | Screen 3 mount                              | Single rAF callback; no workers           |
+| FrameScrubber preload | Async, demand-driven         | `currentFrame` change                       | Concurrent image loads (browser-native)   |
+| TrajectoryCanvas      | Synchronous                  | `currentFrame` change; `BallTrack[]` update | Single rAF or direct call                 |
+| BallSeedPicker        | Synchronous                  | User mouse/touch events                     | —                                         |
+| MediaRecorder (phone) | Async, command-driven        | `record:start` WS message                   | Single recorder per phone page            |
+| Upload XHR (phone)    | Async                        | `recorder.onstop`                           | Single XHR with progress                  |
+| Export functions      | Async (PDF), Sync (CSV/JSON) | User click                                  | —                                         |
+
+**Timing model:**
+
+- Visual Metronome: must complete `tick()` within one rAF interval (< 16ms). Canvas clear + single arc draw is O(1), well within budget.
+- Trajectory rendering: O(N_balls × N_frames) per draw call. At 3 balls × 900 frames (30s @ 30fps) = 2700 `lineTo` calls per canvas → < 2ms in Chrome on modern hardware.
+- FrameScrubber preload: images are 1080p PNGs served from localhost. Decode ~10ms each. Preload window of 20 frames → ~200ms total, distributed asynchronously.
+
+---
+
+## 6. State & Data Flow
+
+### End-to-End Flow
+
+```
+Screen 1 (Setup):
+  User → POST /api/experiments → experimentId → sessionStore
+  Phone → WS join → WebRTC offer → PC answer → MediaStream → sessionStore.cameras
+  User inputs masses → sessionStore.ballConfigs
+
+Screen 2 (Calibration):
+  User → "Run Calibration" → POST /api/calibrate → 202
+  WS stream: calibration:progress → calibrationStore.status
+  WS: calibration:complete → calibrationStore.result, .reprojectionError
+
+Screen 3 (Recording):
+  Mount → VisualMetronome starts, frame_index = 0
+  User → "Record" → WS: record:start → phones start MediaRecorder
+  User → "Stop" → WS: record:stop → phones stop MediaRecorder → upload
+  WS: upload:progress → per-camera progress bars in UI
+  WS: frames:ready → trackingStore.frameCount updated per camera
+
+Screen 4 (Tracking):
+  Load frame 0 → BallSeedPicker rendered
+  User places seeds → trackingStore.seeds
+  "Track" → POST /api/track → WS stream: tracking:update → trackingStore.tracks
+  User drags correction → POST /api/correct → re-tracking stream → trackingStore updated
+  "Compute Physics" → POST /api/physics → WS: physics:result → resultsStore.physicsResult
+
+Screen 5 (Results):
+  Read resultsStore.physicsResult → render all charts and tables
+  Export → Blob → download
+```
+
+### Retained State
+
+| Store                      | Persisted?               | How                                                              |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------- |
+| sessionStore               | Session only (in-memory) | Lost on page refresh; must restart experiment                    |
+| calibrationStore.profiles  | Yes                      | Fetched from Node SQLite on Screen 2 mount                       |
+| trackingStore.tracks       | Session only             | Re-fetched from Node if page reloaded (GET /api/experiments/:id) |
+| resultsStore.physicsResult | Session only             | Re-fetched if needed                                             |
+
+**No localStorage or sessionStorage is used.** All state that must survive a refresh lives in the Node.js backend.
+
+### Intermediate Representations
+
+- `chunks: Blob[]` — `MediaRecorder` data chunks, held in phone's RAM until upload. Typical size: 100 Mbps × 60s = ~750 MB worst case. Acceptable on modern phones.
+- `preloadCache: Map<number, HTMLImageElement>` — FrameScrubber cache. Max 50 entries × ~500KB/frame (1080p PNG) ≈ 25 MB. Acceptable.
+- `pendingWSMessages: OutboundMessage[]` — queue when disconnected. Max 20.
+
+---
+
+## 7. Integration Points
+
+### 7.1 Session Creation
+
+```
+1. User opens http://localhost:5173
+2. React app loads → Shell mounts → WS connection established
+3. User clicks "New Session" on Screen 1
+4. Frontend: POST /api/experiments → { experimentId: "abc123..." }
+5. Frontend: stores experimentId in sessionStore
+6. Frontend: renders QR code with room code
+```
+
+### 7.2 Phone Connection
+
+```
+1. Operator scans QR → opens http://<ip>:3000/phone?room=ABC123
+2. PhonePage: connects WS with params ?room=ABC123&type=phone
+3. Node: registers phone peer, broadcasts 'phone:joined' to PC
+4. PC: receives 'phone:joined' → WebRTC offer/answer via WS signaling
+5. RTCPeerConnection established → MediaStream flows to PC
+6. 'track' event fires → sessionStore.cameras[n].stream = stream
+```
+
+### 7.3 Recording Lifecycle
+
+```
+1. PC: user clicks Record → WS send { type: 'record:start', experimentId }
+2. Node: broadcasts to all phones in session
+3. Phones: start MediaRecorder
+4. PC: user clicks Stop → WS send { type: 'record:stop', experimentId }
+5. Phones: stop MediaRecorder → assemble Blob → POST /api/upload/:id/:camId
+6. Node: receives upload → runs ffmpeg → PNG sequence
+7. Node: WS send { type: 'frames:ready', frameCount }
+8. PC: enables "Proceed to Tracking" button
+```
+
+### 7.4 Tracking & Physics
+
+```
+1. PC: POST /api/experiments/:id/track body: { seeds }
+2. Node: calls Python gRPC TrackBalls(TrackingRequest)
+3. Python: streams TrackingStatus messages back
+4. Node: relays each as WS { type: 'tracking:update', data }
+5. PC: appends to trackingStore.tracks
+
+6. [Optional corrections]:
+   POST /api/experiments/:id/correct body: CorrectionKeyframe
+   → triggers re-propagation from keyframe
+   → new tracking:update stream for affected frames
+
+7. PC: POST /api/experiments/:id/physics body: { massConfigs }
+8. Node: calls Python gRPC ComputePhysics(PhysicsRequest)
+9. Python: returns PhysicsResult
+10. Node: WS send { type: 'physics:result', data }
+11. PC: resultsStore updated; navigate to Screen 5
+```
+
+### 7.5 Error Propagation
+
+| Error                                      | Source          | Frontend Response                                                              |
+| ------------------------------------------ | --------------- | ------------------------------------------------------------------------------ |
+| WS disconnects                             | Network         | Reconnect with backoff; show banner                                            |
+| `calibration:failed`                       | Python          | Toast with reason; re-enable calibration button                                |
+| `tracking:update` with all-zero confidence | Python          | Flag those frames; prompt user correction                                      |
+| Upload XHR fails                           | Node or network | Retry once after 3s; if still failing, show error with manual retry button     |
+| `physics:failed`                           | Python          | Toast with reason; allow re-triggering                                         |
+| MediaRecorder unsupported                  | Phone browser   | Show error: "This browser does not support recording. Please use Chrome."      |
+| RTCPeerConnection fails                    | Network         | Show per-camera "Reconnect" button; recording can proceed without live preview |
+
+---
+
+## 8. Edge Cases & Failure Handling
+
+| Scenario                                           | Detection                                                           | Recovery                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Phone leaves mid-recording                         | WebSocket `close` event from phone                                  | Show warning; recording on phone continues locally (WS reconnects on upload)                                |
+| rAF jitter > 2ms                                   | Measured during Metronome calibration                               | Warn user; record `jitter_ms` in SyncDotConfig for Python uncertainty budget                                |
+| Metronome tab backgrounded                         | `visibilitychange` event                                            | Pause animation; show "Recording paused — please keep this tab visible"                                     |
+| User clicks > 3 seeds                              | Seed count check in BallSeedPicker                                  | Toast: "Maximum 3 balls"; refuse 4th click                                                                  |
+| Frame PNG 404 (ffmpeg incomplete)                  | `img.onerror`                                                       | Show grey placeholder; poll once per second until available                                                 |
+| Upload blob > 2GB                                  | `blob.size` check before XHR                                        | Chunk upload using XHR with Range headers (Node must support) OR warn user to reduce recording duration     |
+| calibration:complete with reprojection_error > 1px | Result inspection in calibrationStore                               | Show red warning: "Poor calibration quality (Xpx). Results may be inaccurate. Retry or use ruler fallback." |
+| No phones connected, only PC webcam                | `sessionStore.cameras.filter(c => c.type === 'phone').length === 0` | Allow single-camera mode; no QR code required                                                               |
+| Correction on already-corrected frame              | `isCorrected` flag check                                            | Allow; replace previous correction; re-propagate                                                            |
+| Track data partially missing on page reload        | GET /api/experiments/:id → check `results/tracks.json` exists       | Re-fetch from Node file API; restore to trackingStore                                                       |
+
+### Simulating Failures (for dev/testing)
+
+```typescript
+// WebSocket disconnect simulation
+// In browser console:
+window.__debugWS?.close();
+
+// Inject a fake tracking update with low confidence:
+window.__debugStore?.trackingStore.getState().onTrackingUpdate({
+  frame: 45,
+  progress: 0.5,
+  points: [{ ballId: 0, cameraId: 0, x: 120, y: 340, confidence: 0.3 }],
+});
+```
+
+---
+
+## 9. Accuracy & Error Sources
+
+### Visual Metronome
+
+| Error Source               | Magnitude | Notes                                                                             |
+| -------------------------- | --------- | --------------------------------------------------------------------------------- |
+| rAF jitter                 | ±0.5–2ms  | Measured and stored in SyncDotConfig; used by Python as input to sync uncertainty |
+| Monitor refresh inaccuracy | ±0.01%    | Negligible; rAF is phase-locked to VSync                                          |
+| Rendering pipeline delay   | ~0–1ms    | Canvas 2D GPU submit latency; absorbed by Python linear fit                       |
+
+**Frontend's responsibility:** provide accurate `speed_px_per_frame` to Python as part of experiment metadata. Python does not rely on this value for sync computation (it measures the dot directly); it is a sanity check only.
+
+### Frame Scrubber
+
+The scrubber has no accuracy implications — it is a display tool. PNG decode fidelity is lossless by definition.
+
+### Canvas Overlay
+
+- Trajectory rendering uses float64 positions. The `toCanvas()` transform is linear with no rounding until the final `lineTo()` call. Sub-pixel positions are preserved in the store even if rendered at integer canvas pixels.
+- Hit testing uses frame-coordinate distances, not canvas-coordinate distances. This is correct regardless of zoom level.
+
+### Export
+
+- CSV values are formatted to 4 decimal places (values are typically O(1) m/s). Underlying `float64` precision is preserved in JSON export.
+- PDF export uses `html2canvas` rasterisation at 2× device pixel ratio. This is for visual output only; scientists should use CSV/JSON for computation.
+
+---
+
+## 10. Testing Strategy
+
+### 10.1 Unit Tests (Vitest)
+
+| Component                     | Test                                                       | Expected Output                                         |
+| ----------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| `SyncDotConfig` calibration   | Mock rAF with known 16.67ms intervals                      | `speed_px_per_frame = speed_px_per_second / 60 ± 0.001` |
+| `SyncDotConfig` calibration   | Mock rAF with 10% jitter                                   | `rAF_jitter_ms > 2`; warning emitted                    |
+| `toCanvas` / `toFrame`        | Round-trip: `toFrame(toCanvas(x,y))` for 100 random points | Recover within ±0.01px                                  |
+| `findNearestPoint`            | Place point at (100,100); query at (105,103)               | Returns that point                                      |
+| `findNearestPoint`            | Query at (200,200) with no points nearby                   | Returns null                                            |
+| `exportCSV`                   | Known PhysicsResult fixture                                | Exact CSV string match                                  |
+| `toChartData`                 | Known VelocityTimeSeries                                   | `v_low = v - v_uncertainty` for each point              |
+| `BallSeedPicker`              | 4th click after 3 seeds                                    | No 4th seed added; toast emitted                        |
+| `sessionStore.advancePhase()` | Call from each valid phase                                 | Correct next phase                                      |
+| `wsClient` message dispatch   | Inject `{ type: 'tracking:update', ... }`                  | `trackingStore` updated correctly                       |
+| `wsClient` reconnect          | Close mock WS after first connect                          | Reconnects within 500ms (mocked timer)                  |
+
+### 10.2 Integration Tests (Playwright)
+
+| Flow                                             | Test                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| Screen 1 → Screen 5 (happy path, mocked backend) | All 5 screens reachable; data flows from mock WS responses to display |
+| Ball seed placement                              | Click 3 positions on frame 0 canvas; verify 3 seeds in store          |
+| Manual correction drag                           | Simulate mousedown+move+up; verify `CorrectionKeyframe` POSTed        |
+| Upload progress                                  | Mock XHR progress events; verify progress bar updates                 |
+| Export CSV                                       | Click export; verify `Blob` download triggered                        |
+
+### 10.3 Visual Regression Tests (Playwright snapshots)
+
+- Screenshot of ResultsPage with known `PhysicsResult` fixture
+- Screenshot of TrajectoryCanvas with 3-ball track data
+- Tolerance: ±2px (anti-aliasing)
+
+### 10.4 Real-World Validation
+
+1. Connect one phone. Record 10 seconds. Verify frames extracted (frame count matches expected at 30fps ± 2 frames).
+2. Place 3 ball seeds. Run tracking. Verify trajectories visually plausible.
+3. Manual correction: drag a flagged point by 10px. Verify store updated; re-tracking triggered.
+4. Verify Results page displays with all fields populated and no NaN/undefined values.
+5. Export CSV. Open in Excel; verify no formatting errors.
+
+---
+
+## 11. Implementation Plan (Step-by-Step)
+
+Each step is independently testable and produces observable output.
+
+### Step 1 — Project Scaffold
+
+- `pnpm create vite frontend --template react-ts`
+- Configure TypeScript strict mode (`tsconfig.json`: `"strict": true`)
+- Install dependencies: `zustand recharts tailwindcss simple-peer protobufjs qrcode jspdf html2canvas`
+- Configure Tailwind
+- Set up React Router v6 with 6 routes: `/setup`, `/calibration`, `/recording`, `/tracking`, `/results`, `/phone`
+- **Observable output:** Dev server starts; all 6 routes render placeholder pages
+
+### Step 2 — WebSocket Client & Shell
+
+- Implement `lib/wsClient.ts` with connect/reconnect/send/dispatch
+- Implement connection status badge in Shell
+- **Observable output:** Badge turns green when Node dev server is running; amber when reconnecting
+
+### Step 3 — Session Store & Screen 1 (Setup)
+
+- Implement `sessionStore`
+- Build Screen 1: "New Session" button → POST `/api/experiments` → store experimentId
+- Render QR code from room code
+- Ball mass config form (1–3 balls, mass + uncertainty)
+- **Observable output:** QR code displayed; mass form values stored in Zustand
+
+### Step 4 — WebRTC Peer Manager + Phone Join
+
+- Implement `lib/webrtc.ts`
+- Handle `phone:joined`, `peer:offer`, `peer:ice` WS messages
+- Send `peer:answer`, `peer:ice`
+- Implement `CameraPreviewGrid` with `<video srcObject>`
+- **Observable output:** Phone opens `/phone?room=XXX`; live preview appears on PC
+
+### Step 5 — Phone Sub-App (`/phone`)
+
+- Implement `PhonePage.tsx`
+- `getUserMedia` with phone constraints + self-preview
+- WebSocket connection + `record:start` / `record:stop` handlers
+- `MediaRecorder` with VP9/MP4 fallback
+- Upload XHR with progress
+- **Observable output:** Phone records 10s; uploads video to Node; ffmpeg extracts frames
+
+### Step 6 — Experiment Recording Screen (Screen 3)
+
+- Implement Visual Metronome (`VisualMetronome.tsx`)
+  - rAF calibration on mount
+  - Animation loop with frame_index counter
+- Layout: left = metronome canvas, right = camera preview grid
+- Record / Stop buttons → WS commands
+- Upload progress per camera
+- **Observable output:** Metronome animates; recording completes; "frames:ready" received
+
+### Step 7 — Frame Scrubber + Trajectory Canvas (Screen 4, Phase A)
+
+- Implement `FrameScrubber.tsx` with preload cache
+- Implement `TrajectoryCanvas.tsx` (rendering only, no interaction yet)
+- Shared `currentFrame` in `trackingStore`
+- Side-by-side camera layout for multi-camera
+- **Observable output:** Scrubbing through extracted PNG frames works; Canvas overlay renders (empty initially)
+
+### Step 8 — Ball Seed Picker
+
+- Implement `BallSeedPicker.tsx` (click + bbox modes)
+- Integrate with `trackingStore.seeds`
+- Enforce 3-ball limit
+- **Observable output:** 3 coloured numbered dots placed on frame 0 canvas; correct frame-coordinate values in store
+
+### Step 9 — Tracking Integration (Screen 4, Phase B)
+
+- "Track All Balls" button → POST `/api/track`
+- Handle streaming `tracking:update` WS messages → append to `trackingStore.tracks`
+- Progress bar
+- Trajectory overlay updates as tracking arrives
+- Flag low-confidence frames with orange ring
+- **Observable output:** Full trajectory paths rendered after tracking completes; flagged frames visible
+
+### Step 10 — Manual Correction
+
+- Implement drag interaction in `TrajectoryCanvas.tsx`
+- Hit testing (`findNearestPoint`)
+- POST `/api/correct` on drag release
+- Handle `tracking:correction_applied` and new `tracking:update` stream
+- **Observable output:** Dragging a flagged point re-runs tracking; trajectory updates in place
+
+### Step 11 — Calibration Screen (Screen 2)
+
+- Implement calibration status flow (WS: `calibration:progress`, `calibration:complete`)
+- Calibration quality score display with colour coding
+- Profile save/load (GET/POST `/api/calibration/profiles`)
+- Ruler fallback mode (two-click tool on frame)
+- **Observable output:** Calibration runs; reprojection error shown; profile saved and reloaded
+
+### Step 12 — Results Screen (Screen 5)
+
+- Implement `VelocityChart` (Recharts with error bars)
+- Implement `MomentumTable`, `EnergyTable`, `ScalarMetrics`
+- Physics trigger: POST `/api/physics` with mass configs
+- Handle `physics:result` WS message
+- **Observable output:** Full results displayed with uncertainty values
+
+### Step 13 — Export
+
+- Implement `exportCSV()`, `exportJSON()`, `exportPDF()`
+- Wire to ExportBar buttons
+- **Observable output:** Downloads work; CSV opens correctly in Excel
+
+### Step 14 — Polish & Hardening
+
+- Navigation guards (can't skip phases if prerequisites missing)
+- Error toasts for all failure modes (Section 8)
+- Phone: `visibilitychange` recording pause warning
+- Loading skeletons for all async states
+- Responsive layout for phone screen sizes
+
+---
+
+## 12. Performance Considerations
+
+### Time Complexity
+
+| Operation            | Complexity                     | Notes                                          |
+| -------------------- | ------------------------------ | ---------------------------------------------- |
+| Trajectory rendering | O(N_balls × N_frames) per draw | 3 × 900 = 2700 ops; < 2ms                      |
+| Hit testing          | O(N_balls × 5)                 | Only ±2 frames searched                        |
+| CSV export           | O(N_balls × N_frames)          | String formatting; < 10ms                      |
+| PDF export           | O(DOM area)                    | html2canvas ~500ms; acceptable (not real-time) |
+
+### Memory Usage
+
+| Buffer                   | Size                            |
+| ------------------------ | ------------------------------- |
+| FrameScrubber cache      | 50 × ~500KB = 25 MB             |
+| `chunks: Blob[]` (phone) | Up to ~750 MB for 60s @ 100Mbps |
+| `BallTrack[]` in store   | 3 × 900 × ~100 bytes = ~270 KB  |
+| `PhysicsResult`          | < 100 KB                        |
+
+### Bandwidth
+
+- WebRTC preview stream: ~1–5 Mbps per camera (H.264 at browser-negotiated bitrate). LAN handles this trivially.
+- PNG frame transfer (scrubber): ~500 KB/request. Pre-loaded in window of 20 → ~10 MB burst. LAN handles this trivially.
+- Video upload: 100 Mbps × 60s = ~750 MB per phone. LAN (802.11ac): ~500 Mbps theoretical; expect ~50–100s transfer time. Acceptable.
+
+### Bottlenecks
+
+- **Phone upload time**: The primary user-perceived bottleneck. Nothing can be done; it is inherent to the 100 Mbps recording strategy. Progress bar makes it acceptable.
+- **PDF export**: html2canvas is slow for large DOM trees. Mitigation: use a dedicated, simplified DOM subtree for PDF capture (not the full page).
+- **TrajectoryCanvas on low-end PCs**: If N_frames > 3000 (5min @ 10fps), batch drawing into path segments, skip rendering frames > 100 away from currentFrame.
+
+---
+
+## 13. Observability
+
+### Logging
+
+All frontend logs use a structured `log()` function:
+
+```typescript
+function log(
+  level: "debug" | "info" | "warn" | "error",
+  component: string,
+  msg: string,
+  data?: object,
+) {
+  if (level === "debug" && !import.meta.env.DEV) return;
+  console[level](`[${component}] ${msg}`, data ?? "");
+}
+```
+
+| Component        | Event                | Level | Fields                                               |
+| ---------------- | -------------------- | ----- | ---------------------------------------------------- |
+| wsClient         | connect              | info  | `url`                                                |
+| wsClient         | disconnect           | warn  | `code`, `reason`, `attempt`                          |
+| wsClient         | message received     | debug | `type`, `size_bytes`                                 |
+| wsClient         | parse error          | error | `raw_text`                                           |
+| webrtc           | peer connected       | info  | `peerId`                                             |
+| webrtc           | ICE failed           | warn  | `peerId`, `state`                                    |
+| VisualMetronome  | calibration complete | info  | `rAF_interval_ms`, `jitter_ms`, `speed_px_per_frame` |
+| VisualMetronome  | jitter warning       | warn  | `jitter_ms`                                          |
+| VisualMetronome  | tab hidden           | warn  | `frame_index`                                        |
+| MediaRecorder    | start                | info  | `mimeType`, `bitrate`                                |
+| MediaRecorder    | stop                 | info  | `chunk_count`, `total_bytes`                         |
+| Upload           | progress             | debug | `percent`                                            |
+| Upload           | complete             | info  | `duration_ms`, `bytes`                               |
+| TrajectoryCanvas | correction           | info  | `ballId`, `frameIdx`, `dx`, `dy`                     |
+
+### Metrics (Dev Mode)
+
+Exposed on `window.__metrics` in dev builds:
+
+```typescript
+window.__metrics = {
+  rAF_interval_ms: number,
+  rAF_jitter_ms: number,
+  frames_cached: number,
+  ws_reconnects: number,
+  ws_queue_depth: number,
+  last_tracking_update_latency_ms: number, // time from WS receive to store update
+};
+```
+
+### Debug Hooks
+
+```typescript
+// In dev builds only:
+window.__debugStore = {
+  sessionStore: useSessionStore.getState,
+  trackingStore: useTrackingStore.getState,
+  resultsStore: useResultsStore.getState,
+};
+window.__debugWS = wsClient;
+window.__debugMetronome = metronomeRef; // access frame_index, config
+```
+
+---
+
+## 14. Future Improvements
+
+| Item                                      | What Was Simplified                   | Upgrade Path                                                                        |
+| ----------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------- |
+| 3D trajectory visualisation               | Placeholder only in this plan         | Add Three.js scene on Screen 4; render 3D track from triangulated positions         |
+| Calibration board auto-detection feedback | No live corner overlay during capture | Stream OpenCV corner detection preview back via WebSocket as JPEG                   |
+| Multi-experiment comparison               | Single session only                   | Add experiment history sidebar; ResultsStore becomes a map                          |
+| Offline / PWA caching                     | No service worker                     | Add Vite PWA plugin; cache app shell; experiment data stays on Node                 |
+| Live confidence indicator during tracking | Only shown post-completion            | Stream `TrackingStatus` messages in real-time to update a live confidence sparkline |
+| Phone @ 120fps                            | iOS 30fps cap with PWA                | Replace PhonePage with native Swift app; rest of system unchanged                   |
+| Undo/redo for corrections                 | Corrections are irreversible          | Add correction history stack to trackingStore; expose undo button                   |
+| Ruler scale calibration accuracy          | Two-point click (user error ~5px)     | Add multi-point ruler fit; show residuals                                           |
