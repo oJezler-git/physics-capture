@@ -35,8 +35,14 @@ try:
 except ImportError:
     # Fallback for systems without SAM2 installed
     class SAM2Tracker:
-        pass
-    logger.warning("SAM2Tracker not found, tracking will use simulation.")
+        def track(self, frames_dir, seeds):
+            # Fallback for when SAM2 is not installed: just yield seed positions
+            logger.warning("SAM2 is not installed. Using basic seed-only tracking fallback.")
+            frame_files = sorted(list(frames_dir.glob("*.jpg")) + list(frames_dir.glob("*.png")))
+            total_frames = len(frame_files)
+            for i in range(total_frames):
+                yield i, [{"ball_id": s["ball_id"], "x": s["x"], "y": s["y"], "confidence": 0.1} for s in seeds], i / max(1, total_frames - 1)
+    logger.warning("SAM2Tracker not found, tracking will use basic seed positions.")
 
 # Import physics pipeline
 from physics.pipeline import run_physics_pipeline
@@ -59,15 +65,68 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
 
     async def TrackBalls(self, request, context):
         logger.info(f"TrackBalls called for experiment {request.experiment_id}")
-        # (Existing simulation implementation preserved for now)
-        total_frames = 200
-        for frame_idx in range(total_frames):
-            yield physics_pb2.TrackingStatus(
-                frame=frame_idx,
-                progress=frame_idx / (total_frames - 1),
-                points=[],
-                frame_confidence=1.0
-            )
+        experiment_id = request.experiment_id
+        seeds = request.seeds
+        
+        if not seeds:
+            logger.warning("No seeds provided for tracking.")
+            return
+
+        # Group seeds by camera
+        seeds_by_camera = {}
+        for s in seeds:
+            if s.camera_id not in seeds_by_camera:
+                seeds_by_camera[s.camera_id] = []
+            seeds_by_camera[s.camera_id].append({
+                "ball_id": s.ball_id,
+                "frame_idx": s.frame_idx,
+                "x": s.x,
+                "y": s.y
+            })
+            
+        all_cameras = sorted(seeds_by_camera.keys())
+        total_cameras = len(all_cameras)
+        
+        for cam_idx, camera_id in enumerate(all_cameras):
+            frames_dir = self.base_dir / experiment_id / "frames" / f"cam{camera_id}"
+            if not frames_dir.exists():
+                logger.error(f"Frames directory not found: {frames_dir}")
+                continue
+            
+            logger.info(f"Starting tracking for camera {camera_id} in {frames_dir}")
+            
+            try:
+                # Iterate through the tracker generator. 
+                tracker_gen = self.tracker.track(frames_dir, seeds_by_camera[camera_id])
+                for frame_idx, frame_results, progress in tracker_gen:
+                    pb_points = []
+                    for res in frame_results:
+                        pb_points.append(physics_pb2.TrackedPoint(
+                            ball_id=res["ball_id"],
+                            camera_id=camera_id,
+                            x=res["x"],
+                            y=res["y"],
+                            confidence=res["confidence"]
+                        ))
+                    
+                    # Overall progress across all cameras
+                    overall_progress = (cam_idx + progress) / total_cameras
+                    
+                    yield physics_pb2.TrackingStatus(
+                        frame=frame_idx,
+                        progress=overall_progress,
+                        points=pb_points,
+                        frame_confidence=max((p.confidence for p in pb_points), default=0.0)
+                    )
+                    
+                    # Brief yield to allowing other async tasks to breathe
+                    await asyncio.sleep(0)
+                    
+            except Exception as e:
+                logger.exception(f"Error tracking camera {camera_id}: {e}")
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(f"Tracking failed for camera {camera_id}: {str(e)}")
+                return
 
     async def ComputePhysics(self, request, context):
         logger.info(f"ComputePhysics for experiment {request.experiment_id}")

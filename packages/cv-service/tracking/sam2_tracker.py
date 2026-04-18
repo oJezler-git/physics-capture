@@ -63,12 +63,12 @@ class SAM2Tracker:
             logger.exception("SAM2 initialization failed; using fallback tracker: %s", exc)
             self.predictor = None
 
-    def track(self, frames_dir: Path, seeds: List[Tuple[int, int]]):
+    def track(self, frames_dir: Path, seeds: List[dict]):
         """
         frames_dir: Path to extracted PNG frames
-        seeds: List of (x, y) coordinates for initial clicks
+        seeds: List of dicts with {ball_id, frame_idx, x, y}
         """
-        frame_files = sorted(frames_dir.glob("*.jpg"))
+        frame_files = sorted(list(frames_dir.glob("*.png")) + list(frames_dir.glob("*.jpg")))
         if not frame_files:
             raise FileNotFoundError(f"No extracted frames found in {frames_dir}")
 
@@ -79,14 +79,18 @@ class SAM2Tracker:
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             inference_state = self.predictor.init_state(video_path=str(frames_dir))
 
-            # Add initial seed points at frame 0.
-            for i, (x, y) in enumerate(seeds):
+            # Add initial seed points.
+            for seed in seeds:
+                x, y = seed["x"], seed["y"]
+                frame_idx = seed.get("frame_idx", 0)
+                obj_id = seed["ball_id"] + 1 # 1-indexed for SAM2
+                
                 points = np.array([[float(x), float(y)]], dtype=np.float32)
                 labels = np.array([1], dtype=np.int32)
                 self.predictor.add_new_points(
                     inference_state=inference_state,
-                    frame_idx=0,
-                    obj_id=i + 1,
+                    frame_idx=frame_idx,
+                    obj_id=obj_id,
                     points=points,
                     labels=labels,
                 )
@@ -110,7 +114,7 @@ class SAM2Tracker:
                 idx = int(frame_idx)
                 yield (idx, frame_results, idx / max(1, total_frames - 1))
 
-    def _fallback_track(self, frame_files: List[Path], seeds: List[Tuple[int, int]]):
+    def _fallback_track(self, frame_files: List[Path], seeds: List[dict]):
         """
         Deterministic fallback when SAM2 cannot initialize:
         repeats seed positions across all frames with low confidence.
@@ -119,12 +123,12 @@ class SAM2Tracker:
         total_frames = len(frame_files)
         for frame_idx, _ in enumerate(frame_files):
             frame_results = []
-            for ball_id, (x, y) in enumerate(seeds):
+            for seed in seeds:
                 frame_results.append(
                     {
-                        "ball_id": ball_id,
-                        "x": float(x),
-                        "y": float(y),
+                        "ball_id": seed["ball_id"],
+                        "x": float(seed["x"]),
+                        "y": float(seed["y"]),
                         "confidence": 0.25,
                     }
                 )

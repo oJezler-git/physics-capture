@@ -46,7 +46,7 @@ export const TrackingPage = () => {
   const activeCameraIndex = resolvedActiveCameraId
     ? cameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
     : -1;
-  const frameFile = `frame_${String(currentFrame + 1).padStart(6, '0')}.png`;
+  const frameFile = `${String(currentFrame + 1).padStart(6, '0')}.jpg`;
   const frameSrc =
     experimentId && activeCameraIndex >= 0
       ? `/api/experiments/${encodeURIComponent(experimentId)}/frames/${activeCameraIndex}/${frameFile}`

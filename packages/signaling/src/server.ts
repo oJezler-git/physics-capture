@@ -158,14 +158,9 @@ app.post("/api/calibration/profiles", async (req, res) => {
 
 import { runCalibration } from "./grpc-client.js";
 
-// ... (other imports)
-
 app.post("/api/calibrate", async (req, res) => {
   try {
     const { experimentId } = req.body;
-    // Get camera IDs from the session store or request body
-    // Assuming for now we want to calibrate all cameras in the experiment
-    // For smoke test, we'll try to calibrate camera 0
     const calibrationStream = runCalibration({
       experiment_id: experimentId,
       camera_ids: [0] 
@@ -463,7 +458,7 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       return res.status(400).json({ error: "Invalid camera id" });
     }
 
-    if (!/^frame_\d{6}\.png$/i.test(frameFile)) {
+    if (!/^\d{6}\.jpg$/i.test(frameFile)) {
       return res.status(400).json({ error: "Invalid frame filename" });
     }
 

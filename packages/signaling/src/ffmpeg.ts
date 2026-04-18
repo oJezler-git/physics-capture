@@ -18,7 +18,7 @@ export async function extractFrames(
     "-y",
     "-i", videoPath,
     "-fps_mode", "passthrough",
-    path.join(framesDir, "frame_%06d.png"),
+    path.join(framesDir, "%06d.jpg"),
   ]);
 
   return new Promise((resolve, reject) => {
@@ -29,8 +29,8 @@ export async function extractFrames(
         // Count files to return frame count
         try {
           const files = await fs.promises.readdir(framesDir);
-          const pngFiles = files.filter((f) => f.endsWith(".png"));
-          resolve(pngFiles.length);
+          const jpgFiles = files.filter((f) => f.endsWith(".jpg"));
+          resolve(jpgFiles.length);
         } catch (err) {
           reject(err);
         }
