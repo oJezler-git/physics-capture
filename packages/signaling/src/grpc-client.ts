@@ -74,16 +74,23 @@ async function* callStreamingRpc<TRequest, TResponse>(
     notify();
   });
 
-  while (true) {
-    while (queue.length > 0) {
-      const item = queue.shift()!;
-      if (item.error) throw mapGrpcError(item.error);
-      if (item.done) return;
-      yield item.value!;
+  try {
+    while (true) {
+      while (queue.length > 0) {
+        const item = queue.shift()!;
+        if (item.error) throw mapGrpcError(item.error);
+        if (item.done) return;
+        yield item.value!;
+      }
+      await new Promise<void>((r) => {
+        resolve = r;
+      });
     }
-    await new Promise<void>((r) => {
-      resolve = r;
-    });
+  } finally {
+    // Cancel stream when consumer exits early (for example range-limited tracking).
+    if (!stream.destroyed) {
+      stream.cancel();
+    }
   }
 }
 
