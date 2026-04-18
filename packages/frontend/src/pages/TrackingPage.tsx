@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BallSeedPicker } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
@@ -12,7 +12,7 @@ const FRAME_HEIGHT = 720;
 
 export const TrackingPage = () => {
   const navigate = useNavigate();
-  const { cameras, advancePhase, experimentId } = useSessionStore();
+  const { cameras, ballConfigs, advancePhase, experimentId } = useSessionStore();
   const {
     frameCount,
     currentFrame,
@@ -34,7 +34,14 @@ export const TrackingPage = () => {
   const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle',
   );
+  const [seedFrameIdx, setSeedFrameIdx] = useState(0);
+  const [trackStartFrameIdx, setTrackStartFrameIdx] = useState(0);
+  const [trackEndFrameIdx, setTrackEndFrameIdx] = useState(0);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const maxBalls = useMemo(() => {
+    const configured = ballConfigs.filter((config) => config.mass_g > 0).length;
+    return Math.min(Math.max(configured || 1, 1), 3);
+  }, [ballConfigs]);
   const resolvedActiveCameraId = activeCameraId ?? cameras[0]?.id ?? null;
   const activeCameraIndex = resolvedActiveCameraId
     ? cameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
@@ -46,12 +53,25 @@ export const TrackingPage = () => {
       : null;
   const correctionEnabled = tracks.length > 0 && status !== 'tracking';
   const seedInteractive =
-    currentFrame === 0 &&
+    currentFrame === seedFrameIdx &&
     tracks.length === 0 &&
     status !== 'tracking' &&
     frameImageState === 'ready' &&
     activeCameraIndex >= 0;
   const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
+  const activeCameraSeedCount = seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length;
+  const camerasMissingSeeds = cameras.filter((camera) => {
+    const cameraSeedCount = seeds.filter((seed) => seed.cameraId === camera.id).length;
+    return cameraSeedCount < maxBalls;
+  });
+  const hasRequiredSeedCoverage = cameras.length > 0 && camerasMissingSeeds.length === 0;
+  const statusLabel =
+    status === 'tracking'
+      ? `Tracking ${trackStartFrameIdx + 1}-${trackEndFrameIdx + 1}`
+      : status === 'complete'
+        ? 'Tracking complete'
+        : 'Ready to seed';
+  const progressPct = Math.round(progress * 100);
 
   useEffect(() => {
     if (isPlaying && frameCount > 0) {
@@ -74,6 +94,20 @@ export const TrackingPage = () => {
     }
     setFrameImageState('loading');
   }, [frameSrc]);
+
+  useEffect(() => {
+    if (frameCount <= 0) return;
+    setSeedFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
+    setTrackStartFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
+    setTrackEndFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
+  }, [frameCount]);
+
+  useEffect(() => {
+    if (frameCount > 0 && seeds.length === 0 && tracks.length === 0) {
+      setTrackStartFrameIdx(0);
+      setTrackEndFrameIdx(frameCount - 1);
+    }
+  }, [frameCount, seeds.length, tracks.length]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -123,6 +157,22 @@ export const TrackingPage = () => {
       setTrackingError('Place at least one seed before running auto-tracker.');
       return;
     }
+    if (!hasRequiredSeedCoverage) {
+      setTrackingError(
+        `Seed all cameras before tracking (${maxBalls} per camera). Missing: ${camerasMissingSeeds
+          .map((camera) => camera.label)
+          .join(', ')}`,
+      );
+      return;
+    }
+    if (trackEndFrameIdx < trackStartFrameIdx) {
+      setTrackingError('Tracking end frame must be after start frame.');
+      return;
+    }
+    if (seedFrameIdx < trackStartFrameIdx || seedFrameIdx > trackEndFrameIdx) {
+      setTrackingError('Seed frame must be inside the selected tracking range.');
+      return;
+    }
 
     const unresolvedSeeds = seeds.filter(
       (seed) => cameras.findIndex((camera) => camera.id === seed.cameraId) < 0,
@@ -155,6 +205,8 @@ export const TrackingPage = () => {
         body: JSON.stringify({
           experiment_id: experimentId,
           seeds: requestSeeds,
+          start_frame_idx: trackStartFrameIdx,
+          end_frame_idx: trackEndFrameIdx,
         }),
       });
 
@@ -188,7 +240,9 @@ export const TrackingPage = () => {
         payload.tracks?.map((track) => ({
           ballId: track.ballId,
           cameraId: cameras[track.cameraId]?.id ?? String(track.cameraId),
-          points: track.points,
+          points: track.points.filter(
+            (point) => point.frameIdx >= trackStartFrameIdx && point.frameIdx <= trackEndFrameIdx,
+          ),
         })) ?? [];
 
       console.log('[Tracking] Tracking completed', {
@@ -213,27 +267,34 @@ export const TrackingPage = () => {
         <div className="space-y-2">
           <p className="eyebrow">Phase 04 - Tracking</p>
           <h1 className="text-3xl">Trajectory Analysis Console</h1>
-          <p className="subtle-copy">Seed frame zero, run SAM2, then drag points for correction.</p>
+          <p className="subtle-copy">
+            1) choose seed frame, 2) place {maxBalls} seeds per camera, 3) set frame range, 4) run
+            SAM2, 5) review and correct flagged points.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="ui-pill">{status}</span>
+          <span className="ui-pill">{statusLabel}</span>
           {status === 'tracking' ? (
-            <div className="w-52 overflow-hidden rounded-full border border-slate-700 bg-slate-900">
-              <div
-                className="h-2 bg-gradient-to-r from-sky-400 to-orange-400 transition-all"
-                style={{ width: `${progress * 100}%` }}
-              />
-            </div>
+            <>
+              <div className="w-52 overflow-hidden rounded-full border border-slate-700 bg-slate-900">
+                <div
+                  className="h-2 bg-gradient-to-r from-sky-400 to-orange-400 transition-all"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <span className="ui-pill">{progressPct}%</span>
+            </>
           ) : null}
           <button
+            disabled={tracks.length === 0 || status === 'tracking'}
             onClick={() => {
               advancePhase();
               navigate('/results');
             }}
             className="btn-main"
           >
-            Finalize Data
+            Continue to Results
           </button>
         </div>
       </header>
@@ -293,10 +354,12 @@ export const TrackingPage = () => {
                 <BallSeedPicker
                   cameraId={resolvedActiveCameraId}
                   currentFrame={currentFrame}
+                  seedFrameIdx={seedFrameIdx}
+                  maxBalls={maxBalls}
                   frameWidth={FRAME_WIDTH}
                   frameHeight={FRAME_HEIGHT}
                   seeds={seeds}
-                  onAddSeed={addSeed}
+                  onAddSeed={(seed) => addSeed(seed, maxBalls)}
                   interactive={seedInteractive}
                   className="relative z-20 h-full w-full cursor-crosshair"
                 />
@@ -308,14 +371,31 @@ export const TrackingPage = () => {
                 {activeCamera?.label || 'No Camera Selected'}
               </span>
               <span className="ui-pill">
-                {currentFrame} / {frameCount}
+                Frame {currentFrame + 1} / {Math.max(frameCount, 1)}
+              </span>
+              <span className="ui-pill border-amber-400/35 text-amber-100">
+                Seed {seedFrameIdx + 1}
+              </span>
+              <span className="ui-pill border-orange-400/35 text-orange-100">
+                Range {trackStartFrameIdx + 1}-{trackEndFrameIdx + 1}
               </span>
             </div>
 
             <div className="absolute bottom-6 right-6 flex flex-wrap gap-2">
-              <span className="ui-pill border-sky-400/35 text-sky-100">Ball 1</span>
-              <span className="ui-pill border-lime-400/35 text-lime-100">Ball 2</span>
-              <span className="ui-pill border-orange-400/35 text-orange-100">Ball 3</span>
+              {Array.from({ length: maxBalls }, (_, index) => (
+                <span
+                  key={`ball-badge-${index}`}
+                  className={
+                    index === 0
+                      ? 'ui-pill border-sky-400/35 text-sky-100'
+                      : index === 1
+                        ? 'ui-pill border-lime-400/35 text-lime-100'
+                        : 'ui-pill border-orange-400/35 text-orange-100'
+                  }
+                >
+                  Ball {index + 1}
+                </span>
+              ))}
             </div>
           </section>
 
@@ -365,20 +445,96 @@ export const TrackingPage = () => {
             <div className="surface-soft space-y-2 p-3">
               <p className="eyebrow">Seed Coverage</p>
               <p className="text-sm text-slate-300">
-                {seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length} / 3 for
-                active camera
+                Active camera: {activeCameraSeedCount} / {maxBalls} seeds
               </p>
               <p className="text-xs text-slate-500">
-                Place seeds on frame 0. After tracking, drag low-confidence points to correct.
+                Overall: {cameras.length - camerasMissingSeeds.length}/{cameras.length} cameras ready
               </p>
+              <p className="text-xs text-slate-500">
+                Tap Seed = center click. Box Seed = drag rectangle around a ball.
+              </p>
+              {!hasRequiredSeedCoverage ? (
+                <p className="text-xs text-amber-200">
+                  Still missing seeds on: {camerasMissingSeeds.map((camera) => camera.label).join(', ')}
+                </p>
+              ) : (
+                <p className="text-xs text-emerald-200">All cameras fully seeded. Ready to run.</p>
+              )}
+            </div>
+
+            <div className="surface-soft space-y-3 p-3">
+              <p className="eyebrow">Frame Controls</p>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="text-xs text-slate-400">
+                  Seed frame
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(frameCount, 1)}
+                    value={seedFrameIdx + 1}
+                    onChange={(event) =>
+                      setSeedFrameIdx(
+                        Math.min(
+                          Math.max(Number(event.target.value || 1) - 1, 0),
+                          Math.max(frameCount - 1, 0),
+                        ),
+                      )
+                    }
+                    className="field-shell mt-1"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Start
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(frameCount, 1)}
+                    value={trackStartFrameIdx + 1}
+                    onChange={(event) =>
+                      setTrackStartFrameIdx(
+                        Math.min(
+                          Math.max(Number(event.target.value || 1) - 1, 0),
+                          Math.max(frameCount - 1, 0),
+                        ),
+                      )
+                    }
+                    className="field-shell mt-1"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  End
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(frameCount, 1)}
+                    value={trackEndFrameIdx + 1}
+                    onChange={(event) =>
+                      setTrackEndFrameIdx(
+                        Math.min(
+                          Math.max(Number(event.target.value || 1) - 1, 0),
+                          Math.max(frameCount - 1, 0),
+                        ),
+                      )
+                    }
+                    className="field-shell mt-1"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSeedFrameIdx(currentFrame)}
+                className="btn-alt w-full py-2"
+              >
+                Use Current Frame as Seed Frame
+              </button>
             </div>
 
             <button
-              disabled={seeds.length === 0 || status === 'tracking'}
+              disabled={!hasRequiredSeedCoverage || status === 'tracking'}
               onClick={handleRunAutoTracker}
               className="btn-main w-full"
             >
-              Run Auto-Tracker
+              Run SAM2 Tracking
             </button>
           </section>
 

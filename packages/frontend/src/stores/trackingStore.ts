@@ -13,7 +13,7 @@ interface TrackingState {
   // Actions
   setFrameCount: (n: number) => void;
   setFrame: (n: number) => void;
-  addSeed: (seed: BallSeed) => boolean;
+  addSeed: (seed: BallSeed, maxBalls?: number) => boolean;
   removeSeed: (ballId: number, cameraId: string) => void;
   startTracking: () => void;
   setStatus: (status: TrackingState['status'], progress?: number) => void;
@@ -39,7 +39,7 @@ export const useTrackingStore = create<TrackingState>((set) => ({
       currentFrame: Math.max(0, Math.min(n, state.frameCount - 1)),
     })),
 
-  addSeed: (seed) => {
+  addSeed: (seed, maxBalls = 3) => {
     let accepted = false;
 
     set((state) => {
@@ -47,7 +47,7 @@ export const useTrackingStore = create<TrackingState>((set) => ({
       const hasExistingBallSeed = cameraSeeds.some((entry) => entry.ballId === seed.ballId);
       const uniqueBallCount = new Set(cameraSeeds.map((entry) => entry.ballId)).size;
 
-      if (!hasExistingBallSeed && uniqueBallCount >= 3) {
+      if (!hasExistingBallSeed && uniqueBallCount >= maxBalls) {
         return state;
       }
 

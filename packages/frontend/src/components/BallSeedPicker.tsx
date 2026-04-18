@@ -8,6 +8,8 @@ type SeedMode = 'click' | 'bbox';
 interface BallSeedPickerProps {
   cameraId: string | null;
   currentFrame: number;
+  seedFrameIdx: number;
+  maxBalls: number;
   frameWidth: number;
   frameHeight: number;
   seeds: BallSeed[];
@@ -39,6 +41,8 @@ function normalizeBbox(draft: BboxDraft): BboxDraft {
 export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   cameraId,
   currentFrame,
+  seedFrameIdx,
+  maxBalls,
   frameWidth,
   frameHeight,
   seeds,
@@ -59,7 +63,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   const nextBallId = useMemo(() => {
     const used = new Set(cameraSeeds.map((seed) => seed.ballId));
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < maxBalls; index += 1) {
       if (!used.has(index)) {
         return index;
       }
@@ -86,27 +90,27 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       return;
     }
 
-    if (currentFrame !== 0) {
-      setWarning('Seeds must be placed on frame 0.');
+    if (currentFrame !== seedFrameIdx) {
+      setWarning(`Seeds must be placed on frame ${seedFrameIdx + 1}.`);
       return;
     }
 
     if (nextBallId === null) {
-      setWarning('Maximum 3 balls reached for this camera.');
+      setWarning(`Maximum ${maxBalls} balls reached for this camera.`);
       return;
     }
 
     const accepted = onAddSeed({
       ballId: nextBallId,
       cameraId,
-      frameIdx: 0,
+      frameIdx: seedFrameIdx,
       x: point.x,
       y: point.y,
       bbox,
     });
 
     if (!accepted) {
-      setWarning('Maximum 3 balls reached for this camera.');
+      setWarning(`Maximum ${maxBalls} balls reached for this camera.`);
       return;
     }
 
@@ -192,7 +196,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
               : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
-          Click
+          Tap Seed
         </button>
         <button
           type="button"
@@ -204,10 +208,10 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
               : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
           }`}
         >
-          BBox
+          Box Seed
         </button>
         <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-mono text-slate-200">
-          {cameraSeeds.length} / 3
+          Seeds {cameraSeeds.length} / {maxBalls}
         </span>
       </div>
 
