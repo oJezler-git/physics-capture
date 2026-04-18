@@ -1,0 +1,100 @@
+# packages/cv-service/tests/physics/test_pipeline.py
+
+import pytest
+import json
+import numpy as np
+from pathlib import Path
+from physics.pipeline import run_physics_pipeline
+
+def test_full_pipeline_synthetic(tmp_path):
+    # 1. Create dummy experiment structure
+    experiment_id = "test_experiment"
+    exp_dir = tmp_path / experiment_id
+    results_dir = exp_dir / "results"
+    calibration_dir = exp_dir / "calibration"
+    
+    results_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+    
+    # 2. Generate synthetic data
+    # Ball 0: moving right, collision at frame 50
+    total_frames = 100
+    collision_frame = 50
+    fps = 30.0
+    dt = 1.0 / fps
+    timestamps_ms = [i * dt * 1000.0 for i in range(total_frames)]
+    
+    # Ball 0
+    # Before: v = 1.0 m/s -> x = 100.0 + 1000.0 * t (mm)
+    # Scale: 1 px/mm for simplicity
+    ball0_frames = []
+    for i in range(total_frames):
+        t = i * dt
+        if i < collision_frame:
+            x = 100.0 + 1000.0 * t
+        else:
+            # Rebound at v = -0.5 m/s
+            t_col = collision_frame * dt
+            x_col = 100.0 + 1000.0 * t_col
+            x = x_col - 500.0 * (t - t_col)
+            
+        ball0_frames.append({
+            "frame_idx": i,
+            "x_px": x,
+            "y_px": 200.0,
+            "confidence": 1.0
+        })
+        
+    sync_data = {
+        "cameras": {
+            "cam0": {
+                "timestamps_ms": timestamps_ms
+            }
+        }
+    }
+    
+    tracks_data = {
+        "balls": [
+            {
+                "ball_id": 0,
+                "camera_id": 0,
+                "frames": ball0_frames
+            }
+        ]
+    }
+    
+    calib_data = {
+        "scale_px_per_mm": 1.0,
+        "scale_uncertainty_px_per_mm": 0.001
+    }
+    
+    with open(results_dir / "sync.json", 'w') as f:
+        json.dump(sync_data, f)
+    with open(results_dir / "tracks.json", 'w') as f:
+        json.dump(tracks_data, f)
+    with open(calibration_dir / "cam0_intrinsics.json", 'w') as f:
+        json.dump(calib_data, f)
+        
+    # 3. Run pipeline
+    masses = [{"ball_id": 0, "mass_g": 100.0, "uncertainty_g": 1.0}]
+    results = run_physics_pipeline(
+        experiment_id=experiment_id,
+        base_dir=tmp_path,
+        masses=masses,
+        ke_mode="point_mass"
+    )
+    
+    # 4. Assertions
+    v0_before = results["velocities"]["balls"][0]["v_before"]["value_mps"]
+    v0_after = results["velocities"]["balls"][0]["v_after"]["value_mps"]
+    
+    assert pytest.approx(v0_before, abs=0.01) == 1.0
+    assert pytest.approx(v0_after, abs=0.01) == -0.5
+    
+    # Check momentum
+    p_before = results["momentum"]["system"]["p_before"]["value_kgmps"]
+    assert pytest.approx(p_before, abs=0.001) == 0.1
+    
+    # Check CoR
+    cor = results["momentum"]["system"]["cor"]["value"]
+    assert pytest.approx(cor, abs=0.01) == 0.5

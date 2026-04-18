@@ -68,45 +68,47 @@ class SAM2Tracker:
         frames_dir: Path to extracted PNG frames
         seeds: List of (x, y) coordinates for initial clicks
         """
-        frame_files = sorted(frames_dir.glob("frame_*.png"))
+        frame_files = sorted(frames_dir.glob("*.jpg"))
         if not frame_files:
             raise FileNotFoundError(f"No extracted frames found in {frames_dir}")
 
         if self.predictor is None:
             return self._fallback_track(frame_files, seeds)
 
-        inference_state = self.predictor.init_state(video_path=str(frames_dir))
+        # Apply inference mode and autocast for massive hardware acceleration
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            inference_state = self.predictor.init_state(video_path=str(frames_dir))
 
-        # Add initial seed points at frame 0.
-        for i, (x, y) in enumerate(seeds):
-            points = np.array([[float(x), float(y)]], dtype=np.float32)
-            labels = np.array([1], dtype=np.int32)
-            self.predictor.add_new_points(
-                inference_state=inference_state,
-                frame_idx=0,
-                obj_id=i + 1,
-                points=points,
-                labels=labels,
-            )
-
-        # Propagate through video.
-        results = {}
-        for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
-            frame_results = []
-            for i, obj_id in enumerate(obj_ids):
-                mask_np = self._to_numpy_mask(masks[i])
-                centroid = self._get_centroid(mask_np)
-                frame_results.append(
-                    {
-                        "ball_id": int(obj_id) - 1,
-                        "x": centroid[0],
-                        "y": centroid[1],
-                        "confidence": float(mask_np.max()) if mask_np.size else 0.0,
-                    }
+            # Add initial seed points at frame 0.
+            for i, (x, y) in enumerate(seeds):
+                points = np.array([[float(x), float(y)]], dtype=np.float32)
+                labels = np.array([1], dtype=np.int32)
+                self.predictor.add_new_points(
+                    inference_state=inference_state,
+                    frame_idx=0,
+                    obj_id=i + 1,
+                    points=points,
+                    labels=labels,
                 )
-            results[int(frame_idx)] = frame_results
 
-        return results
+            # Propagate through video.
+            total_frames = len(frame_files)
+            for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
+                frame_results = []
+                for i, obj_id in enumerate(obj_ids):
+                    mask_np = self._to_numpy_mask(masks[i])
+                    centroid = self._get_centroid(mask_np)
+                    frame_results.append(
+                        {
+                            "ball_id": int(obj_id) - 1,
+                            "x": centroid[0],
+                            "y": centroid[1],
+                            "confidence": float(mask_np.max()) if mask_np.size else 0.0,
+                        }
+                    )
+                # Yield streaming item: (frame_int, points, progress_pct)
+                idx = int(frame_idx)
+                yield (idx, frame_results, idx / max(1, total_frames - 1))
 
     def _fallback_track(self, frame_files: List[Path], seeds: List[Tuple[int, int]]):
         """
@@ -114,7 +116,7 @@ class SAM2Tracker:
         repeats seed positions across all frames with low confidence.
         """
         logger.warning("Running fallback tracker for %d frames", len(frame_files))
-        results = {}
+        total_frames = len(frame_files)
         for frame_idx, _ in enumerate(frame_files):
             frame_results = []
             for ball_id, (x, y) in enumerate(seeds):
@@ -126,8 +128,7 @@ class SAM2Tracker:
                         "confidence": 0.25,
                     }
                 )
-            results[frame_idx] = frame_results
-        return results
+            yield (frame_idx, frame_results, frame_idx / max(1, total_frames - 1))
 
     def _to_numpy_mask(self, mask) -> np.ndarray:
         if hasattr(mask, "detach"):

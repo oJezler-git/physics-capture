@@ -1,0 +1,167 @@
+# packages/cv-service/physics/pipeline.py
+
+import json
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from uncertainties import ufloat, UFloat
+import numpy as np
+
+from .loader import load_experiment_data, LoadedTrack, ScaleCalibration
+from .converter import convert_to_metric, MetricTrack
+from .collision import detect_collision, CollisionResult
+from .fitting import fit_velocity_segment, FitResult, kinematic_model
+from .momentum import compute_physics, PhysicsOutput
+
+def ufloat_to_dict(u: Optional[UFloat], key_stem: str, unit: str) -> dict:
+    suffix = f"_{unit}" if unit else ""
+    if u is None:
+        return {
+            f"value{suffix}": None,
+            f"uncertainty{suffix}": None
+        }
+    return {
+        f"value{suffix}": float(u.nominal_value),
+        f"uncertainty{suffix}": float(u.std_dev)
+    }
+
+def run_physics_pipeline(
+    experiment_id: str,
+    base_dir: Path,
+    masses: List[Dict[str, float]],  # List of {"ball_id": int, "mass_g": float, "uncertainty_g": float}
+    ke_mode: str = "rolling_sphere",
+    friction_mode: str = "IGNORE"
+) -> Dict[str, Any]:
+    """
+    Full physics analysis pipeline.
+    """
+    experiment_dir = base_dir / experiment_id
+    
+    # 1. Load data
+    loaded_tracks, scale = load_experiment_data(experiment_dir)
+    
+    # 2. Convert to metric
+    metric_tracks = [convert_to_metric(t, scale) for t in loaded_tracks]
+    
+    # 3. Detect collision (using ball 0 as primary)
+    primary_track = next((t for t in metric_tracks if t.ball_id == 0), metric_tracks[0])
+    collision = detect_collision(primary_track)
+    
+    # 4. Fit segments
+    ball_fits = []
+    v_before = []
+    v_after = []
+    
+    for track in metric_tracks:
+        # Pre-collision fit
+        pre_fit = fit_velocity_segment(
+            track.t_s[collision.pre_start:collision.pre_end],
+            track.x_m[collision.pre_start:collision.pre_end],
+            track.sigma_x_m[collision.pre_start:collision.pre_end]
+        )
+        
+        # Post-collision fit
+        if collision.collision_frame != -1:
+            post_fit = fit_velocity_segment(
+                track.t_s[collision.post_start:collision.post_end],
+                track.x_m[collision.post_start:collision.post_end],
+                track.sigma_x_m[collision.post_start:collision.post_end]
+            )
+        else:
+            post_fit = None
+            
+        # Friction compensation (Step 5 in plan)
+        v_at_collision_before = pre_fit.v0
+        if friction_mode == "COMPENSATE" and collision.collision_frame != -1:
+             t_collision = track.t_s[collision.collision_frame]
+             t_start_pre = track.t_s[collision.pre_start]
+             dt = t_collision - t_start_pre
+             # extrapolated velocity at collision instant: v(t) = v0 + a*t
+             v_at_collision_before = pre_fit.v0 + pre_fit.a * dt
+             
+        v_before.append(v_at_collision_before)
+        
+        v_at_collision_after = None
+        if post_fit:
+            v_at_collision_after = post_fit.v0
+            v_after.append(v_at_collision_after)
+        else:
+            v_after.append(ufloat(0, 0)) # Placeholder for no-collision case
+            
+        ball_fits.append({
+            "ball_id": track.ball_id,
+            "pre_fit": pre_fit,
+            "post_fit": post_fit,
+            "v_before": v_at_collision_before,
+            "v_after": v_at_collision_after
+        })
+
+    # 5. Compute physics
+    # Align masses with metric_tracks
+    mass_ufloats = []
+    for track in metric_tracks:
+        m_data = next((m for m in masses if m["ball_id"] == track.ball_id), {"mass_g": 50.0, "uncertainty_g": 1.0})
+        mass_ufloats.append(ufloat(m_data["mass_g"]/1000.0, m_data["uncertainty_g"]/1000.0))
+        
+    physics_results = compute_physics(mass_ufloats, v_before, v_after, ke_mode=ke_mode)
+    
+    # 6. Build output JSON structure
+    # velocities.json
+    velocities_data = {
+        "experiment_id": experiment_id,
+        "collision_frame": collision.collision_frame,
+        "balls": []
+    }
+    for i, fit in enumerate(ball_fits):
+        ball_entry = {
+            "ball_id": fit["ball_id"],
+            "v_before": ufloat_to_dict(fit["v_before"], "v_before", "mps"),
+            "v_after": ufloat_to_dict(fit["v_after"], "v_after", "mps"),
+            "friction_a": ufloat_to_dict(fit["pre_fit"].a, "friction_a", "mps2"),
+            "fit_diagnostics": {
+                "pre_window_frames": [collision.pre_start, collision.pre_end],
+                "post_window_frames": [collision.post_start, collision.post_end] if fit["post_fit"] else None,
+                "pre_chi2_reduced": float(fit["pre_fit"].chi2_reduced),
+                "post_chi2_reduced": float(fit["post_fit"].chi2_reduced) if fit["post_fit"] else None,
+                "pre_dof": int(fit["pre_fit"].dof),
+                "post_dof": int(fit["post_fit"].dof) if fit["post_fit"] else None
+            }
+        }
+        velocities_data["balls"].append(ball_entry)
+        
+    # momentum.json
+    momentum_data = {
+        "experiment_id": experiment_id,
+        "ke_mode": ke_mode,
+        "n_balls": len(metric_tracks),
+        "per_ball": [],
+        "system": {
+            "p_before": ufloat_to_dict(physics_results.p_before_total, "p_before", "kgmps"),
+            "p_after": ufloat_to_dict(physics_results.p_after_total, "p_after", "kgmps"),
+            "conservation_pct": ufloat_to_dict(physics_results.conservation_pct, "conservation_pct", "pct") if physics_results.conservation_pct else None,
+            "ke_before": ufloat_to_dict(physics_results.ke_before_total, "ke_before", "J"),
+            "ke_after": ufloat_to_dict(physics_results.ke_after_total, "ke_after", "J"),
+            "cor": ufloat_to_dict(physics_results.cor, "cor", "") if physics_results.cor else None
+        }
+    }
+    for i in range(len(metric_tracks)):
+        ball_entry = {
+            "ball_id": metric_tracks[i].ball_id,
+            "p_before": ufloat_to_dict(physics_results.p_before_per_ball[i], "p_before", "kgmps"),
+            "p_after": ufloat_to_dict(physics_results.p_after_per_ball[i], "p_after", "kgmps"),
+            "ke_before": ufloat_to_dict(physics_results.ke_before_per_ball[i], "ke_before", "J"),
+            "ke_after": ufloat_to_dict(physics_results.ke_after_per_ball[i], "ke_after", "J")
+        }
+        momentum_data["per_ball"].append(ball_entry)
+        
+    # 7. Write to disk
+    results_dir = experiment_dir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    with open(results_dir / "velocities.json", 'w') as f:
+        json.dump(velocities_data, f, indent=2)
+    with open(results_dir / "momentum.json", 'w') as f:
+        json.dump(momentum_data, f, indent=2)
+        
+    return {
+        "velocities": velocities_data,
+        "momentum": momentum_data
+    }
