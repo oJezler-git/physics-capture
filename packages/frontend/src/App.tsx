@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { wsClient } from './lib/wsClient';
 import { peerManager } from './lib/webrtc';
 import { ToastViewport } from './components/ToastViewport';
@@ -118,12 +118,15 @@ function App() {
     };
   }, []);
 
-  return (
-    <BrowserRouter>
+  function AppChrome() {
+    const location = useLocation();
+    const isPhoneRoute = location.pathname === '/phone';
+
+    return (
       <div className="relative min-h-screen overflow-hidden selection:bg-orange-300/25">
         <div className="pointer-events-none absolute -left-28 top-[-8rem] h-[24rem] w-[24rem] rounded-full bg-sky-400/10 blur-3xl" />
         <div className="pointer-events-none absolute bottom-[-12rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-orange-500/10 blur-3xl" />
-        <ConnectionStatus />
+        {!isPhoneRoute ? <ConnectionStatus /> : null}
         <ToastViewport />
 
         <main className="relative z-10 mx-auto w-full max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10">
@@ -173,6 +176,12 @@ function App() {
           </Routes>
         </main>
       </div>
+    );
+  }
+
+  return (
+    <BrowserRouter>
+      <AppChrome />
     </BrowserRouter>
   );
 }

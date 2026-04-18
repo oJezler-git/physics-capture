@@ -113,6 +113,26 @@ describe('WSClient', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
+  it('continues reconnecting beyond five failed attempts', () => {
+    const client = new WSClient('ws://test.local');
+    client.connect();
+
+    MockWebSocket.instances[0].close(1006);
+    vi.advanceTimersByTime(500); // attempt 1
+    MockWebSocket.instances[1].close(1006);
+    vi.advanceTimersByTime(1000); // attempt 2
+    MockWebSocket.instances[2].close(1006);
+    vi.advanceTimersByTime(2000); // attempt 3
+    MockWebSocket.instances[3].close(1006);
+    vi.advanceTimersByTime(4000); // attempt 4
+    MockWebSocket.instances[4].close(1006);
+    vi.advanceTimersByTime(8000); // attempt 5
+    MockWebSocket.instances[5].close(1006);
+    vi.advanceTimersByTime(8000); // attempt 6
+
+    expect(MockWebSocket.instances).toHaveLength(7);
+  });
+
   it('queues outbound messages while disconnected and flushes on open', () => {
     const client = new WSClient('ws://test.local');
     client.connect();
@@ -141,6 +161,29 @@ describe('WSClient', () => {
     client.connect();
 
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('replays join messages after reconnect', () => {
+    const client = new WSClient('ws://test.local');
+    client.connect();
+
+    const firstSocket = MockWebSocket.instances[0];
+    firstSocket.open();
+    client.send({ type: 'join', roomId: 'exp-1', clientId: 'pc', role: 'pc' });
+    expect(firstSocket.sentMessages).toHaveLength(1);
+
+    firstSocket.close(1006);
+    vi.advanceTimersByTime(500);
+
+    const secondSocket = MockWebSocket.instances[1];
+    secondSocket.open();
+    expect(secondSocket.sentMessages).toHaveLength(1);
+    expect(JSON.parse(secondSocket.sentMessages[0])).toEqual({
+      type: 'join',
+      roomId: 'exp-1',
+      clientId: 'pc',
+      role: 'pc',
+    });
   });
 
   it('pushes an error toast for malformed inbound messages', () => {

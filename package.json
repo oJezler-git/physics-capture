@@ -5,7 +5,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n \"signaling,frontend,cv\" -c \"blue,green,yellow\" \"npm run dev:signaling\" \"npm run dev:frontend\" \"npm run dev:cv\"",
+    "dev": "npm run dev:banner && concurrently --kill-others-on-fail --prefix \"[{name}]\" -n \"signal,web,cv\" -c \"blue,green,yellow\" \"npm run dev --workspace=signaling\" \"npm run dev --workspace=frontend\" \".venv\\Scripts\\python packages/cv-service/grpc_server.py\"",
+    "dev:banner": "node scripts/dev-banner.mjs",
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:signaling": "npm run dev --workspace=signaling",
     "dev:cv": ".venv\\Scripts\\python packages/cv-service/grpc_server.py",

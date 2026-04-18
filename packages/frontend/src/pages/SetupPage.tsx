@@ -75,7 +75,7 @@ const getConnectionDetails = (autoDetectedHost: string) => {
 
   const mode: ConnectionMode = isLocalHostname(host) ? 'local' : 'public';
 
-  const isLocal = isLoopbackHostname(host);
+  const isLocal = isLocalHostname(host);
   const protocol = isLocal ? window.location.protocol.slice(0, -1) : 'https';
   const wsProtocol = protocol === 'https' ? 'wss' : 'ws';
   const port =
