@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { BallSeedPicker } from '../components/BallSeedPicker';
+import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
+import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -16,6 +17,7 @@ export const DebugPage = () => {
   const [selectedModel, setSelectedModel] = useState<string>('facebook/sam2-hiera-tiny');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [seedMode, setSeedMode] = useState<SeedMode>('click');
 
   const {
     seeds,
@@ -26,12 +28,15 @@ export const DebugPage = () => {
     setFrame,
     frameCount,
     setFrameCount,
+    frameMap,
+    setFrameMap,
     status,
     setStatus,
+    progress,
     reset: resetTracking,
   } = useTrackingStore();
 
-  const { ballConfigs } = useSessionStore();
+  const { experimentId: storeExpId, ballConfigs } = useSessionStore();
 
   // Load experiments list
   const fetchExperiments = useCallback(async () => {
@@ -56,6 +61,7 @@ export const DebugPage = () => {
   useEffect(() => {
     if (!selectedExp) {
       setFrameCount(1);
+      setFrameMap([]);
       return;
     }
     const loadMeta = async () => {
@@ -64,13 +70,14 @@ export const DebugPage = () => {
         if (res.ok) {
           const data = await res.json();
           setFrameCount(data.frameCount || 1);
+          setFrameMap(data.frameMap || [], data.sequenceToPhysical || []);
         }
       } catch (err) {
         console.error('Failed to load metadata:', err);
       }
     };
     loadMeta();
-  }, [selectedExp, setFrameCount]);
+  }, [selectedExp, setFrameCount, setFrameMap]);
 
   // Playback engine
   useEffect(() => {
@@ -103,9 +110,13 @@ export const DebugPage = () => {
   }, [frameCount, setFrame]);
 
   const safeFrame = isNaN(currentFrame) ? 0 : currentFrame;
-  const frameFile = `${String(safeFrame + 1).padStart(6, '0')}.jpg`;
-  const frameSrc = selectedExp ? `/api/experiments/${selectedExp}/frames/0/${frameFile}` : null;
+  const frameFile = frameMap[safeFrame];
+  const frameSrc =
+    selectedExp && frameFile ? `/api/experiments/${selectedExp}/frames/0/${frameFile}` : null;
   const maxBalls = ballConfigs.filter((c) => c.mass_g > 0).length || 2;
+  const isFrameMissing = selectedExp && !frameFile;
+  const actualFileCount = frameMap.filter(Boolean).length;
+  const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
 
   const handleRunTrack = async () => {
     if (!selectedExp || seeds.length === 0) return;
@@ -118,6 +129,7 @@ export const DebugPage = () => {
           experiment_id: selectedExp,
           seeds: seeds.map((s) => ({ ...s, ball_id: s.ballId, camera_id: 0 })),
           model_id: selectedModel,
+          clientId: 'pc', // Using 'pc' so it routes back to our store
         }),
       });
       if (!response.ok) throw new Error('Tracking failed');
@@ -130,78 +142,29 @@ export const DebugPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-8 text-slate-100">
-      <header className="mb-8 flex items-center justify-between">
-        <div className="flex flex-wrap gap-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
-              Experiment
-            </label>
-            <select
-              className="min-w-[200px] rounded-lg border border-slate-700 bg-slate-900 px-4 py-2"
-              value={selectedExp}
-              onChange={(e) => {
-                setSelectedExp(e.target.value);
-                resetTracking();
-                setIsPlaying(false);
-              }}
-            >
-              <option value="">Select Experiment</option>
-              {experiments.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
+    <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden">
+      <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
+        {/* Left Side: Massive Preview */}
+        <div className="flex min-h-0 flex-col bg-black relative items-center justify-center">
+          {/* Subtle overlay header */}
+          <div className="absolute top-6 left-8 z-30 pointer-events-none opacity-40">
+            <h1 className="text-xl font-black uppercase tracking-[0.2em] text-slate-500">
+              Debug Lab <span className="text-orange-600/50">//</span> SAM2
+            </h1>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
-              SAM2 Model
-            </label>
-            <select
-              className="min-w-[200px] rounded-lg border border-slate-700 bg-slate-900 px-4 py-2"
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-            >
-              <option value="facebook/sam2-hiera-tiny">Tiny (Fastest)</option>
-              <option value="facebook/sam2-hiera-small">Small</option>
-              <option value="facebook/sam2-hiera-base-plus">Base+</option>
-              <option value="facebook/sam2-hiera-large">Large (Best)</option>
-            </select>
-          </div>
-
-          <div className="flex items-end gap-2 pb-1">
-            <button
-              onClick={fetchExperiments}
-              className="rounded-lg border border-slate-700 bg-slate-800 p-2.5 hover:bg-slate-700"
-            >
-              🔄
-            </button>
-            <button
-              onClick={() => onTrackingComplete([])}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold uppercase text-slate-400"
-            >
-              Clear
-            </button>
-            <button
-              onClick={handleRunTrack}
-              disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
-              className={`rounded-lg px-6 py-2 font-bold transition-all ${status === 'tracking' ? 'bg-slate-800 text-slate-500' : 'bg-orange-600 text-white hover:bg-orange-500 hover:shadow-[0_0_20px_rgba(234,88,12,0.4)]'}`}
-            >
-              {status === 'tracking' ? 'Processing...' : 'Run SAM2'}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
-        <div className="space-y-4">
-          <div className="relative aspect-video overflow-hidden rounded-3xl border border-slate-800 bg-black shadow-2xl">
+          <div 
+            className="relative bg-black shadow-2xl overflow-hidden"
+            style={{ 
+              aspectRatio: `${dims.width} / ${dims.height}`,
+              maxHeight: '100%',
+              maxWidth: '100%',
+            }}
+          >
             {frameSrc && (
               <img
                 src={frameSrc}
-                className="h-full w-full object-contain"
+                className="h-full w-full object-contain block"
                 onLoad={(e) => {
                   setDims({
                     width: e.currentTarget.naturalWidth,
@@ -213,13 +176,23 @@ export const DebugPage = () => {
               />
             )}
             {!selectedExp && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-600">
-                Select an experiment to begin
+              <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
+                -- No Experiment Selected --
               </div>
             )}
             {frameImageState === 'error' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500">
-                Frame not found
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500 font-bold uppercase tracking-tighter">
+                [ ERROR: FRAME NOT FOUND ]
+              </div>
+            )}
+
+            {isFrameMissing && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
+                <div className="text-center">
+                  <p className="text-6xl mb-4">⚠️</p>
+                  <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
+                  <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {safeFrame}</p>
+                </div>
               </div>
             )}
 
@@ -227,88 +200,193 @@ export const DebugPage = () => {
               width={dims.width}
               height={dims.height}
               tracks={tracks}
-              currentFrame={currentFrame}
+              currentFrame={safeFrame}
               cameraId="0"
             />
 
             <BallSeedPicker
               cameraId="0"
-              currentFrame={currentFrame}
-              seedFrameIdx={currentFrame}
+              currentFrame={safeFrame}
+              seedFrameIdx={safeFrame}
               maxBalls={maxBalls}
               frameWidth={dims.width}
               frameHeight={dims.height}
               seeds={seeds}
               onAddSeed={(s) => addSeed(s, maxBalls)}
+              mode={seedMode}
             />
           </div>
 
-          <div className="flex items-center gap-6 rounded-2xl border border-slate-800 bg-slate-900/40 p-4 backdrop-blur-md">
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 border border-slate-700 text-xl shadow-lg hover:bg-slate-700"
-            >
-              {isPlaying ? '⏸' : '▶'}
-            </button>
-
-            <select
-              value={playbackSpeed}
-              onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm"
-            >
-              <option value="0.25">0.25x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1">1x</option>
-              <option value="2">2x</option>
-            </select>
-
-            <div className="flex flex-1 flex-col gap-2">
-              <input
-                type="range"
-                min="0"
-                max={Math.max(0, frameCount - 1)}
-                value={currentFrame}
-                onChange={(e) => {
-                  setFrame(parseInt(e.target.value));
-                  setIsPlaying(false);
-                }}
-                className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-800 accent-orange-500"
-              />
-              <div className="flex justify-between font-mono text-[10px] text-slate-500">
-                <span>
-                  FRAME {currentFrame + 1} / {frameCount}
-                </span>
-                <span>{((currentFrame / Math.max(1, frameCount - 1)) * 100).toFixed(1)}%</span>
-              </div>
+          {hasFrameMismatch && (
+            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-500/60 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity">
+              Sparse Dataset: {frameCount - actualFileCount} missing
             </div>
-          </div>
+          )}
         </div>
 
-        <aside className="space-y-6">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
-            <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-slate-500">
-              Monitor
+        {/* Right Side: All Controls */}
+        <aside className="custom-scrollbar overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-8 space-y-10">
+          <section className="space-y-6">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
+              Experiment
             </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800">
-                <span className="block text-[10px] text-slate-500 uppercase">Seeds</span>
-                <span className="text-lg font-bold">
-                  {seeds.length} / {maxBalls}
-                </span>
+
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+                  Experiment
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
+                    value={selectedExp}
+                    onChange={(e) => {
+                      setSelectedExp(e.target.value);
+                      resetTracking();
+                      setIsPlaying(false);
+                    }}
+                  >
+                    <option value="">Select Experiment</option>
+                    {experiments.map((e) => (
+                      <option key={e} value={e}>
+                        {e}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={fetchExperiments}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 hover:bg-slate-700"
+                  >
+                    🔄
+                  </button>
+                </div>
               </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+                  SAM2 Model
+                </label>
+                <select
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                >
+                  <option value="facebook/sam2-hiera-tiny">Tiny (Fastest)</option>
+                  <option value="facebook/sam2-hiera-small">Small</option>
+                  <option value="facebook/sam2-hiera-base-plus">Base+</option>
+                  <option value="facebook/sam2-hiera-large">Large (Best)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  onClick={() => onTrackingComplete([])}
+                  className="rounded-lg border border-slate-700 bg-slate-800 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleRunTrack}
+                  disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
+                  className={`rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${status === 'tracking' ? 'bg-slate-800 text-slate-500' : 'bg-orange-600 text-white hover:bg-orange-500 shadow-lg shadow-orange-900/20'}`}
+                >
+                  {status === 'tracking' ? 'Processing...' : 'Run SAM2'}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Playback
+            </h3>
+
+            <FrameScrubber
+              currentFrame={currentFrame}
+              frameCount={frameCount}
+              onFrameChange={setFrame}
+              isPlaying={isPlaying}
+              onPlayToggle={() => setIsPlaying(!isPlaying)}
+              playbackSpeed={playbackSpeed}
+              onSpeedChange={setPlaybackSpeed}
+              variant="compact"
+            />
+          </section>
+
+          <section className="space-y-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Seed Controls
+            </h3>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 p-2">
+                <button
+                  type="button"
+                  onClick={() => setSeedMode('click')}
+                  className={`flex-1 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                    seedMode === 'click'
+                      ? 'bg-orange-600 text-white shadow-lg'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Tap
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSeedMode('bbox')}
+                  className={`flex-1 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                    seedMode === 'bbox'
+                      ? 'bg-orange-600 text-white shadow-lg'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Box
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    Seeds Placed
+                  </span>
+                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-xs text-slate-200">
+                    {seeds.filter((s) => s.frameIdx === safeFrame).length} / {maxBalls}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Monitor</h3>
+            <div className="grid grid-cols-2 gap-4">
               <div className="rounded-xl bg-slate-950 p-3 border border-slate-800">
                 <span className="block text-[10px] text-slate-500 uppercase">Res</span>
                 <span className="text-lg font-bold">
                   {dims.width}x{dims.height}
                 </span>
               </div>
+              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800">
+                <span className="block text-[10px] text-slate-500 uppercase">Status</span>
+                <span className="text-[10px] font-bold uppercase text-orange-500 truncate">
+                  {status}
+                </span>
+              </div>
             </div>
             {status === 'tracking' && (
-              <div className="mt-4 animate-pulse rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-center text-xs text-sky-400">
-                ⚡ Analyzing video frames...
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-sky-400">
+                  <span>Analyzing Video</span>
+                  <span className="font-mono">{Math.round(progress * 100)}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full border border-slate-800 bg-slate-950">
+                  <div 
+                    className="h-full bg-gradient-to-r from-sky-500 to-orange-500 transition-all duration-300"
+                    style={{ width: `${progress * 100}%` }}
+                  />
+                </div>
               </div>
             )}
-          </div>
+          </section>
         </aside>
       </div>
     </div>

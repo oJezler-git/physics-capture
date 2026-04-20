@@ -3,7 +3,7 @@ import type { BallSeed } from '../types';
 
 const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
-type SeedMode = 'click' | 'bbox';
+export type SeedMode = 'click' | 'bbox';
 
 interface BallSeedPickerProps {
   cameraId: string | null;
@@ -16,6 +16,7 @@ interface BallSeedPickerProps {
   onAddSeed: (seed: BallSeed) => boolean;
   interactive?: boolean;
   className?: string;
+  mode?: SeedMode;
 }
 
 interface BboxDraft {
@@ -49,9 +50,9 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   onAddSeed,
   interactive = true,
   className,
+  mode = 'click',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mode, setMode] = useState<SeedMode>('click');
   const [warning, setWarning] = useState<string | null>(null);
   const [bboxDraft, setBboxDraft] = useState<BboxDraft | null>(null);
   const [isDraggingBbox, setIsDraggingBbox] = useState(false);
@@ -183,30 +184,6 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   return (
     <div className="absolute inset-0">
-      <div className="absolute left-4 top-16 z-20 flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-950/85 px-3 py-2 backdrop-blur-sm">
-        <button
-          type="button"
-          onClick={() => setMode('click')}
-          className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
-            mode === 'click' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-        >
-          Tap Seed
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('bbox')}
-          className={`rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${
-            mode === 'bbox' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-        >
-          Box Seed
-        </button>
-        <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-mono text-slate-200">
-          Seeds {visibleSeeds.length} present / {maxBalls} total
-        </span>
-      </div>
-
       {warning ? (
         <div className="absolute bottom-4 left-4 z-20 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
           {warning}

@@ -4,6 +4,8 @@ import type { BallSeed, BallTrack, CorrectionKeyframe } from '../types';
 interface TrackingState {
   frameCount: number;
   currentFrame: number;
+  frameMap: (string | null)[]; // physicalIndex -> filename
+  sequenceToPhysical: number[]; // sequenceIndex -> physicalIndex
   seeds: BallSeed[];
   tracks: BallTrack[];
   corrections: CorrectionKeyframe[];
@@ -11,6 +13,7 @@ interface TrackingState {
   progress: number;
 
   setFrameCount: (n: number) => void;
+  setFrameMap: (map: (string | null)[], sequenceToPhysical?: number[]) => void;
   setFrame: (n: number | ((prev: number) => number)) => void;
   addSeed: (seed: BallSeed, maxBalls?: number) => boolean;
   removeSeed: (ballId: number, cameraId: string) => void;
@@ -25,6 +28,8 @@ interface TrackingState {
 export const useTrackingStore = create<TrackingState>((set) => ({
   frameCount: 0,
   currentFrame: 0,
+  frameMap: [],
+  sequenceToPhysical: [],
   seeds: [],
   tracks: [],
   corrections: [],
@@ -32,6 +37,8 @@ export const useTrackingStore = create<TrackingState>((set) => ({
   progress: 0,
 
   setFrameCount: (n) => set({ frameCount: n }),
+
+  setFrameMap: (map, sequenceToPhysical = []) => set({ frameMap: map, sequenceToPhysical }),
 
   setFrame: (frameOrUpdater) =>
     set((state) => {
@@ -118,6 +125,8 @@ export const useTrackingStore = create<TrackingState>((set) => ({
     set({
       frameCount: 0,
       currentFrame: 0,
+      frameMap: [],
+      sequenceToPhysical: [],
       seeds: [],
       tracks: [],
       corrections: [],

@@ -1,6 +1,6 @@
 import { useSessionStore } from '../stores/sessionStore';
 import { useCalibrationStore } from '../stores/calibrationStore';
-import { useTrackingStore } from '../stores/trackingStore';
+import { useTrackingStore, type FrameMapEntry } from '../stores/trackingStore';
 import { useResultsStore } from '../stores/resultsStore';
 import { useUiStore } from '../stores/uiStore';
 import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '../types';
@@ -18,7 +18,7 @@ export type InboundMessage =
   | { type: 'tracking:correction_applied'; data: { ok: boolean } }
   | { type: 'physics:result'; data: PhysicsResult }
   | { type: 'upload:progress'; data: { cameraId: string; percent: number } }
-  | { type: 'frames:ready'; data: { frameCount: number } }
+  | { type: 'frames:ready'; data: { frameCount: number; frameMap?: (string | null)[]; sequenceToPhysical?: number[] } }
   | { type: 'record:start'; data: { experimentId: string } }
   | { type: 'record:stop'; data: { experimentId: string } }
   | { type: 'peer:offer'; data: RTCSessionDescriptionInit & { peerId: string } }
@@ -214,6 +214,9 @@ export class WSClient {
         break;
       case 'frames:ready':
         useTrackingStore.getState().setFrameCount(msg.data.frameCount);
+        if (msg.data.frameMap) {
+          useTrackingStore.getState().setFrameMap(msg.data.frameMap, msg.data.sequenceToPhysical);
+        }
         window.dispatchEvent(new CustomEvent('ws:frames', { detail: msg }));
         break;
       case 'record:start':

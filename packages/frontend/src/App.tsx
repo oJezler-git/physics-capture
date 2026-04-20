@@ -103,9 +103,6 @@ function PhaseGuard({ phase, children }: { phase: GuardPhase; children: ReactEle
     return <Navigate to="/recording" replace />;
   }
 
-  if (phase === 'results' && !physicsResult) {
-    return <Navigate to="/tracking" replace />;
-  }
 
   return children;
 }
@@ -123,6 +120,8 @@ function App() {
     const location = useLocation();
     const isPhoneRoute = location.pathname === '/phone';
 
+    const isFullBleed = location.pathname === '/debug' || location.pathname === '/tracking';
+
     return (
       <div className="relative min-h-screen overflow-hidden selection:bg-orange-300/25">
         <div className="pointer-events-none absolute -left-28 top-[-8rem] h-[24rem] w-[24rem] rounded-full bg-sky-400/10 blur-3xl" />
@@ -130,7 +129,7 @@ function App() {
         {!isPhoneRoute ? <ConnectionStatus /> : null}
         <ToastViewport />
 
-        <main className="relative z-10 mx-auto w-full max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10">
+        <main className={`relative z-10 w-full min-h-screen ${isFullBleed ? '' : 'mx-auto max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10'}`}>
           <Routes>
             <Route path="/" element={<Navigate to="/setup" replace />} />
             <Route

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -72,6 +72,12 @@ export const ResultsPage = () => {
       setError(message);
     }
   };
+
+  useEffect(() => {
+    if (!physicsResult && status === 'idle' && experimentId) {
+      handleComputePhysics();
+    }
+  }, [experimentId, physicsResult, status]);
 
   const handleExportCsv = () => {
     if (!physicsResult) return;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BallSeedPicker } from '../components/BallSeedPicker';
+import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { useSessionStore } from '../stores/sessionStore';
@@ -14,6 +14,10 @@ export const TrackingPage = () => {
     frameCount,
     currentFrame,
     setFrame,
+    setFrameCount,
+    frameMap,
+    setFrameMap,
+    sequenceToPhysical,
     tracks,
     status,
     progress,
@@ -26,7 +30,9 @@ export const TrackingPage = () => {
   } = useTrackingStore();
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
+  const [seedMode, setSeedMode] = useState<SeedMode>('click');
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle',
@@ -44,12 +50,19 @@ export const TrackingPage = () => {
   const activeCameraIndex = resolvedActiveCameraId
     ? cameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
     : -1;
-  const frameFile = `${String(currentFrame + 1).padStart(6, '0')}.jpg`;
+
+  const currentFrameEntry = frameMap[currentFrame];
+  const frameFile = currentFrameEntry || `${String(currentFrame + 1).padStart(6, '0')}.jpg`;
+  const physicalFrame = currentFrame;
+
   const frameSrc =
-    experimentId && activeCameraIndex >= 0
+    experimentId && activeCameraIndex >= 0 && currentFrameEntry
       ? `/api/experiments/${encodeURIComponent(experimentId)}/frames/${activeCameraIndex}/${frameFile}`
       : null;
   const correctionEnabled = tracks.length > 0 && status !== 'tracking';
+  const isFrameMissing = !!experimentId && !currentFrameEntry;
+  const actualFileCount = frameMap.filter(Boolean).length;
+  const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
   const seedInteractive =
     currentFrame === seedFrameIdx &&
     tracks.length === 0 &&
@@ -88,10 +101,27 @@ export const TrackingPage = () => {
   };
 
   useEffect(() => {
+    if (!experimentId) return;
+    const fetchMeta = async () => {
+      try {
+        const res = await fetch(`/api/experiments/${experimentId}/metadata`);
+        if (res.ok) {
+          const data = await res.json();
+          setFrameCount(data.frameCount || 0);
+          setFrameMap(data.frameMap || [], data.sequenceToPhysical || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch metadata:', err);
+      }
+    };
+    fetchMeta();
+  }, [experimentId, setFrameCount, setFrameMap]);
+
+  useEffect(() => {
     if (isPlaying && frameCount > 0) {
       playRef.current = setInterval(() => {
-        setFrame((currentFrame + 1) % frameCount);
-      }, 100);
+        setFrame((prev) => (prev + 1) % frameCount);
+      }, 1000 / (30 * playbackSpeed));
     } else if (playRef.current) {
       clearInterval(playRef.current);
     }
@@ -99,7 +129,7 @@ export const TrackingPage = () => {
     return () => {
       if (playRef.current) clearInterval(playRef.current);
     };
-  }, [isPlaying, currentFrame, frameCount, setFrame]);
+  }, [isPlaying, frameCount, setFrame, playbackSpeed]);
 
   useEffect(() => {
     if (!frameSrc) {
@@ -277,216 +307,216 @@ export const TrackingPage = () => {
   };
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-84px)] max-w-[1600px] flex-col gap-6 rise-in">
-      <header className="surface-panel flex flex-wrap items-center justify-between gap-4 p-5">
-        <div className="space-y-2">
-          <p className="eyebrow">Phase 04 - Tracking</p>
-          <h1 className="text-3xl">Trajectory Analysis Console</h1>
-          <p className="subtle-copy">
-            1) choose seed frame, 2) place {maxBalls} seeds per camera, 3) set frame range, 4) run
-            SAM2, 5) review and correct flagged points.
-          </p>
-        </div>
+    <div className="flex h-screen w-full flex-col bg-slate-950 text-slate-100 overflow-hidden rise-in">
+      <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
+        {/* Left Side: Massive Preview */}
+        <div className="flex min-h-0 flex-col bg-black relative group">
+          {/* Subtle overlay header */}
+          <div className="absolute top-6 left-8 z-30 pointer-events-none transition-opacity group-hover:opacity-100 opacity-40">
+            <div className="space-y-0.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-500/80">Phase 04 // Tracking</p>
+              <h1 className="text-xl font-bold tracking-tight text-slate-400">Trajectory Analysis</h1>
+            </div>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="ui-pill">{statusLabel}</span>
-          {status === 'tracking' ? (
-            <>
-              <div className="w-52 overflow-hidden rounded-full border border-slate-700 bg-slate-900">
-                <div
-                  className="h-2 bg-gradient-to-r from-sky-400 to-orange-400 transition-all"
-                  style={{ width: `${progressPct}%` }}
-                />
+          <div className="relative flex-1 overflow-hidden bg-black">
+            {frameSrc ? (
+              <img
+                src={frameSrc}
+                alt={`Frame ${currentFrame + 1}`}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  setDims({ width: img.naturalWidth, height: img.naturalHeight });
+                  setFrameImageState('ready');
+                }}
+                onError={() => setFrameImageState('error')}
+                className="absolute inset-0 h-full w-full object-contain"
+                draggable={false}
+              />
+            ) : null}
+
+            {frameImageState !== 'ready' && !isFrameMissing ? (
+              <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                <div className="bg-slate-950/40 p-12 backdrop-blur-3xl rounded-[4rem]">
+                  <p className="font-black uppercase tracking-[0.4em] text-slate-800 text-6xl">
+                    {currentFrame + 1}
+                  </p>
+                  <p className="mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    {frameImageState === 'error' ? 'Frame Link Dead' : 'Loading Sequence...'}
+                  </p>
+                </div>
               </div>
-              <span className="ui-pill">{progressPct}%</span>
-            </>
+            ) : null}
+
+            {isFrameMissing && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
+                <div className="text-center">
+                  <p className="text-6xl mb-4">⚠️</p>
+                  <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
+                  <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {physicalFrame}</p>
+                </div>
+              </div>
+            )}
+
+            <TrajectoryCanvas
+              tracks={tracks}
+              currentFrame={currentFrame}
+              cameraId={resolvedActiveCameraId || ''}
+              width={dims.width}
+              height={dims.height}
+              correctionEnabled={correctionEnabled}
+              onCorrection={handleCorrection}
+            />
+
+            <BallSeedPicker
+              cameraId={resolvedActiveCameraId}
+              currentFrame={currentFrame}
+              seedFrameIdx={seedFrameIdx}
+              maxBalls={maxBalls}
+              frameWidth={dims.width}
+              frameHeight={dims.height}
+              seeds={seeds}
+              onAddSeed={(seed) => addSeed(seed, maxBalls)}
+              interactive={seedInteractive}
+              mode={seedMode}
+              className="relative z-20 h-full w-full cursor-crosshair"
+            />
+          </div>
+
+          {hasFrameMismatch && (
+            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-500/60 backdrop-blur-md transition-opacity group-hover:opacity-100 opacity-40">
+              Sparse Stream: {frameCount - actualFileCount} DROPPED
+            </div>
+          )}
+
+          {trackingError ? (
+            <div className="absolute top-20 left-8 z-40 rounded-xl border border-rose-500/40 bg-rose-950/90 px-4 py-3 text-xs text-rose-200 shadow-2xl backdrop-blur-xl max-w-md animate-in slide-in-from-left-4">
+              <span className="font-black mr-2 opacity-50">ERROR:</span> {trackingError}
+            </div>
           ) : null}
-          <button
-            disabled={tracks.length === 0 || status === 'tracking'}
-            onClick={() => {
-              advancePhase();
-              navigate('/results');
-            }}
-            className="btn-main"
-          >
-            Continue to Results
-          </button>
         </div>
-      </header>
 
-      {trackingError ? (
-        <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-100">
-          {trackingError}
-        </div>
-      ) : null}
-
-      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[1.9fr_1fr]">
-        <div className="flex min-h-0 flex-col gap-4">
-          <section className="surface-panel relative flex-1 overflow-hidden p-4">
-            <div className="relative flex h-full w-full items-center justify-center">
-              <div className="relative aspect-video h-full max-h-full w-full overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
-                {frameSrc ? (
-                  <img
-                    src={frameSrc}
-                    alt={`Frame ${currentFrame + 1}`}
-                    onLoad={(e) => {
-                      const img = e.currentTarget;
-                      setDims({ width: img.naturalWidth, height: img.naturalHeight });
-                      setFrameImageState('ready');
-                    }}
-                    onError={() => setFrameImageState('error')}
-                    className="absolute inset-0 h-full w-full object-contain"
-                    draggable={false}
-                  />
-                ) : null}
-
-                {frameImageState !== 'ready' ? (
-                  <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-                    <div>
-                      <p className="eyebrow">
-                        {frameImageState === 'error'
-                          ? 'Frame unavailable'
-                          : frameImageState === 'loading'
-                            ? 'Loading frame'
-                            : 'Frame'}
-                      </p>
-                      <p className="font-mono text-4xl text-slate-700">{currentFrame + 1}</p>
-                      {frameImageState === 'error' ? (
-                        <p className="mt-2 text-xs text-rose-200">
-                          Could not load {frameFile} for this camera.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
-                <TrajectoryCanvas
-                  tracks={tracks}
-                  currentFrame={currentFrame}
-                  cameraId={resolvedActiveCameraId || ''}
-                  width={dims.width}
-                  height={dims.height}
-                  correctionEnabled={correctionEnabled}
-                  onCorrection={handleCorrection}
-                />
-
-                <BallSeedPicker
-                  cameraId={resolvedActiveCameraId}
-                  currentFrame={currentFrame}
-                  seedFrameIdx={seedFrameIdx}
-                  maxBalls={maxBalls}
-                  frameWidth={dims.width}
-                  frameHeight={dims.height}
-                  seeds={seeds}
-                  onAddSeed={(seed) => addSeed(seed, maxBalls)}
-                  interactive={seedInteractive}
-                  className="relative z-20 h-full w-full cursor-crosshair"
-                />
+        {/* Right Side: High-Density Controls */}
+        <aside className="custom-scrollbar overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-8 space-y-10">
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Session</h3>
+              <button
+                disabled={tracks.length === 0 || status === 'tracking'}
+                onClick={() => {
+                  advancePhase();
+                  navigate('/results');
+                }}
+                className="rounded bg-sky-600 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-lg shadow-sky-900/40 transition hover:bg-sky-500 disabled:opacity-30 disabled:grayscale"
+              >
+                Finish Tracking
+              </button>
+            </div>
+            
+            <div className="surface-soft p-4 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {cameras.map((camera) => (
+                  <button
+                    key={camera.id}
+                    onClick={() => setActiveCameraId(camera.id)}
+                    className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition ${
+                      resolvedActiveCameraId === camera.id
+                        ? 'border-sky-500 bg-sky-500/10 text-sky-400'
+                        : 'border-slate-800 bg-slate-900 text-slate-500 hover:border-slate-700'
+                    }`}
+                  >
+                    {camera.label}
+                  </button>
+                ))}
               </div>
-            </div>
 
-            <div className="absolute left-6 top-6 flex flex-wrap gap-2">
-              <span className="ui-pill border-sky-400/30 text-sky-100">
-                {activeCamera?.label || 'No Camera Selected'}
-              </span>
-              <span className="ui-pill">
-                Frame {currentFrame + 1} / {Math.max(frameCount, 1)}
-              </span>
-              <span className="ui-pill border-amber-400/35 text-amber-100">
-                Seed {seedFrameIdx + 1}
-              </span>
-              <span className="ui-pill border-orange-400/35 text-orange-100">
-                Range {trackStartFrameIdx + 1}-{trackEndFrameIdx + 1}
-              </span>
-            </div>
-
-            <div className="absolute bottom-6 right-6 flex flex-wrap gap-2">
-              {Array.from({ length: maxBalls }, (_, index) => (
-                <span
-                  key={`ball-badge-${index}`}
-                  className={
-                    index === 0
-                      ? 'ui-pill border-sky-400/35 text-sky-100'
-                      : index === 1
-                        ? 'ui-pill border-lime-400/35 text-lime-100'
-                        : 'ui-pill border-orange-400/35 text-orange-100'
-                  }
-                >
-                  Ball {index + 1}
-                </span>
-              ))}
+              <div className="flex items-center justify-between">
+                <span className="ui-pill border-slate-800 text-slate-400">{statusLabel}</span>
+                {status === 'tracking' && (
+                  <div className="flex items-center gap-3">
+                     <div className="w-20 h-1.5 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
+                        <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${progressPct}%` }} />
+                     </div>
+                     <span className="text-[10px] font-mono text-sky-400 font-bold">{progressPct}%</span>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
 
-          <FrameScrubber
-            currentFrame={currentFrame}
-            frameCount={Math.max(frameCount, 1)}
-            onFrameChange={setFrame}
-            isPlaying={isPlaying}
-            onPlayToggle={() => setIsPlaying((playing) => !playing)}
-            flaggedFrames={flaggedFrames}
-          />
-        </div>
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Playback</h3>
+            <FrameScrubber
+              currentFrame={currentFrame}
+              frameCount={Math.max(frameCount, 1)}
+              onFrameChange={setFrame}
+              isPlaying={isPlaying}
+              onPlayToggle={() => setIsPlaying((playing) => !playing)}
+              flaggedFrames={flaggedFrames}
+              playbackSpeed={playbackSpeed}
+              onSpeedChange={setPlaybackSpeed}
+              variant="compact"
+            />
+          </section>
 
-        <div className="custom-scrollbar flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-          <section className="surface-panel space-y-4 p-4">
+          <section className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl">Active Camera</h3>
-              <span className="ui-pill">{cameras.length}</span>
-            </div>
-            <div className="space-y-2">
-              {cameras.map((camera) => (
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Seeding</h3>
+              <div className="flex gap-2">
                 <button
-                  key={camera.id}
-                  onClick={() => setActiveCameraId(camera.id)}
-                  className={`surface-soft w-full px-3 py-3 text-left transition ${
-                    resolvedActiveCameraId === camera.id
-                      ? 'border-sky-400/45 bg-sky-500/10'
-                      : 'hover:border-slate-600'
+                  type="button"
+                  onClick={() => setSeedMode('click')}
+                  className={`rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition ${
+                    seedMode === 'click'
+                      ? 'bg-sky-600 text-white shadow-lg shadow-sky-900/40'
+                      : 'bg-slate-950 border border-slate-800 text-slate-500 hover:text-slate-300'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-slate-100">{camera.label}</span>
-                    <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                      {camera.status}
-                    </span>
-                  </div>
+                  Tap
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setSeedMode('bbox')}
+                  className={`rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition ${
+                    seedMode === 'bbox'
+                      ? 'bg-sky-600 text-white shadow-lg shadow-sky-900/40'
+                      : 'bg-slate-950 border border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Box
+                </button>
+              </div>
+            </div>
+            
+            <div className="surface-soft space-y-3 p-4 rounded-2xl border border-slate-800 bg-slate-950">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                  Active Frame Seeds
+                </span>
+                <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] text-sky-400 border border-sky-500/20">
+                  {seeds.filter((s) => s.cameraId === resolvedActiveCameraId && s.frameIdx === currentFrame).length} / {maxBalls}
+                </span>
+              </div>
+              
+              {!hasRequiredSeedCoverage ? (
+                <p className="text-[9px] text-amber-500/80 font-bold uppercase tracking-widest leading-relaxed">
+                  Missing: {camerasMissingSeeds.map((camera) => camera.label).join(', ')}
+                </p>
+              ) : (
+                <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-[0.2em] text-center pt-1 animate-pulse">
+                  System Ready
+                </p>
+              )}
             </div>
           </section>
 
-          <section className="surface-panel space-y-4 p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl">Tracking Engine</h3>
-              <span className="ui-pill border-lime-400/35 text-lime-100">SAM2</span>
-            </div>
-
-            <div className="surface-soft space-y-2 p-3">
-              <p className="eyebrow">Seed Coverage</p>
-              <p className="text-sm text-slate-300">
-                Active camera: {activeCameraSeedCount} / {maxBalls} seeds
-              </p>
-              <p className="text-xs text-slate-500">
-                Overall: {cameras.length - camerasMissingSeeds.length}/{cameras.length} cameras ready
-              </p>
-              <p className="text-xs text-slate-500">
-                Tap Seed = center click. Box Seed = drag rectangle around a ball.
-              </p>
-              {!hasRequiredSeedCoverage ? (
-                <p className="text-xs text-amber-200">
-                  Still missing seeds on: {camerasMissingSeeds.map((camera) => camera.label).join(', ')}
-                </p>
-              ) : (
-                <p className="text-xs text-emerald-200">All cameras fully seeded. Ready to run.</p>
-              )}
-            </div>
-
-            <div className="surface-soft space-y-3 p-3">
-              <p className="eyebrow">Frame Controls</p>
-              <div className="grid grid-cols-3 gap-2">
-                <label className="text-xs text-slate-400">
-                  Seed frame
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">SAM2 Engine</h3>
+            
+            <div className="surface-soft space-y-5 p-4 rounded-2xl border border-slate-800 bg-slate-950">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Seed</p>
                   <input
                     type="number"
                     min={1}
@@ -500,11 +530,11 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="field-shell mt-1"
+                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-sky-400 focus:border-sky-500 outline-none"
                   />
-                </label>
-                <label className="text-xs text-slate-400">
-                  Start
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Start</p>
                   <input
                     type="number"
                     min={1}
@@ -518,11 +548,11 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="field-shell mt-1"
+                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-orange-400 focus:border-orange-500 outline-none"
                   />
-                </label>
-                <label className="text-xs text-slate-400">
-                  End
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">End</p>
                   <input
                     type="number"
                     min={1}
@@ -536,50 +566,51 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="field-shell mt-1"
+                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-orange-400 focus:border-orange-500 outline-none"
                   />
-                </label>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setSeedFrameIdx(currentFrame)}
-                className="btn-alt w-full py-2"
-              >
-                Use Current Frame as Seed Frame
-              </button>
-            </div>
+              
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSeedFrameIdx(currentFrame)}
+                  className="w-full border border-slate-800 py-2 text-[9px] font-black uppercase tracking-[0.2em] text-slate-500 hover:bg-slate-900 transition rounded-xl"
+                >
+                  Anchor Seed @ {currentFrame + 1}
+                </button>
 
-            <button
-              disabled={!hasRequiredSeedCoverage || status === 'tracking'}
-              onClick={handleRunAutoTracker}
-              className="btn-main w-full"
-            >
-              Run SAM2 Tracking
-            </button>
+                <button
+                  disabled={!hasRequiredSeedCoverage || status === 'tracking'}
+                  onClick={handleRunAutoTracker}
+                  className="w-full bg-orange-600 hover:bg-orange-500 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-white shadow-xl shadow-orange-900/20 transition rounded-xl disabled:opacity-20 disabled:grayscale"
+                >
+                  Execute SAM2 Track
+                </button>
+              </div>
+            </div>
           </section>
 
-          {tracks.length > 0 ? (
-            <section className="rounded-2xl border border-rose-400/35 bg-rose-500/10 p-4">
+          {tracks.length > 0 && flaggedFrames.length > 0 && (
+            <section className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5 space-y-3 backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <p className="eyebrow text-rose-200">Confidence Alerts</p>
-                <span className="ui-pill border-rose-400 text-rose-100">
-                  {flaggedFrames.length} issues
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-400">Anomaly Alerts</p>
+                <span className="rounded-full bg-rose-500 px-2.5 py-0.5 font-mono text-[10px] text-white font-bold">
+                  {flaggedFrames.length}
                 </span>
               </div>
-              <p className="mt-2 text-xs text-rose-100">
-                Red rings mark low-confidence points. Scrub to these frames and drag to adjust.
+              <p className="text-[10px] text-rose-200/60 leading-relaxed italic">
+                System detected low-confidence artifacts. Manual correction required.
               </p>
-              {flaggedFrames.length > 0 && (
-                <button
-                  onClick={goToNextFlagged}
-                  className="btn-alt mt-3 w-full border-rose-500/50 py-2 hover:bg-rose-500/20"
-                >
-                  Jump to Problem Frame
-                </button>
-              )}
+              <button
+                onClick={goToNextFlagged}
+                className="w-full border border-rose-500/40 bg-rose-500/10 py-2 text-[9px] font-black uppercase tracking-[0.2em] text-rose-300 hover:bg-rose-500/20 transition rounded-xl"
+              >
+                Jump to Anomaly
+              </button>
             </section>
-          ) : null}
-        </div>
+          )}
+        </aside>
       </div>
     </div>
   );
