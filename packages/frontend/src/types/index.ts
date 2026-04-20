@@ -17,13 +17,14 @@ export interface BallMassConfig {
   uncertainty_g: number; // grams, float64, > 0, default 1.0
 }
 
-export interface SyncDotConfig {
-  speed_px_per_second: number; // float64, > 0
-  speed_px_per_frame: number; // float64, derived from measured rAF interval
-  dot_radius_px: number; // uint32
-  dot_y_px: number; // uint32
-  rAF_interval_ms: number; // float64, measured
-  rAF_jitter_ms: number; // float64, median absolute deviation
+export interface SyncMarkerConfig {
+  roi_width_px: number; // uint32 (rendered)
+  roi_height_px: number; // uint32 (rendered)
+  gray_bits: number; // uint32, e.g. 10
+  grating_cycles: number; // uint32, e.g. 3-5 across ROI width
+  phase_step_rad: number; // float64 per display frame
+  rAF_interval_ms?: number; // float64, optional diagnostics
+  rAF_jitter_ms?: number; // float64, optional diagnostics
 }
 
 export interface BallSeed {

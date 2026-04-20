@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
-import { VisualMetronomeComponent } from '../components/VisualMetronome';
+import { SyncMarkerComponent } from '../components/SyncMarker';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
 
 export const RecordingPage = () => {
@@ -134,7 +134,7 @@ export const RecordingPage = () => {
             <span className="ui-pill">{isRecording ? 'Capturing' : 'Idle'}</span>
           </div>
           <div className="h-[360px]">
-            <VisualMetronomeComponent />
+            <SyncMarkerComponent config={{ grayBits: 10, gratingCycles: 4 }} />
           </div>
         </section>
 
