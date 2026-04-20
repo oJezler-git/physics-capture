@@ -3,6 +3,36 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 import numpy as np
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    class tqdm:  # minimal fallback progress bar
+        def __init__(self, iterable=None, total=None, desc="", unit="", **kwargs):
+            self._it      = iter(iterable) if iterable is not None else None
+            self._total   = total or (len(iterable) if iterable is not None else "?")
+            self._desc    = desc
+            self._n       = 0
+            self._postfix = ""
+        def __iter__(self):
+            return self
+        def __next__(self):
+            item = next(self._it)
+            self._n += 1
+            self._print()
+            return item
+        def _print(self):
+            pct = self._n / self._total if isinstance(self._total, int) else 0
+            bar = "█" * int(pct * 30) + "░" * (30 - int(pct * 30))
+            end = "\n" if self._n == self._total else ""
+            print(f"\r{self._desc}: [{bar}] {self._n}/{self._total}  {self._postfix}",
+                  end=end, flush=True)
+        def set_postfix_str(self, s, refresh=True):
+            self._postfix = s
+            if refresh:
+                self._print()
+        def __enter__(self):  return self
+        def __exit__(self, *_): print()
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 EXP_NAME        = "synthetic-simple-linear-collision"
 WIDTH, HEIGHT   = 1280, 720
@@ -187,40 +217,44 @@ def generate():
 
     trail1, trail2 = [], []
 
-    for i in range(TOTAL_FRAMES):
-        arr = felt.copy()
+    collisions = 0
 
-        # Motion blur ghosts (drawn before balls so they sit behind)
-        if trail1:
-            arr = _draw_motion_blur(arr, trail1[-MOTION_BLUR_N:], BALL_RADIUS, col1)
-        if trail2:
-            arr = _draw_motion_blur(arr, trail2[-MOTION_BLUR_N:], BALL_RADIUS, col2)
+    with tqdm(range(TOTAL_FRAMES), desc="Rendering", unit="frame") as pbar:
+        for i in pbar:
+            arr = felt.copy()
 
-        arr = _draw_ball(arr, p1[0], p1[1], BALL_RADIUS, col1)
-        arr = _draw_ball(arr, p2[0], p2[1], BALL_RADIUS, col2)
+            # Motion blur ghosts (drawn before balls so they sit behind)
+            if trail1:
+                arr = _draw_motion_blur(arr, trail1[-MOTION_BLUR_N:], BALL_RADIUS, col1)
+            if trail2:
+                arr = _draw_motion_blur(arr, trail2[-MOTION_BLUR_N:], BALL_RADIUS, col2)
 
-        Image.fromarray(arr).save(frames_dir / f"{i+1:06d}.jpg", quality=95)
+            arr = _draw_ball(arr, p1[0], p1[1], BALL_RADIUS, col1)
+            arr = _draw_ball(arr, p2[0], p2[1], BALL_RADIUS, col2)
 
-        # ── Physics step ──────────────────────────────────────────────────────
-        t = _ccd(p1, p2, v1, v2, BALL_RADIUS)
-        if t is not None:
-            p1 += v1 * t
-            p2 += v2 * t
-            v1, v2 = _resolve(v1, v2, p1, p2)
-            p1 += v1 * (1 - t)
-            p2 += v2 * (1 - t)
-            print(f"  CCD collision at frame {i+1}, t={t:.3f}")
-        else:
-            p1 += v1
-            p2 += v2
+            Image.fromarray(arr).save(frames_dir / f"{i+1:06d}.jpg", quality=95)
 
-        v1 *= AIR_DRAG
-        v2 *= AIR_DRAG
-        _wall_bounce(p1, v1, BALL_RADIUS, WIDTH, HEIGHT)
-        _wall_bounce(p2, v2, BALL_RADIUS, WIDTH, HEIGHT)
+            # ── Physics step ──────────────────────────────────────────────────
+            t = _ccd(p1, p2, v1, v2, BALL_RADIUS)
+            if t is not None:
+                p1 += v1 * t
+                p2 += v2 * t
+                v1, v2 = _resolve(v1, v2, p1, p2)
+                p1 += v1 * (1 - t)
+                p2 += v2 * (1 - t)
+                collisions += 1
+                pbar.set_postfix_str(f"collisions={collisions} [CCD @ frame {i+1}, t={t:.3f}]")
+            else:
+                p1 += v1
+                p2 += v2
 
-        trail1.append(tuple(p1.copy()))
-        trail2.append(tuple(p2.copy()))
+            v1 *= AIR_DRAG
+            v2 *= AIR_DRAG
+            _wall_bounce(p1, v1, BALL_RADIUS, WIDTH, HEIGHT)
+            _wall_bounce(p2, v2, BALL_RADIUS, WIDTH, HEIGHT)
+
+            trail1.append(tuple(p1.copy()))
+            trail2.append(tuple(p2.copy()))
 
     print("\nDone - load", EXP_NAME, "in the Debug Lab.")
 

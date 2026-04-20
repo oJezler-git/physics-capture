@@ -3,6 +3,36 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    class tqdm:  # minimal fallback progress bar
+        def __init__(self, iterable=None, total=None, desc="", unit="", **kwargs):
+            self._it    = iter(iterable) if iterable is not None else None
+            self._total = total or (len(iterable) if iterable is not None else "?")
+            self._desc  = desc
+            self._n     = 0
+            self._postfix = ""
+        def __iter__(self):
+            return self
+        def __next__(self):
+            item = next(self._it)
+            self._n += 1
+            self._print()
+            return item
+        def _print(self):
+            pct = self._n / self._total if isinstance(self._total, int) else 0
+            bar = "█" * int(pct * 30) + "░" * (30 - int(pct * 30))
+            end = "\n" if self._n == self._total else ""
+            print(f"\r{self._desc}: [{bar}] {self._n}/{self._total}  {self._postfix}",
+                  end=end, flush=True)
+        def set_postfix_str(self, s, refresh=True):
+            self._postfix = s
+            if refresh:
+                self._print()
+        def __enter__(self):  return self
+        def __exit__(self, *_): print()
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 EXP_NAME        = "synthetic-chaotic-collision"
 WIDTH, HEIGHT   = 1280, 720
@@ -14,8 +44,8 @@ NUM_PEGS        = 10
 RESTITUTION     = 0.82        # ball-ball / ball-peg energy kept
 WALL_RESTITUTION= 0.75        # wall bounce (slightly lossier)
 AIR_DRAG        = 0.9995      # per-frame velocity multiplier
-GRAVITY         = 0.18        # pixels/frame² downward
-SPIN_TRANSFER   = 0.12        # fraction of tangential velocity -> angular
+GRAVITY         = 0.18        # pixels/frame^2 downward
+SPIN_TRANSFER   = 0.12        # fraction of tangential velocity → angular
 MOTION_BLUR_N   = 4
 ANGULAR_DRAG    = 0.97        # spin decay per frame
 
@@ -301,101 +331,102 @@ def generate():
     trail1, trail2 = [], []
     collisions = 0
 
-    for i in range(TOTAL_FRAMES):
-        arr = felt.copy()
+    with tqdm(range(TOTAL_FRAMES), desc="Rendering", unit="frame") as pbar:
+        for i in pbar:
+            arr = felt.copy()
 
-        # Draw pegs first (background layer)
-        for (px, py) in pegs:
-            arr = _draw_peg(arr, px, py, PEG_RADIUS)
+            # Draw pegs first (background layer)
+            for (px, py) in pegs:
+                arr = _draw_peg(arr, px, py, PEG_RADIUS)
 
-        # Motion blur ghosts
-        if trail1:
-            arr = _draw_motion_blur(arr, trail1[-MOTION_BLUR_N:], BALL_RADIUS, col1)
-        if trail2:
-            arr = _draw_motion_blur(arr, trail2[-MOTION_BLUR_N:], BALL_RADIUS, col2)
+            # Motion blur ghosts
+            if trail1:
+                arr = _draw_motion_blur(arr, trail1[-MOTION_BLUR_N:], BALL_RADIUS, col1)
+            if trail2:
+                arr = _draw_motion_blur(arr, trail2[-MOTION_BLUR_N:], BALL_RADIUS, col2)
 
-        arr = _draw_ball(arr, int(p1[0]), int(p1[1]), BALL_RADIUS, col1, angle1)
-        arr = _draw_ball(arr, int(p2[0]), int(p2[1]), BALL_RADIUS, col2, angle2)
+            arr = _draw_ball(arr, int(p1[0]), int(p1[1]), BALL_RADIUS, col1, angle1)
+            arr = _draw_ball(arr, int(p2[0]), int(p2[1]), BALL_RADIUS, col2, angle2)
 
-        Image.fromarray(arr).save(frames_dir / f"{i+1:06d}.jpg", quality=95)
+            Image.fromarray(arr).save(frames_dir / f"{i+1:06d}.jpg", quality=95)
 
-        # ── Physics step ──────────────────────────────────────────────────────
+            # ── Physics step ──────────────────────────────────────────────────
 
-        # Gravity
-        v1[1] += GRAVITY
-        v2[1] += GRAVITY
+            # Gravity
+            v1[1] += GRAVITY
+            v2[1] += GRAVITY
 
-        # Ball–ball CCD
-        t_bb = _ccd(p1, p2, v1, v2, BALL_RADIUS, BALL_RADIUS)
-        if t_bb is not None:
-            p1 += v1 * t_bb
-            p2 += v2 * t_bb
-            v1, v2 = _resolve_ball_ball(v1, v2, p1, p2)
-            # spin from tangential impact
-            n   = (p2 - p1) / (np.linalg.norm(p2 - p1) + 1e-8)
-            t   = np.array([-n[1], n[0]])
-            omega1 += SPIN_TRANSFER * np.dot(v1, t) / BALL_RADIUS
-            omega2 += SPIN_TRANSFER * np.dot(v2, t) / BALL_RADIUS
-            p1 += v1 * (1 - t_bb)
-            p2 += v2 * (1 - t_bb)
-            _separate(p1, p2, BALL_RADIUS, BALL_RADIUS)
-            collisions += 1
-            print(f"  Ball-ball collision frame {i+1}, t={t_bb:.3f}")
-        else:
-            p1 += v1
-            p2 += v2
+            # Ball–ball CCD
+            t_bb = _ccd(p1, p2, v1, v2, BALL_RADIUS, BALL_RADIUS)
+            if t_bb is not None:
+                p1 += v1 * t_bb
+                p2 += v2 * t_bb
+                v1, v2 = _resolve_ball_ball(v1, v2, p1, p2)
+                # spin from tangential impact
+                n   = (p2 - p1) / (np.linalg.norm(p2 - p1) + 1e-8)
+                t   = np.array([-n[1], n[0]])
+                omega1 += SPIN_TRANSFER * np.dot(v1, t) / BALL_RADIUS
+                omega2 += SPIN_TRANSFER * np.dot(v2, t) / BALL_RADIUS
+                p1 += v1 * (1 - t_bb)
+                p2 += v2 * (1 - t_bb)
+                _separate(p1, p2, BALL_RADIUS, BALL_RADIUS)
+                collisions += 1
+                pbar.set_postfix_str(f"collisions={collisions} [ball-ball @ frame {i+1}]")
+            else:
+                p1 += v1
+                p2 += v2
 
-        # Ball–peg collisions
-        for (px, py) in pegs:
-            pp = np.array([px, py])
-            for ball_pos, ball_v, ball_omega_ref, ball_idx in [
-                (p1, v1, [omega1], 1), (p2, v2, [omega2], 2)
-            ]:
-                t_bp = _ccd(ball_pos, pp,
-                            ball_v,  np.zeros(2),
-                            BALL_RADIUS, PEG_RADIUS)
-                if t_bp is not None:
-                    ball_pos += ball_v * t_bp
-                    new_v, new_omega = _resolve_ball_peg(
-                        ball_v, ball_pos, pp, ball_omega_ref[0]
-                    )
-                    ball_v[:]          = new_v
-                    ball_omega_ref[0]  = new_omega
-                    ball_pos += ball_v * (1 - t_bp)
-                    _separate_peg(ball_pos, pp, BALL_RADIUS, PEG_RADIUS)
-                    collisions += 1
-                    print(f"  Ball{ball_idx}-peg collision frame {i+1}")
-                else:
-                    # soft overlap correction (missed by CCD at high speed)
-                    d = ball_pos - pp
-                    dist = np.linalg.norm(d)
-                    if dist < BALL_RADIUS + PEG_RADIUS:
+            # Ball–peg collisions
+            for (px, py) in pegs:
+                pp = np.array([px, py])
+                for ball_pos, ball_v, ball_omega_ref, ball_idx in [
+                    (p1, v1, [omega1], 1), (p2, v2, [omega2], 2)
+                ]:
+                    t_bp = _ccd(ball_pos, pp,
+                                ball_v,  np.zeros(2),
+                                BALL_RADIUS, PEG_RADIUS)
+                    if t_bp is not None:
+                        ball_pos += ball_v * t_bp
                         new_v, new_omega = _resolve_ball_peg(
                             ball_v, ball_pos, pp, ball_omega_ref[0]
                         )
-                        ball_v[:]         = new_v
-                        ball_omega_ref[0] = new_omega
+                        ball_v[:]          = new_v
+                        ball_omega_ref[0]  = new_omega
+                        ball_pos += ball_v * (1 - t_bp)
                         _separate_peg(ball_pos, pp, BALL_RADIUS, PEG_RADIUS)
+                        collisions += 1
+                        pbar.set_postfix_str(f"collisions={collisions} [ball{ball_idx}-peg @ frame {i+1}]")
+                    else:
+                        # soft overlap correction (missed by CCD at high speed)
+                        d = ball_pos - pp
+                        dist = np.linalg.norm(d)
+                        if dist < BALL_RADIUS + PEG_RADIUS:
+                            new_v, new_omega = _resolve_ball_peg(
+                                ball_v, ball_pos, pp, ball_omega_ref[0]
+                            )
+                            ball_v[:]         = new_v
+                            ball_omega_ref[0] = new_omega
+                            _separate_peg(ball_pos, pp, BALL_RADIUS, PEG_RADIUS)
 
             # write back mutable omegas
             # (already updated in-place via the list trick above)
 
-        # drag + spin decay
-        v1 *= AIR_DRAG
-        v2 *= AIR_DRAG
-        omega1 *= ANGULAR_DRAG
-        omega2 *= ANGULAR_DRAG
+            # drag + spin decay
+            v1 *= AIR_DRAG
+            v2 *= AIR_DRAG
+            omega1 *= ANGULAR_DRAG
+            omega2 *= ANGULAR_DRAG
 
-        # wall bounce
-        _wall_bounce(p1, v1, BALL_RADIUS, WIDTH, HEIGHT)
-        _wall_bounce(p2, v2, BALL_RADIUS, WIDTH, HEIGHT)
+            # wall bounce
+            _wall_bounce(p1, v1, BALL_RADIUS, WIDTH, HEIGHT)
+            _wall_bounce(p2, v2, BALL_RADIUS, WIDTH, HEIGHT)
 
-        # accumulate rotation angle for stripe rendering
-        angle1 += omega1
-        angle2 += omega2
+            # accumulate rotation angle for stripe rendering
+            angle1 += omega1
+            angle2 += omega2
 
-        trail1.append(tuple(p1.copy()))
-        trail2.append(tuple(p2.copy()))
+            trail1.append(tuple(p1.copy()))
+            trail2.append(tuple(p2.copy()))
 
     print(f"\nDone - {collisions} total collisions. Load {EXP_NAME} in the Debug Lab.")
 
