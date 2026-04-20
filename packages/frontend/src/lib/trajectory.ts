@@ -4,41 +4,49 @@ export interface Point2D {
 }
 
 /**
- * Converts normalized coordinates (0-1) to pixel coordinates (e.g. for Canvas drawing)
+ * Convert frame pixel coordinates (image space) to canvas pixel coordinates (overlay space).
  */
 export function toCanvas(
-  normalizedX: number,
-  normalizedY: number,
+  frameX: number,
+  frameY: number,
+  imageWidth: number,
+  imageHeight: number,
   canvasWidth: number,
   canvasHeight: number,
 ): Point2D {
+  const scaleX = canvasWidth / imageWidth;
+  const scaleY = canvasHeight / imageHeight;
   return {
-    x: normalizedX * canvasWidth,
-    y: normalizedY * canvasHeight,
+    x: frameX * scaleX,
+    y: frameY * scaleY,
   };
 }
 
 /**
- * Converts pixel coordinates (e.g. from mouse click) to normalized coordinates (0-1)
+ * Convert canvas pixel coordinates (overlay space) to frame pixel coordinates (image space).
  */
-export function toNormalized(
+export function toFrame(
   canvasX: number,
   canvasY: number,
+  imageWidth: number,
+  imageHeight: number,
   canvasWidth: number,
   canvasHeight: number,
 ): Point2D {
+  const scaleX = canvasWidth / imageWidth;
+  const scaleY = canvasHeight / imageHeight;
   return {
-    x: canvasX / canvasWidth,
-    y: canvasY / canvasHeight,
+    x: canvasX / scaleX,
+    y: canvasY / scaleY,
   };
 }
 
 export function findNearestPoint<T extends Point2D>(
   query: Point2D,
   points: T[],
-  maxDistanceNormalized: number,
+  maxDistancePx: number,
 ): T | null {
-  const maxDistanceSquared = maxDistanceNormalized ** 2;
+  const maxDistanceSquared = maxDistancePx ** 2;
   let closest: T | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
 
