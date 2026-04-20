@@ -122,18 +122,41 @@ class SAM2Tracker:
 
             # Propagate through video.
             total_frames = len(frame_files)
+            
+            # Keep track of last valid positions to "hold" during occlusions/jumps
+            last_valid = {} # obj_id -> {x, y}
+
             for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
                 frame_results = []
                 for i, obj_id in enumerate(obj_ids):
                     # Keep mask on GPU for centroid calculation
-                    centroid = self._get_centroid_gpu(masks[i])
+                    centroid, area = self._get_centroid_and_area_gpu(masks[i])
                     
+                    obj_key = int(obj_id)
+                    
+                    # If mask is present, update last valid and use high confidence
+                    if area > 10: # Minimum pixel threshold
+                        x_norm = centroid[0] / width
+                        y_norm = centroid[1] / height
+                        last_valid[obj_key] = {"x": x_norm, "y": y_norm}
+                        confidence = 1.0
+                    else:
+                        # Mask lost! Use last known position if available
+                        if obj_key in last_valid:
+                            x_norm = last_valid[obj_key]["x"]
+                            y_norm = last_valid[obj_key]["y"]
+                            confidence = 0.0 # Flag as lost but hold position
+                        else:
+                            # Never found?
+                            x_norm, y_norm = 0.0, 0.0
+                            confidence = 0.0
+
                     frame_results.append(
                         {
-                            "ball_id": int(obj_id) - 1,
-                            "x": centroid[0] / width,
-                            "y": centroid[1] / height,
-                            "confidence": 1.0, # Confidence is implicit in mask presence
+                            "ball_id": obj_key - 1,
+                            "x": x_norm,
+                            "y": y_norm,
+                            "confidence": confidence,
                         }
                     )
                 # Yield streaming item: (frame_int, points, progress_pct)
@@ -160,36 +183,32 @@ class SAM2Tracker:
                 )
             yield (frame_idx, frame_results, frame_idx / max(1, total_frames - 1))
 
-    def _get_centroid_gpu(self, mask: torch.Tensor) -> Tuple[float, float]:
+    def _get_centroid_and_area_gpu(self, mask: torch.Tensor) -> Tuple[Tuple[float, float], float]:
         """
-        Calculate centroid on GPU to avoid heavy CPU-GPU transfers.
+        Calculate centroid and sum (area) on GPU.
         """
         if not isinstance(mask, torch.Tensor):
-            return (0.0, 0.0)
+            return (0.0, 0.0), 0.0
             
         # Squeeze to 2D: (H, W)
         m = mask.detach().squeeze()
-        if m.ndim > 2: m = m[0] # Take first if still multi-dimensional
+        if m.ndim > 2: m = m[0]
         
-        # Simple threshold/clip to get weights
         m = torch.clamp(m, min=0.0)
         total_weight = m.sum()
+        area = float(total_weight.cpu())
         
         if total_weight <= 1e-6:
-            return (0.0, 0.0)
+            return (0.0, 0.0), 0.0
             
-        # GPU-accelerated projection
         height, width = m.shape
-        
-        # Generate coordinate vectors on the SAME device as mask
         cols = torch.arange(width, device=m.device, dtype=m.dtype)
         rows = torch.arange(height, device=m.device, dtype=m.dtype)
         
-        # Weighted averages
         cx = (m.sum(dim=0) * cols).sum() / total_weight
         cy = (m.sum(dim=1) * rows).sum() / total_weight
         
-        return (float(cx.cpu()), float(cy.cpu()))
+        return (float(cx.cpu()), float(cy.cpu())), area
 
     def _get_centroid(self, mask: np.ndarray) -> Tuple[float, float]:
         """Fallback for non-torch masks"""
