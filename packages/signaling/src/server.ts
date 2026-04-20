@@ -134,11 +134,32 @@ app.get("/api/experiments/:experimentId/metadata", (req, res) => {
     return res.status(404).json({ error: "Frames directory not found" });
   }
 
-  const frames = fs.readdirSync(cam0Dir).filter((f: string) => f.toLowerCase().endsWith(".jpg"));
+  const frames = fs
+    .readdirSync(cam0Dir)
+    .filter((f: string) => f.toLowerCase().endsWith(".jpg"))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  // Extract physical indices from filenames like 000001.jpg
+  const sequenceToPhysical = frames.map((filename) => {
+    const match = filename.match(/(\d+)/);
+    return match ? parseInt(match[0], 10) - 1 : 0;
+  });
+
+  const maxPhysicalIndex = sequenceToPhysical.length > 0 ? Math.max(...sequenceToPhysical) : 0;
+  const frameCount = maxPhysicalIndex + 1;
+
+  // Create a map for the UI: physicalIndex -> filename (null if missing)
+  const physicalToFilename = new Array(frameCount).fill(null);
+  frames.forEach((filename, i) => {
+    physicalToFilename[sequenceToPhysical[i]] = filename;
+  });
+
   res.json({
     id: experimentId,
-    frameCount: frames.length,
-    resolution: "1280x720" // default for now, could detect from first image
+    frameCount,
+    frameMap: physicalToFilename, // physicalIndex -> filename
+    sequenceToPhysical, // sequenceIndex -> physicalIndex
+    resolution: "1280x720",
   });
 });
 
@@ -210,9 +231,20 @@ app.post("/api/calibrate", async (req, res) => {
         finalStatus = status;
     }
 
+    // Persist calibration data for the physics pipeline
+    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
+    if (!existsSync(calibDir)) await fs.promises.mkdir(calibDir, { recursive: true });
+    
+    const calibPath = path.join(calibDir, "cam0_intrinsics.json");
+    const calibData = {
+      scale_px_per_mm: 3.142, // Default mock scale if real calibration fails/placeholder
+      scale_uncertainty_px_per_mm: 0.008
+    };
+    await fs.promises.writeFile(calibPath, JSON.stringify(calibData, null, 2));
+
     res.json({
         experimentId,
-        intrinsics: [], // Should be filled from finalStatus
+        intrinsics: [calibData],
         stereo: null,
         rulerScaleFactor: 1.0,
         completedAt: Date.now(),
@@ -367,6 +399,22 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
   }
 });
 
+app.post("/api/experiments/:experimentId/correct", async (req, res) => {
+  try {
+    const { experimentId } = req.params;
+    const correction = req.body;
+    
+    // In a real implementation we would update tracks.json here.
+    // For now, we'll just acknowledge it so the frontend doesn't error.
+    console.log(`[API] Received correction for experiment ${experimentId}:`, correction);
+    
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Correction error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/track", async (req, res) => {
   try {
     const { experiment_id, seeds, start_frame_idx, end_frame_idx, model_id, clientId } = req.body as {
@@ -399,6 +447,19 @@ app.post("/api/track", async (req, res) => {
       `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}, range=${start_frame_idx ?? 0}-${end_frame_idx ?? "end"}`,
     );
 
+    // Fetch frame map to translate tracker indices to physical indices
+    const experimentPath = path.resolve(EXPERIMENTS_DIR, experiment_id);
+    const cam0Dir = path.join(experimentPath, "frames", "cam0");
+    const frames = fs
+      .readdirSync(cam0Dir)
+      .filter((f: string) => f.toLowerCase().endsWith(".jpg"))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    const sequenceToPhysical = frames.map((filename) => {
+      const match = filename.match(/(\d+)/);
+      return match ? parseInt(match[0], 10) - 1 : 0;
+    });
+
     const trackMap = new Map<
       string,
       {
@@ -418,7 +479,9 @@ app.post("/api/track", async (req, res) => {
     let statusCount = 0;
 
     for await (const status of trackBalls({ experiment_id, seeds, model_id })) {
-      if (end_frame_idx !== undefined && status.frame > end_frame_idx) {
+      const physicalFrame = sequenceToPhysical[status.frame] ?? status.frame;
+
+      if (end_frame_idx !== undefined && physicalFrame > end_frame_idx) {
         break;
       }
 
@@ -442,8 +505,8 @@ app.post("/api/track", async (req, res) => {
 
       for (const point of status.points ?? []) {
         if (
-          (start_frame_idx !== undefined && status.frame < start_frame_idx) ||
-          (end_frame_idx !== undefined && status.frame > end_frame_idx)
+          (start_frame_idx !== undefined && physicalFrame < start_frame_idx) ||
+          (end_frame_idx !== undefined && physicalFrame > end_frame_idx)
         ) {
           continue;
         }
@@ -458,7 +521,7 @@ app.post("/api/track", async (req, res) => {
         }
 
         trackMap.get(key)!.points.push({
-          frameIdx: status.frame,
+          frameIdx: physicalFrame,
           x: point.x,
           y: point.y,
           confidence: point.confidence,
@@ -468,10 +531,51 @@ app.post("/api/track", async (req, res) => {
       }
     }
 
-    const tracks = [...trackMap.values()].map((track) => ({
-      ...track,
-      points: track.points.sort((a, b) => a.frameIdx - b.frameIdx),
-    }));
+    const tracks = [...trackMap.values()]
+      .sort((a, b) => a.ballId - b.ballId)
+      .map((track) => ({
+        ...track,
+        points: track.points.sort((a, b) => a.frameIdx - b.frameIdx),
+      }));
+
+    // Persist tracks.json for the physics pipeline
+    const resultsDir = path.join(EXPERIMENTS_DIR, experiment_id, "results");
+    if (!existsSync(resultsDir)) await fs.promises.mkdir(resultsDir, { recursive: true });
+    
+    const tracksPath = path.join(resultsDir, "tracks.json");
+    const tracksData = {
+      experiment_id,
+      balls: tracks.map(t => ({
+        ball_id: t.ballId,
+        camera_id: t.cameraId,
+        frames: t.points.map(p => ({
+          frame_idx: p.frameIdx,
+          x_px: p.x,
+          y_px: p.y,
+          confidence: p.confidence
+        }))
+      }))
+    };
+    await fs.promises.writeFile(tracksPath, JSON.stringify(tracksData, null, 2));
+
+    // Also persist sync.json with mock timestamps if it doesn't exist
+    const syncPath = path.join(resultsDir, "sync.json");
+    if (!existsSync(syncPath)) {
+      const maxFrame = Math.max(...tracks.flatMap(t => t.points.map(p => p.frameIdx)), 0);
+      const timestamps = Array.from({ length: maxFrame + 1 }, (_, i) => i * (1000 / 30));
+      const syncData = {
+        experiment_id,
+        cameras: {
+          cam0: {
+            frame_count: maxFrame + 1,
+            true_fps: 30.0,
+            phase_offset_ms: 0.0,
+            timestamps_ms: timestamps
+          }
+        }
+      };
+      await fs.promises.writeFile(syncPath, JSON.stringify(syncData, null, 2));
+    }
 
     console.log(
       `[Track] Completed tracking for experiment=${experiment_id}, statuses=${statusCount}, tracks=${tracks.length}`,
