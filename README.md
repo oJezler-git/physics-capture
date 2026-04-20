@@ -4,7 +4,7 @@ PhysicsCapture is a high-accuracy multi-camera motion analysis system designed f
 
 ## Key Features
 
-- **Visual Metronome Synchronisation:** Achieves sub-frame (<0.5ms) temporal alignment across multiple independent devices.
+- **Frequency-Domain Synchronisation (Phased Grating + Gray Code):** Achieves sub-frame temporal alignment across multiple independent devices without relying on brightness flicker, colour encoding, or fast-moving geometry.
 - **High-Accuracy Tracking:** Uses Meta's **Segment Anything Model 2 (SAM2)** for robust object tracking, even with motion blur or partial occlusions.
 - **Uncertainty Propagation:** All results (velocity, momentum, kinetic energy) include automatic uncertainty estimates derived from measurement errors.
 - **PWA Camera Client:** No native app required—any smartphone with a modern browser can serve as a camera.
@@ -117,7 +117,7 @@ _Note: The frontend uses a self-signed certificate for local HTTPS (required for
 1.  **Setup Session:** Open the app on your laptop and smartphones. Scan the QR code on the phones to link them as camera devices.
 2.  **Calibration:** Place a checkerboard in the field of view of all cameras to perform intrinsic and extrinsic (stereo) calibration.
 3.  **Recording:**
-    - Place the laptop so the screen (Visual Metronome) is visible in a corner of the camera frames.
+    - Place the laptop so the on-screen **Sync Marker** (static border + Gray code strip + phased sine grating) is visible in a corner of the camera frames.
     - Press **Record**. The phones will record locally at 100Mbps.
     - Roll the balls and capture the collision.
     - Press **Stop**. The UI will guide you through the processing phases:
