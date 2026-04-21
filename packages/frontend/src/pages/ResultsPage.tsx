@@ -27,6 +27,7 @@ export const ResultsPage = () => {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+  const autoRequestedForExperimentId = useRef<string | null>(null);
 
   const chartSeries = useMemo(
     () =>
@@ -60,7 +61,16 @@ export const ResultsPage = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Physics request failed (${response.status})`);
+        let errorMessage = `Physics request failed (${response.status})`;
+        try {
+          const payload = (await response.json()) as { error?: unknown };
+          if (typeof payload?.error === 'string' && payload.error.trim()) {
+            errorMessage = payload.error;
+          }
+        } catch {
+          // Ignore non-JSON bodies.
+        }
+        throw new Error(errorMessage);
       }
 
       const result = (await response.json()) as PhysicsResult;
@@ -75,6 +85,8 @@ export const ResultsPage = () => {
 
   useEffect(() => {
     if (!physicsResult && status === 'idle' && experimentId) {
+      if (autoRequestedForExperimentId.current === experimentId) return;
+      autoRequestedForExperimentId.current = experimentId;
       handleComputePhysics();
     }
   }, [experimentId, physicsResult, status]);

@@ -52,6 +52,15 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         self.tracker = SAM2Tracker()
         self.base_dir = Path(__file__).parent.parent / "experiments"
 
+    @staticmethod
+    def _read_optional_float(metric, key: str, default: float = 0.0) -> float:
+        if not metric:
+            return default
+        value = metric.get(key)
+        if value is None:
+            return default
+        return float(value)
+
     async def RunCalibration(self, request, context):
         logger.info(f"RunCalibration for experiment {request.experiment_id}")
         # Placeholder implementation
@@ -197,8 +206,9 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                     ke_before_uncertainty=sys_p["ke_before"]["uncertainty_J"],
                     ke_after=sys_p["ke_after"]["value_J"],
                     ke_after_uncertainty=sys_p["ke_after"]["uncertainty_J"],
-                    momentum_conservation_error_pct=sys_p["conservation_pct"]["value"] if sys_p["conservation_pct"] else 0.0,
-                    momentum_conservation_error_pct_uncertainty=sys_p["conservation_pct"]["uncertainty"] if sys_p["conservation_pct"] else 0.0,
+                    # ufloat_to_dict(unit="pct") yields keys like value_pct/uncertainty_pct.
+                    momentum_conservation_error_pct=self._read_optional_float(sys_p.get("conservation_pct"), "value_pct"),
+                    momentum_conservation_error_pct_uncertainty=self._read_optional_float(sys_p.get("conservation_pct"), "uncertainty_pct"),
                     coefficient_of_restitution=sys_p["cor"]["value"] if sys_p["cor"] else -1.0,
                     coefficient_of_restitution_uncertainty=sys_p["cor"]["uncertainty"] if sys_p["cor"] else 0.0
                 )

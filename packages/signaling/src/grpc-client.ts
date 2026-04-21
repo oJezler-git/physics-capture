@@ -109,10 +109,13 @@ export function trackBalls(request: TrackingRequest) {
 }
 
 export async function computePhysics(request: PhysicsRequest): Promise<PhysicsResult> {
+  const deadlineMsRaw = process.env.PHYSICS_GRPC_DEADLINE_MS;
+  const deadlineMsParsed = deadlineMsRaw ? Number(deadlineMsRaw) : NaN;
+  const deadlineMs = Number.isFinite(deadlineMsParsed) ? deadlineMsParsed : 120_000;
   return new Promise((resolve, reject) => {
     grpcClient.computePhysics(
       request,
-      { deadline: Date.now() + 30_000 },
+      { deadline: Date.now() + deadlineMs },
       (err: any, res: PhysicsResult) => (err ? reject(mapGrpcError(err)) : resolve(res))
     );
   });
