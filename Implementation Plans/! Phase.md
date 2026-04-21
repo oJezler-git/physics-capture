@@ -9,7 +9,7 @@
 
   Phase 2: Accuracy & Multi-Camera (Sprints 3 & 4)
   Goal: Sub-millisecond timing and 3D reconstruction.
-   6. Module A (Synchronisation - Part 2): Implement the "Visual Metronome" dot tracking to sync two cameras.
+   6. Module A (Synchronisation - Part 2): Implement the Sync Marker (phased grating + Gray code) decoding to sync two cameras.
    7. Module C (Calibration): Build the checkerboard detection to calibrate lens distortion.
    8. Module E (Reconstruction): Use stereo triangulation to turn two 2D tracks into one 3D path.
 

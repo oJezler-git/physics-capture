@@ -139,7 +139,7 @@ enum FrictionMode { IGNORE = 0; COMPENSATE = 1; }
 
 **Outside this module (treated as black boxes):**
 - SAM2 tracking and centroid extraction
-- Sync dot fitting and timestamp generation
+- Sync Marker decoding (Gray code + grating phase) and timestamp generation
 - Camera calibration and stereo triangulation
 - All UI, WebSocket relay, and file upload logic
 

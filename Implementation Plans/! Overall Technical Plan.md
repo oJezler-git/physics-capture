@@ -39,29 +39,27 @@ A single experiment can take 10 seconds or 10 minutes to process — the result 
 
 ## 2. Synchronisation
 
-### Method: Continuous Visual Kinematic Sync (The Visual Metronome)
+### Method: Frequency-Domain Sync (Phased Grating + Gray Code)
 
-Rather than relying on network time protocols or hardware triggers, PhysicsCapture uses a
-purely optical synchronisation strategy. No special hardware, network configuration, or
-browser permissions are required.
+Based on the strict constraints of the physical setup (unlocked auto-exposure, motion blur, 4:2:0 video compression, and a laptop display refresh that does not match camera FPS), the sync signal must not rely on absolute brightness, sharp color boundaries, or fast-moving geometric centroids.
+
+Instead, PhysicsCapture uses a **static Sync Marker** on the laptop screen that turns synchronisation into a signal-processing problem.
 
 **Setup:**
-- The laptop screen displays a high-contrast white dot moving horizontally at a constant,
-  known speed across a black background.
-- The phones record this dot for **3 seconds before** the ball roll and **3 seconds after** it ends.
-- The sync dot is always visible in the corner or edge of the physical scene captured by
-  both cameras throughout the recording.
+- The laptop screen renders a **high-contrast rectangular border** (used as a stable localisation target for perspective rectification).
+- Inside the border are two stacked elements:
+  - **Top (macro-time):** a 10-bit **Gray code** strip that increments once per display refresh frame.
+  - **Bottom (micro-time):** a low-frequency **spatial sine grating** (3â€“5 cycles across the ROI) whose **phase** shifts smoothly each display refresh frame.
+- The phones record the Sync Marker for **3 seconds before** the ball roll and **3 seconds after** it ends, and it remains visible in-frame throughout the recording.
 
 **Python CV Sync Analysis:**
-- After upload and frame extraction, the Python pipeline runs SAM2 to track the sync dot
-  across both camera sequences independently.
-- For each camera, the dot's X-position vs. frame-index is fitted to a linear model:
-  `x = m·n + c`
-- This line fit gives two pieces of information per camera:
-  1. **Sub-frame phase offset** — the fractional frame offset between the two cameras'
-     shutters, bypassing shutter mismatch entirely.
-  2. **True exact FPS** — the slope of the line encodes the camera's real frame rate,
-     solving clock drift over the recording duration.
+- After upload and frame extraction, the Python pipeline locates the marker border, computes a homography, and uses `cv2.warpPerspective` to rectify the ROI.
+- **Macro-time (Gray code):** sample bit centers, threshold to 0/1, and decode the Gray-coded integer frame counter `N`.
+- **Micro-time (grating phase):** crop the sine region, vertically average (`roi.mean(axis=0)`) to a 1D signal, then take a 1D FFT (`np.fft.fft`) and read phase (`np.angle`) at the known spatial frequency bin to obtain `φ`.
+- Combine `N` + `φ` into an unwrapped continuous phase timeline `Φ(n)` and fit a line `Φ = m·n + c` per camera.
+- This fit gives two pieces of information per camera:
+  1. **Sub-frame phase offset** — derived from the intercept `c`.
+  2. **True exact FPS** — derived from the slope `m` (captures drift over the recording duration).
 - Python generates a **master timestamp array**: a mapping from every integer frame index
   to a true synchronised millisecond timestamp, accounting for both phase offset and
   per-device clock drift.
@@ -73,7 +71,7 @@ browser permissions are required.
   mismatch and per-device clock drift.
 
 **Estimated sync accuracy:** sub-frame (< 0.5ms equivalent at 30fps), derived from the
-residuals of the linear fit to the sync dot trajectory.
+residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-code consistency checks.
 
 ---
 
@@ -145,7 +143,7 @@ residuals of the linear fit to the sync dot trajectory.
 #### 1. Session Setup
 - Add camera devices (PC webcam or linked phones via QR code/room code)
 - Camera preview with live feed from all devices
-- Position guidance: ensure the laptop screen's sync dot is visible in all camera frames
+- Position guidance: ensure the laptop screen Sync Marker (border + Gray code + grating) is visible in all camera frames
 - **Ball configuration:** number of balls (1–3), mass per ball in grams, mass uncertainty (default ±1g)
 
 #### 2. Calibration
@@ -156,10 +154,10 @@ residuals of the linear fit to the sync dot trajectory.
 - Calibration quality score shown (reprojection error in pixels)
 
 #### 3. Experiment Recording
-- Laptop screen displays the Visual Metronome (moving sync dot) automatically
+- Laptop screen displays the Sync Marker (phased grating + Gray code) automatically
 - Live preview from all cameras simultaneously (via WebRTC)
 - Press record → all phones begin `MediaRecorder` local capture
-- Sync dot recorded for 3 seconds before and after the ball roll
+- Sync Marker recorded for 3 seconds before and after the ball roll
 - Stop recording → phones upload single video file to server → `ffmpeg` extracts PNG frames
 
 #### 4. Ball Selection & Tracking
@@ -581,7 +579,7 @@ Expected end-to-end accuracy for a typical rolling ball experiment
 
 | Error Source | Magnitude | Mitigation |
 |---|---|---|
-| Frame timestamp sync | < 0.5ms | Visual Metronome — sync dot linear fit, sub-frame accuracy |
+| Frame timestamp sync | < 0.5ms | Sync Marker — Gray code + grating phase, line fit on `Φ(n)` |
 | Ball position (single camera) | ±0.3px → ±0.3mm | SAM2 + Gaussian sub-pixel fit |
 | Ball position (stereo 3D) | ±0.5mm | Stereo triangulation |
 | Lens distortion | <0.1px after correction | Checkerboard calibration |
@@ -617,10 +615,10 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 > Sprints 3–4 add sync accuracy and 3D reconstruction but are not blocking.
 
 ### Sprint 3 — Synchronisation
-- [ ] Visual Metronome: laptop screen displays moving sync dot (constant-speed, high-contrast)
-- [ ] Phone PWA: ensure sync dot is framed at start/end of every recording (3s pre/post)
-- [ ] Python: SAM2 sync dot tracking on both camera sequences post-extraction
-- [ ] Python: linear fit to dot X-position → sub-frame phase offset + true FPS per camera
+- [ ] Sync Marker: laptop screen displays phased grating + Gray code (static border, no fast-moving geometry)
+- [ ] Phone PWA: ensure Sync Marker is framed at start/end of every recording (3s pre/post)
+- [ ] Python: rectify marker ROI (`warpPerspective`) + decode Gray code + extract grating phase via FFT
+- [ ] Python: line fit on unwrapped `Φ(n)` → sub-frame phase offset + true FPS per camera
 - [ ] Python: master timestamp array generation (`frame_index → true_ms`) → `sync.json`
 - [ ] Physics Engine: all calculations consume true timestamps, not raw frame indices
 - [ ] Multi-camera UI: side-by-side synchronised scrubbing
@@ -675,7 +673,7 @@ physicscapture/
 │       ├── main.py            ← FastAPI app
 │       ├── grpc_server.py
 │       ├── sync/
-│       │   ├── dot_tracker.py     ← SAM2 sync dot tracking
+│       │   ├── sync_marker.py     ← border rectify + Gray code + FFT phase
 │       │   └── timestamp_array.py ← master frame→ms mapping
 │       ├── tracking/
 │       │   ├── sam2_tracker.py
@@ -752,14 +750,16 @@ All open questions resolved:
    PNG sequence. This is simpler, more reliable, and places no bandwidth constraint on the
    recording quality.
 
-7. **Synchronisation: Visual Metronome (not PTP/IEEE 1588).**
+7. **Synchronisation: Sync Marker (Phased Grating + Gray Code) (not PTP/IEEE 1588).**
    PTP over a browser required tunnelling UDP through WebRTC data channels (`node-ptpd` + custom
-   client), adding significant complexity with uncertain cross-browser behaviour. The LED flash
-   verification step also assumed precise frame-detection latency. The Visual Metronome (a
-   constant-speed dot on the laptop screen, recorded by all cameras) solves both sub-frame phase
-   offset and per-device clock drift purely through post-processing — no network protocol, no
-   special hardware, no browser permissions. Sync quality is directly measurable from the fit
-   residuals.
+   client), adding significant complexity with uncertain cross-browser behaviour. Hardware flashes
+   only give ~1-frame alignment and still depend on exposure/thresholding.
+
+   The Sync Marker (static border + Gray code strip + phased spatial sine grating on the laptop
+   screen, recorded by all cameras) solves both sub-frame shutter phase offset and per-device clock
+   drift purely through post-processing. It is robust to auto-exposure and motion blur because the
+   phase is measured in the frequency domain, and sequence order is provided by the Gray code.
+   Sync quality is directly measurable from the `Φ(n)` fit residuals and Gray-code decode validity.
 
 8. **Kinetic energy: 0.7·mv² for solid rolling spheres.**
    A solid rolling sphere has both translational KE (½mv²) and rotational KE (⅕mv²), giving a
@@ -768,4 +768,4 @@ All open questions resolved:
 
 ---
 
-*Plan version 1.2 — MediaRecorder migration, Visual Metronome sync, rolling KE correction*
+*Plan version 1.2 — MediaRecorder migration, Sync Marker sync, rolling KE correction*

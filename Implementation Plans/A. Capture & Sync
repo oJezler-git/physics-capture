@@ -2,13 +2,15 @@
 
 ## Full Implementation Plan
 
+**Note (updated sync design):** The original moving-dot "Visual Metronome" design has been replaced by a static **Sync Marker** (border + Gray code strip + phased spatial sine grating) decoded via perspective rectification + Gray decode + FFT phase.
+
 **Version:** 1.0  
 **Target Module Group:** A — Capture & Sync  
 **Submodules Covered:**
 
 1. Camera Capture Client (PWA)
 2. Local Recording via `MediaRecorder`
-3. Continuous Visual Kinematic Sync (The Visual Metronome)
+3. Frequency-Domain Sync (Sync Marker: Phased Grating + Gray Code)
 4. Sync Analysis (Python post-processing)
 
 **Treating as fixed external systems:** Calibration, Ball Tracking (SAM2), Physics Engine, 3D Reconstruction, gRPC layer, Results UI.
@@ -23,7 +25,7 @@
 | ---------------------------- | ---------------------------------- | ------------------------------------------- |
 | WebRTC signaling (SDP / ICE) | Node.js signaling server           | Session establishment for live preview only |
 | Experiment ID                | Node.js session manager            | Namespaces all file output                  |
-| Laptop screen (physical)     | React frontend `<canvas>` renderer | Renders the Visual Metronome dot            |
+| Laptop screen (physical)     | React frontend `<canvas>` renderer | Renders the Sync Marker                    |
 | Extracted PNG frames         | Node.js `ffmpeg` pipeline          | Input to sync analysis Python module        |
 
 ### 0.2 Downstream Consumers
@@ -32,8 +34,8 @@
 | -------------------------------- | --------------------------------------------------- |
 | Node.js backend                  | Raw `.webm` / `.mp4` video file via HTTP POST       |
 | Node.js `ffmpeg` pipeline        | Triggers on upload completion → produces PNG frames |
-| Python `sync/dot_tracker.py`     | PNG frame sequences for both cameras                |
-| Python `sync/timestamp_array.py` | Dot tracking results → produces `sync.json`         |
+| Python `sync/sync_marker.py`     | PNG frame sequences for both cameras                |
+| Python `sync/timestamp_array.py` | Sync Marker decode results → produces `sync.json`   |
 | Physics Engine (`fitting.py`)    | `sync.json` master timestamp array                  |
 | All other Python CV modules      | True timestamps from `sync.json`                    |
 
@@ -65,9 +67,11 @@
   },
   "sync_accuracy_ms": "float64",
   "reference_camera": "string",
-  "dot_speed_px_per_frame": {
-    "cam0": "float64",
-    "cam1": "float64"
+  "sync_marker": {
+    "gray_bits": "uint32",
+    "grating_cycles": "uint32",
+    "roi_width_px": "uint32",
+    "roi_height_px": "uint32"
   }
 }
 ```
@@ -80,8 +84,8 @@
 | ------------------------- | ----------------------------------------- | ------------------------------------------------- |
 | Camera Capture Client     | Browser PWA (iOS Safari / Chrome Android) | iOS caps `getUserMedia` at 30fps                  |
 | MediaRecorder             | Browser PWA                               | `video/webm;codecs=vp9`; iOS fallback `avc1`      |
-| Visual Metronome renderer | Browser (React on laptop)                 | Canvas2D; must drive at ≥60Hz screen refresh      |
-| Visual Metronome display  | Physical laptop screen                    | LCD refresh rate determines dot position accuracy |
+| Sync Marker renderer | Browser (React on laptop)                 | Canvas2D; must drive at ≥60Hz screen refresh      |
+| Sync Marker display  | Physical laptop screen                    | LCD refresh rate determines marker update cadence |
 | Sync Analysis             | Python 3.11 (CPU or CUDA)                 | SAM2 PyTorch inference; scipy linear regression   |
 
 ### 0.5 Hardware Constraints
@@ -110,13 +114,13 @@
 ### 0.7 Explicit Assumptions
 
 1. **Both cameras record at nominally the same FPS** (e.g., both at "30fps"), but their actual clock rates differ by up to ±1000 ppm.
-2. **The laptop screen displays the sync dot continuously throughout the entire recording**, not just at start/end.
-3. **The sync dot is always visible in at least a 50×50 px region of each camera frame.** Physical framing is the user's responsibility; the system validates this during SAM2 tracking.
+2. **The laptop screen displays the Sync Marker continuously throughout the entire recording**, not just at start/end.
+3. **The Sync Marker is always visible in at least a ~120×60 px region of each camera frame.** Physical framing is the user's responsibility; the system validates this during sync decoding.
 4. **No frames are dropped silently by `MediaRecorder`.** If `MediaRecorder` drops frames, the linear fit will still converge because drop events cause detectable residual spikes (treated as outliers).
 5. **The dot moves at strictly constant speed in the laptop's display coordinate space.** Constant pixel/second is enforced by the renderer using `requestAnimationFrame` + elapsed-time arithmetic (not per-frame increments). This is verified via dot speed calibration in the Python step.
 6. **iOS `MediaRecorder` produces a decodable `.mp4` file with an accurate container timestamp stream.** The container timestamps are NOT used for physics (sync.json overrides them), but they must be monotonically increasing for `ffmpeg -vsync 0` to extract a clean PNG sequence.
-7. **"Experiment start" is defined as: the first frame where the sync dot is detected in both cameras.** This is computed post-hoc during sync analysis.
-8. **The sync dot recording extends 3 seconds before the ball roll and 3 seconds after.** At 30fps this is 90 pre-frames + N roll frames + 90 post-frames, giving ≥180 dot-visible frames for fitting.
+7. **"Experiment start" is defined as: the first frame where the Sync Marker is decoded in both cameras.** This is computed post-hoc during sync analysis.
+8. **The Sync Marker recording extends 3 seconds before the ball roll and 3 seconds after.** At 30fps this is 90 pre-frames + N roll frames + 90 post-frames, giving ≥180 marker-visible frames for robust fitting.
 
 ### 0.8 Missing / Ambiguous Details — Resolved Here
 
@@ -136,7 +140,7 @@
 - `getUserMedia` setup and stream management on phone PWA
 - `MediaRecorder` lifecycle (start / dataavailable / stop)
 - HTTP multipart upload of recorded video to Node.js
-- Visual Metronome renderer (laptop `<canvas>`)
+- Sync Marker renderer (laptop `<canvas>`)
 - Sync analysis Python pipeline: SAM2 dot tracking, linear fit, `sync.json` generation
 
 **OUTSIDE this module group (treated as black boxes):**
@@ -156,7 +160,7 @@
 This module group is responsible for:
 
 1. **Acquiring video** from each phone at the highest quality the PWA environment allows, locally on the device, with zero network interference during capture.
-2. **Rendering a ground-truth timing reference** (the Visual Metronome) on the laptop screen, which is physically visible to both cameras throughout the recording.
+2. **Rendering a ground-truth timing reference** (the Sync Marker) on the laptop screen, which is physically visible to both cameras throughout the recording.
 3. **Recovering the true per-frame timestamps** for every frame of every camera, correcting for inter-camera shutter phase offset and per-device clock drift, producing a single authoritative `sync.json` file.
 
 ### 1.2 Non-Goals
@@ -465,7 +469,7 @@ Node.js triggers `ffmpeg` extraction immediately after `stored_path` is written,
 }
 ```
 
-### 3.3 Visual Metronome Canvas Protocol
+### 3.3 Sync Marker Canvas Protocol
 
 The metronome is rendered on a `<canvas>` element with these fixed properties:
 
@@ -558,7 +562,7 @@ message SyncStatus {
 ### 3.6 Python Internal Interfaces
 
 ```python
-# packages/cv-service/sync/dot_tracker.py
+# packages/cv-service/sync/sync_marker.py
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -722,7 +726,7 @@ ON stopRecording():
    Return { videoBlob, mimeType, durationMs }
 ```
 
-### 4.3 Visual Metronome Renderer Algorithm ([D])
+### 4.3 Sync Marker Renderer Algorithm ([D])
 
 **Key design principle:** The dot position is calculated from elapsed wall-clock time (`performance.now()`), NOT from frame count. This means camera frame-rate variations on the laptop display side are irrelevant — the position is always correct at the moment of rendering.
 
@@ -814,7 +818,7 @@ ALGORITHM: seed_dot(frames_dir, camera_id)
 
 7. IF no blob found with area > 100 px²:
    Scan frames 1..29 and retry. IF still not found:
-   Raise SyncDotNotFoundError(camera_id, "No sync dot detected in first 30 frames")
+   Raise SyncMarkerNotFoundError(camera_id, "No Sync Marker detected/decoded in first 30 frames")
 
 8. Return (cx, cy) and frame_idx where dot was found
 ```
@@ -976,7 +980,7 @@ STEP 5: Final global fit using RANSAC for outlier rejection.
   r_squared = 1 - ss_res / ss_tot
 
   IF r_squared < 0.99:
-    Raise SyncFitQualityError(f"Linear fit R² = {r_squared:.4f} < 0.99 — poor sync dot trajectory")
+    Raise SyncFitQualityError(f"Linear fit R² = {r_squared:.4f} < 0.99 — poor Sync Marker phase timeline")
 
 STEP 6: Return LinearFitResult(
   slope=model.coef_[0],           // float64 px/frame
@@ -1458,7 +1462,7 @@ This typically reduces to < 0.5ms in practice.
 
 Phone cameras use CMOS rolling shutters. A 30fps 1080p phone typically has a row readout time of ~15–25ms, meaning the top and bottom of the frame are captured at different times within the ~33ms inter-frame period.
 
-**Impact on dot tracking:** The dot is in the bottom strip of the frame. All frames of both cameras capture the dot at the same fixed Y-position (bottom strip). Rolling shutter delay at the bottom of the frame is consistent and constant across all frames, so it introduces a fixed bias (not a random error) into the sync dot intercept.
+**Impact on Sync Marker decoding:** Place the marker in a compact strip of the frame (ideally near the same Y-region in both cameras). Rolling shutter delay across that strip is consistent and largely cancels as a fixed bias in the fitted offset rather than random error.
 
 **Impact on physics:** The ball is tracked at varying Y-positions in the frame (since it moves). Rolling shutter introduces a position-dependent timing error of up to ~10ms for a ball at the top of the frame vs the dot at the bottom. This is a known systematic error; quantification is out of scope for this module but should be documented in the physics accuracy budget.
 
@@ -1579,7 +1583,7 @@ The sync accuracy is empirically measurable from the `sync.json` itself:
 
 ### 10.4 Real-World Validation
 
-1. Record two phones simultaneously showing a stopwatch app (accurate to 10ms) in the same frame as the sync dot.
+1. Record two phones simultaneously showing a stopwatch app (accurate to 10ms) in the same frame as the Sync Marker.
 2. Run sync analysis → get `timestamp_ms` arrays.
 3. Compare timestamps from sync.json against stopwatch digits read by OCR.
 4. Acceptable tolerance: < 2ms.
@@ -1610,7 +1614,7 @@ Each step is independently testable and produces an observable output.
 **Files:** `packages/signaling/src/ffmpeg.ts`.
 **Dependency:** Step 2.
 
-### Step 4: Visual Metronome renderer on laptop
+### Step 4: Sync Marker renderer on laptop
 
 **Deliverable:** Canvas element in React shows white dot sweeping left-to-right at constant speed.
 **Test:** Visual inspection; measure dot position at `t=0`, `t=1s`, `t=2s` using browser dev tools canvas screenshot. Assert linearity.
@@ -1621,14 +1625,14 @@ Each step is independently testable and produces an observable output.
 
 **Deliverable:** Given a PNG frame directory, `seed_dot()` returns (cx, cy) within 2px of the actual dot position.
 **Test:** Unit test with synthetic PNG (§10.1 E1).
-**Files:** `packages/cv-service/sync/dot_tracker.py` — `seed_dot()` function only.
+**Files:** `packages/cv-service/sync/sync_marker.py` — marker ROI localisation + decode (Gray + phase).
 **Dependency:** Step 3 (for real frames); synthetic frames for unit test.
 
 ### Step 6: SAM2 dot tracking (Python)
 
 **Deliverable:** `track_dot()` returns `DotTrackingResult` with x-positions matching the dot trajectory.
 **Test:** Synthetic 90-frame PNG sequence (§10.3); assert positions ± 0.5px.
-**Files:** `packages/cv-service/sync/dot_tracker.py` — `track_dot()`.
+**Files:** `packages/cv-service/sync/sync_marker.py` — per-frame decode + timeline fit.
 **Dependency:** Step 5.
 
 ### Step 7: Linear fit (Python)
@@ -1661,7 +1665,7 @@ Each step is independently testable and produces an observable output.
 
 ### Step 11: Full end-to-end validation
 
-**Deliverable:** Two phones record the Visual Metronome; `sync.json` generated; `sync_accuracy_ms < 0.5` verified against stopwatch reference.
+**Deliverable:** Two phones record the Sync Marker; `sync.json` generated; `sync_accuracy_ms < 0.5` verified against stopwatch reference.
 **Test:** Real-world validation (§10.4).
 **Dependency:** Steps 1–10 all complete.
 
@@ -1737,11 +1741,11 @@ All log entries include: `{ timestamp_iso, experiment_id, camera_id, module, lev
 | ffmpeg started            | INFO  | ffmpeg          | `cameraId, inputPath, outputDir`                           |
 | ffmpeg complete           | INFO  | ffmpeg          | `cameraId, frameCount, durationMs`                         |
 | ffmpeg failed             | ERROR | ffmpeg          | `cameraId, exitCode, stderr`                               |
-| Sync dot seeded           | INFO  | dot_tracker     | `cameraId, frameIdx, cx, cy`                               |
-| Sync dot not found        | ERROR | dot_tracker     | `cameraId, searchedFrames`                                 |
-| Dot tracking progress     | DEBUG | dot_tracker     | `cameraId, frameIdx, progress`                             |
-| Potential frame drop      | WARN  | dot_tracker     | `cameraId, frameIdx, residualPx`                           |
-| Metronome freeze detected | WARN  | dot_tracker     | `cameraId, durationMs`                                     |
+| Sync Marker decoded       | INFO  | sync_marker     | `cameraId, frameIdx, grayN, phaseRad`                      |
+| Sync Marker not found     | ERROR | sync_marker     | `cameraId, searchedFrames`                                 |
+| Sync decode progress      | DEBUG | sync_marker     | `cameraId, frameIdx, progress`                             |
+| Potential frame drop      | WARN  | sync_marker     | `cameraId, frameIdx, residualPhase`                        |
+| Marker freeze detected    | WARN  | sync_marker     | `cameraId, durationMs`                                     |
 | Linear fit complete       | INFO  | timestamp_array | `cameraId, slope, intercept, rSquared, residualRmsPx`      |
 | Fit quality error         | ERROR | timestamp_array | `cameraId, rSquared, errorMsg`                             |
 | Phase offset computed     | INFO  | timestamp_array | `phaseOffsetMs, syncAccuracyMs`                            |
@@ -1807,17 +1811,17 @@ for cam_id, cam_sync in result.cameras.items():
 | Cameras processed sequentially by SAM2             | Avoid VRAM contention                | Run on separate GPU processes if multi-GPU available                           |
 | Phase offset computed from intercept extrapolation | Simple; works well for linear motion | Use cross-correlation of dot trajectories for redundancy check                 |
 | Rolling shutter not corrected                      | Complex to measure; small effect     | Add per-camera rolling shutter parameter from device specs                     |
-| Single sync dot                                    | Simple to seed and track             | Two dots at different speeds would over-determine the clock model              |
+| Single Sync Marker                                 | Simple to detect and decode          | Multiple markers could over-determine the clock model (optional redundancy)    |
 | TheilSen regression                                | Robust but slower than OLS           | RANSAC with OLS inner fit for speed (if analysis time is a bottleneck)         |
 | No real-time sync check                            | Post-hoc only                        | Add a real-time "dot detected" confidence indicator in the UI during recording |
 
 ### 14.2 120fps Native App Path
 
-If 120fps capture becomes necessary (unlocks < 8ms frame period vs 33ms at 30fps), the phone client can be replaced with a Swift AVCaptureSession app. The interface contract is unchanged: the app uploads a single video file to `POST /api/upload-video`. The Visual Metronome and sync analysis pipeline require no modifications.
+If 120fps capture becomes necessary (unlocks < 8ms frame period vs 33ms at 30fps), the phone client can be replaced with a Swift AVCaptureSession app. The interface contract is unchanged: the app uploads a single video file to `POST /api/upload-video`. The Sync Marker and sync analysis pipeline require no modifications.
 
 ### 14.3 Hardware Sync Option
 
-A future hardware sync flash (LED triggered by the laptop) could replace the Visual Metronome. The LED would produce a single bright frame in both camera sequences simultaneously. This would yield ~1-frame (33ms) accuracy without the linear fitting step — substantially less accurate than the current approach. The Visual Metronome achieves better accuracy with no additional hardware.
+A future hardware sync flash (LED triggered by the laptop) could replace the Sync Marker. The LED would produce a single bright frame in both camera sequences simultaneously. This would yield ~1-frame (33ms) accuracy without the linear fitting step — substantially less accurate than the current approach. The Sync Marker achieves better accuracy with no additional hardware.
 
 ---
 

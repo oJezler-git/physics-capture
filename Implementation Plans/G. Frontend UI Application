@@ -36,7 +36,7 @@
 - `CalibrationResult`: per-camera intrinsics, stereo extrinsics, reprojection error
 - `TrackingStatusMessage`: frame index, progress float, per-ball centroid array, confidence
 - `PhysicsResult`: per-ball velocities ± uncertainty, momentum, KE, CoR
-- `SyncDotConfig`: dot speed (px/s), dot radius (px), screen dimensions
+- `SyncMarkerConfig`: ROI size (px), Gray code bit count, grating cycle count, phase step
 
 ### Execution Environment
 
@@ -46,14 +46,15 @@
 
 ### Hardware Constraints
 
-- **PC screen:** Drives the Visual Metronome canvas. Must achieve consistent `requestAnimationFrame` cadence (≥60 Hz). The sync dot's true velocity (px/frame) is a first-class calibration input.
+- **PC screen:** Drives the Sync Marker canvas (static border + Gray code strip + phased sine grating). The marker must remain stable on-screen throughout recording and be large enough in the recorded video to survive codec macroblocks.
 - **Cameras:** PC webcam (via `getUserMedia`) or phone cameras (via WebRTC). Phone cameras deliver 30fps (iOS Safari cap), 1080p target.
 - **Network:** LAN or laptop hotspot. WebRTC peer connections on the same LAN subnet. No TURN server assumed — STUN only. All HTTP traffic stays local.
 - **Canvas2D overlay:** Operates on `<canvas>` elements sized to the displayed video frame dimensions. Must not trigger layout reflow on every frame.
 
 ### Timing / Accuracy Constraints
 
-- The Visual Metronome dot must move at a **known, constant, calibrated speed.** The ground truth is: _dot_x(frame) = start_x + speed_px_per_frame × frame_index_, where `speed_px_per_frame` is derived from the screen's actual refresh rate (measured at startup). Speed must be stable to < 0.1 px/frame jitter.
+- The Sync Marker must not depend on absolute luminance flicker, color boundaries, or fast-moving geometric centroids (auto-exposure, motion blur, and 4:2:0 compression make those unreliable).
+- The marker animation is expressed as (a) a Gray-coded counter that increments once per display frame and (b) a sine grating whose **phase** advances each display frame. The backend recovers sub-frame time from the measured phase in the frequency domain.
 - Frame scrubber must load and display PNG frames with < 200ms latency (LAN, not real-time critical).
 - Canvas overlay updates (trajectory drawing) must complete within a single animation frame (< 16ms for 60fps display).
 
@@ -73,7 +74,7 @@
 
 | Ambiguity                                                         | Resolution                                                                                                                       |
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Does the phone sub-app show a live preview of its own camera?     | Yes — the phone shows its own `getUserMedia` stream in a small monitor preview to help the user frame the sync dot.              |
+| Does the phone sub-app show a live preview of its own camera?     | Yes — the phone shows its own `getUserMedia` stream in a small monitor preview to help the user frame the Sync Marker.           |
 | Can calibration be skipped?                                       | Yes — "Single camera / ruler" mode is the fallback. Calibration screen shows a "Skip / Use Ruler" button.                        |
 | Is the frame scrubber loading PNGs or seeking in a video element? | PNGs, loaded individually via `<img>` tags from the Node static file server. This is simpler and avoids video codec seek jitter. |
 | How many balls can be seeded per camera?                          | Maximum 3. The UI enforces this limit.                                                                                           |
@@ -86,7 +87,7 @@
 - All React components, pages, hooks, and stores
 - WebRTC peer connection lifecycle (offer/answer/ICE)
 - `MediaRecorder` orchestration on the phone PWA route
-- Visual Metronome canvas animation (sync dot)
+- Sync Marker canvas rendering (border + Gray code + grating)
 - Canvas2D trajectory overlay rendering
 - Frame scrubber logic (image preloading, navigation)
 - Ball click / bounding-box seed UI
@@ -131,7 +132,7 @@ The Frontend module is the **sole human interface** for PhysicsCapture. It orche
 | `physicsResult`     | `PhysicsResult`             | m/s, kg·m/s, J | scalar object | All values carry `±uncertainty`                               |
 | `frameCount`        | `uint32`                    | frames         | scalar        | ≥ 1                                                           |
 | `framePngUrl`       | `string`                    | —              | scalar        | `http://localhost:3001/experiments/{id}/frames/{cam}/{n}.png` |
-| `syncDotConfig`     | `SyncDotConfig`             | px, px/frame   | scalar object | Computed at startup from measured rAF cadence                 |
+| `syncMarkerConfig`  | `SyncMarkerConfig`          | px, cycles     | scalar object | Fixed spec; used by Python to decode Gray code + grating      |
 
 ### Outputs (typed)
 
@@ -309,47 +310,41 @@ ICE server config: `[{ urls: 'stun:stun.l.google.com:19302' }]` as fallback only
 
 ---
 
-### 2.5 Visual Metronome (`components/VisualMetronome.tsx`)
+### 2.5 Sync Marker (`components/SyncMarker.tsx`)
 
-**Purpose:** Full-screen black canvas with a white sync dot that moves horizontally at constant speed. Active only on Screen 3 (Experiment Recording).
+**Purpose:** Render a robust optical synchronisation target on the laptop screen: a static border + Gray code strip + phased spatial sine grating. Active only on Screen 3 (Experiment Recording).
 
-**Inputs:** `SyncDotConfig`  
-**Outputs:** Rendered canvas animation; `SyncDotConfig` with calibrated `speed_px_per_frame`
+**Inputs:** `SyncMarkerConfig`  
+**Outputs:** Rendered canvas marker (no numeric “speed calibration” required).
 
-**Core logic — startup calibration:**
+**Recommended size (in the recorded camera frame):**
+- Target ~200×100 px visible ROI; absolute minimum ~120×60 px.
+
+**Core logic (requestAnimationFrame loop):**
 
 ```
-1. On mount, measure actual rAF cadence:
-   a. Record `performance.now()` at each rAF callback over 120 frames
-   b. Compute median inter-frame interval (ms) = rAF_interval
-   c. Derive: speed_px_per_frame = speed_px_per_second / (1000 / rAF_interval)
-   d. Store calibrated speed in SyncDotConfig and emit to sessionStore
+1. Maintain a local, monotonically increasing display-frame counter: display_frame++
 
-2. Animation loop (requestAnimationFrame):
-   a. frame_index++ (integer counter, monotonically increasing)
-   b. dot_x = (start_x + speed_px_per_frame * frame_index) % canvas_width
-   c. clearRect(0, 0, w, h)   // black background
-   d. fillStyle = 'white'; beginPath(); arc(dot_x, dot_y, dot_radius, 0, 2π); fill()
-   e. requestAnimationFrame(loop)
+2. Macro-time (Gray code):
+   - Encode display_frame into a 10-bit Gray code.
+   - Render 10 square cells (black/white) in a single row.
 
-3. On unmount: cancelAnimationFrame; reset frame_index
+3. Micro-time (phased grating):
+   - Compute phase: φ = (display_frame * φ_step) mod 2π
+   - Render a low-frequency spatial sine wave across X with that phase:
+     I(x) = A * sin(ωx * x + φ) + DC
+   - Keep frequency low (e.g. 3–5 cycles across the ROI) to avoid moiré and codec artifacts.
+
+4. Border:
+   - Render a high-contrast rectangular border around the marker for robust detection and
+     `warpPerspective` rectification in post-processing.
+
+5. On unmount: cancelAnimationFrame; reset display_frame
 ```
-
-**Parameters:**
-
-| Field                 | Type           | Value                 | Derivation                                    |
-| --------------------- | -------------- | --------------------- | --------------------------------------------- |
-| `dot_radius`          | `uint32` px    | 20                    | Fixed; large enough to track clearly          |
-| `dot_y`               | `uint32` px    | `canvas_height * 0.1` | Top 10% of screen, always in camera frame     |
-| `speed_px_per_second` | `float64` px/s | 300                   | Calibrated on setup screen; user-configurable |
-| `rAF_interval`        | `float64` ms   | measured at runtime   | Median of 120-frame sample                    |
-
-**Constraint:** The canvas must be rendered **on the laptop screen**, not a projected view. The component uses `document.fullscreenElement` to enter full-screen when active to maximise contrast.
 
 **Failure modes:**
-
-- rAF jitter > 2ms median absolute deviation → warn user "display refresh unstable; sync accuracy may be reduced"
-- Canvas not fullscreen → show warning overlay prompting user to maximise
+- Marker ROI too small in the recorded video → Gray code decode errors / unstable phase.
+- Browser tab throttling / screen sleep pauses rAF → Gray code jumps; warn user if `document.visibilityState !== "visible"` during recording.
 
 ---
 
@@ -364,7 +359,7 @@ ICE server config: `[{ urls: 'stun:stun.l.google.com:19302' }]` as fallback only
 
 - For PC webcam: call `getUserMedia({ video: { facingMode: 'user' }, audio: false })` once on mount; assign to `<video srcObject>`.
 - For phone cameras: `stream` is provided by `webrtcManager` as a `MediaStream`; assign to `<video srcObject>`.
-- Overlay a framing guide: a CSS border overlay showing the region where the sync dot should appear (top-left quadrant of frame). Green when dot is detected (post-calibration), amber otherwise.
+- Overlay a framing guide: a CSS border overlay showing the region where the Sync Marker should appear (top-left quadrant of frame). Green when marker is detected (post-sync), amber otherwise.
 
 ---
 
@@ -513,7 +508,7 @@ See Section 4.10 for rendering details.
 
 - Display room code join confirmation
 - Show live self-preview (own camera)
-- Show framing guide overlay (is sync dot visible?)
+- Show framing guide overlay (is Sync Marker visible?)
 - Receive `record:start` / `record:stop` commands over WebSocket
 - Run `MediaRecorder` capture
 - Upload recorded video to Node.js after stop
@@ -555,13 +550,14 @@ interface BallMassConfig {
   uncertainty_g: number; // grams, float64, > 0, default 1.0
 }
 
-interface SyncDotConfig {
-  speed_px_per_second: number; // float64, > 0
-  speed_px_per_frame: number; // float64, derived from measured rAF interval
-  dot_radius_px: number; // uint32
-  dot_y_px: number; // uint32
-  rAF_interval_ms: number; // float64, measured
-  rAF_jitter_ms: number; // float64, median absolute deviation
+interface SyncMarkerConfig {
+  roi_width_px: number; // uint32 (rendered)
+  roi_height_px: number; // uint32 (rendered)
+  gray_bits: number; // uint32, e.g. 10
+  grating_cycles: number; // uint32, e.g. 3–5 across ROI width
+  phase_step_rad: number; // float64 per display frame
+  rAF_interval_ms?: number; // float64, optional diagnostics
+  rAF_jitter_ms?: number; // float64, optional diagnostics
 }
 
 interface BallSeed {
@@ -759,7 +755,7 @@ POST   /api/upload/:experimentId/:cameraId  multipart/form-data  → { received:
 
 - All timestamps use **Unix time in milliseconds** (`number`, `float64`).
 - The `frameToMs` mapping in `SyncData` uses integer frame indices as keys.
-- The Visual Metronome's `frame_index` counter is a **local, monotonically increasing integer** starting at 0 on component mount. It has no relationship to wall-clock time; the Python sync pipeline derives true timestamps from the recorded dot trajectory.
+- The Sync Marker maintains a **local, monotonically increasing display-frame counter** starting at 0 on component mount. True timestamps are derived in Python from the recorded Gray-code + grating phase (not from any frontend wall-clock).
 
 ### 3.5 Coordinate System
 
@@ -771,70 +767,32 @@ POST   /api/upload/:experimentId/:cameraId  multipart/form-data  → { received:
 
 ## 4. Algorithmic Implementation
 
-### 4.1 Visual Metronome Calibration & Animation
+### 4.1 Sync Marker Rendering
 
-**Startup calibration (runs once on Screen 3 mount):**
+**Startup (runs once on Screen 3 mount):**
+- Optionally measure rAF cadence/jitter for diagnostics only (not used as a timing input).
+- Register a `visibilitychange` listener: if the tab is hidden or the display sleeps, pause the marker and warn the user (recording must be re-done to ensure a continuous marker timeline).
 
-```
-Step 1: Collect rAF timing samples
-  let timestamps: number[] = []
-  let frameCount = 0
-  function sample(t: DOMHighResTimeStamp) {
-    timestamps.push(t)
-    frameCount++
-    if (frameCount < 121) requestAnimationFrame(sample)
-    else computeCalibration()
-  }
-  requestAnimationFrame(sample)
-
-Step 2: Compute median interval
-  intervals = [timestamps[1]-timestamps[0], ..., timestamps[120]-timestamps[119]]
-  sort(intervals)
-  rAF_interval_ms = intervals[60]   // median of 120 samples
-
-Step 3: Compute jitter (median absolute deviation)
-  median_val = intervals[60]
-  deviations = intervals.map(i => Math.abs(i - median_val))
-  sort(deviations)
-  rAF_jitter_ms = deviations[60]
-
-Step 4: Derive speed_px_per_frame
-  speed_px_per_frame = speed_px_per_second / (1000 / rAF_interval_ms)
-
-Step 5: Warn if jitter > 2ms
-  if (rAF_jitter_ms > 2) dispatch warning toast
-
-Step 6: Emit SyncDotConfig to sessionStore
-```
-
-**Main animation loop:**
+**Main render loop (requestAnimationFrame):**
 
 ```
-let frame_index = 0
-const canvas_width = window.innerWidth
-const canvas_height = window.innerHeight
-const dot_y = canvas_height * 0.1
-const dot_r = 20
+let display_frame = 0
 
 function tick() {
-  const dot_x = (speed_px_per_frame * frame_index) % canvas_width
-  ctx.fillStyle = '#000000'
-  ctx.fillRect(0, 0, canvas_width, canvas_height)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.beginPath()
-  ctx.arc(dot_x, dot_y, dot_r, 0, Math.PI * 2)
-  ctx.fill()
-  frame_index++
+  // 1) Macro-time: Gray code for display_frame
+  // 2) Micro-time: sine grating with φ = (display_frame * φ_step) mod 2π
+  // 3) Draw border + Gray code row + grating region
+  display_frame++
   rafId = requestAnimationFrame(tick)
 }
 rafId = requestAnimationFrame(tick)
 
 // On unmount:
 cancelAnimationFrame(rafId)
-frame_index = 0
+display_frame = 0
 ```
 
-**Critical invariant:** `frame_index` must never skip. If the browser throttles rAF (e.g. tab hidden), `frame_index` must be reset and the user must re-record. A `visibilitychange` listener fires a warning toast and pauses the loop.
+**Critical invariant:** the marker must be continuous. If the browser throttles rAF (tab hidden), the marker must pause and the UI must force a re-record.
 
 ### 4.2 QR Code / Room Code Join Flow
 
@@ -1120,7 +1078,7 @@ Colour coding for momentum conservation:
 
 ### 4.11 Phone Sub-App — Framing Guide
 
-While waiting for `record:start`, the phone shows its own camera preview. An overlay indicates whether the sync dot is in the expected region.
+While waiting for `record:start`, the phone shows its own camera preview. An overlay indicates whether the Sync Marker is in the expected region.
 
 **Framing check (visual only — no ML):**
 
@@ -1137,7 +1095,7 @@ While waiting for `record:start`, the phone shows its own camera preview. An ove
 | Router & Shell        | Continuous                   | App load                                    | Single-threaded (React render loop)       |
 | WebSocket Client      | Async, event-driven          | App load; reconnect on close                | Single connection; message queue          |
 | WebRTC Peer Manager   | Async, event-driven          | `phone:joined` WS message                   | One `RTCPeerConnection` per phone (max 3) |
-| Visual Metronome      | rAF loop                     | Screen 3 mount                              | Single rAF callback; no workers           |
+| Sync Marker           | rAF loop                     | Screen 3 mount                              | Single rAF callback; no workers           |
 | FrameScrubber preload | Async, demand-driven         | `currentFrame` change                       | Concurrent image loads (browser-native)   |
 | TrajectoryCanvas      | Synchronous                  | `currentFrame` change; `BallTrack[]` update | Single rAF or direct call                 |
 | BallSeedPicker        | Synchronous                  | User mouse/touch events                     | —                                         |
@@ -1147,7 +1105,7 @@ While waiting for `record:start`, the phone shows its own camera preview. An ove
 
 **Timing model:**
 
-- Visual Metronome: must complete `tick()` within one rAF interval (< 16ms). Canvas clear + single arc draw is O(1), well within budget.
+- Sync Marker: must complete `tick()` within one rAF interval (< 16ms). Drawing border + 10 squares + low-frequency grating is well within budget.
 - Trajectory rendering: O(N_balls × N_frames) per draw call. At 3 balls × 900 frames (30s @ 30fps) = 2700 `lineTo` calls per canvas → < 2ms in Chrome on modern hardware.
 - FrameScrubber preload: images are 1080p PNGs served from localhost. Decode ~10ms each. Preload window of 20 frames → ~200ms total, distributed asynchronously.
 
@@ -1169,7 +1127,7 @@ Screen 2 (Calibration):
   WS: calibration:complete → calibrationStore.result, .reprojectionError
 
 Screen 3 (Recording):
-  Mount → VisualMetronome starts, frame_index = 0
+  Mount → SyncMarker starts, display_frame = 0
   User → "Record" → WS: record:start → phones start MediaRecorder
   User → "Stop" → WS: record:stop → phones stop MediaRecorder → upload
   WS: upload:progress → per-camera progress bars in UI
@@ -1283,8 +1241,8 @@ Screen 5 (Results):
 | Scenario                                           | Detection                                                           | Recovery                                                                                                    |
 | -------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Phone leaves mid-recording                         | WebSocket `close` event from phone                                  | Show warning; recording on phone continues locally (WS reconnects on upload)                                |
-| rAF jitter > 2ms                                   | Measured during Metronome calibration                               | Warn user; record `jitter_ms` in SyncDotConfig for Python uncertainty budget                                |
-| Metronome tab backgrounded                         | `visibilitychange` event                                            | Pause animation; show "Recording paused — please keep this tab visible"                                     |
+| rAF jitter > 2ms                                   | Optional diagnostics on Sync Marker mount                            | Warn user; jitter is not a timing input but may indicate an unstable display environment                    |
+| Sync Marker tab backgrounded                       | `visibilitychange` event                                             | Pause marker; show "Recording paused — please keep this tab visible"                                        |
 | User clicks > 3 seeds                              | Seed count check in BallSeedPicker                                  | Toast: "Maximum 3 balls"; refuse 4th click                                                                  |
 | Frame PNG 404 (ffmpeg incomplete)                  | `img.onerror`                                                       | Show grey placeholder; poll once per second until available                                                 |
 | Upload blob > 2GB                                  | `blob.size` check before XHR                                        | Chunk upload using XHR with Range headers (Node must support) OR warn user to reduce recording duration     |
@@ -1312,15 +1270,15 @@ window.__debugStore?.trackingStore.getState().onTrackingUpdate({
 
 ## 9. Accuracy & Error Sources
 
-### Visual Metronome
+### Sync Marker
 
-| Error Source               | Magnitude | Notes                                                                             |
+| Error Source               | Magnitude | Notes                                                                                  |
 | -------------------------- | --------- | --------------------------------------------------------------------------------- |
-| rAF jitter                 | ±0.5–2ms  | Measured and stored in SyncDotConfig; used by Python as input to sync uncertainty |
-| Monitor refresh inaccuracy | ±0.01%    | Negligible; rAF is phase-locked to VSync                                          |
-| Rendering pipeline delay   | ~0–1ms    | Canvas 2D GPU submit latency; absorbed by Python linear fit                       |
+| rAF jitter                 | ±0.5–2ms  | Not a timing input; used only as a diagnostics signal (the sync decode is post-hoc) |
+| Tab throttling / sleep     | catastrophic | Marker timeline breaks; UI must force a re-record                                   |
+| Codec macroblocks          | depends on ROI size | Too-small marker can corrupt Gray bits / phase; enforce minimum visible ROI        |
 
-**Frontend's responsibility:** provide accurate `speed_px_per_frame` to Python as part of experiment metadata. Python does not rely on this value for sync computation (it measures the dot directly); it is a sanity check only.
+**Frontend's responsibility:** keep the Sync Marker visible and continuous during recording, and provide the marker specification (bit count, cycle count, ROI dimensions) to Python so it can decode Gray code + grating phase deterministically.
 
 ### Frame Scrubber
 
@@ -1344,8 +1302,8 @@ The scrubber has no accuracy implications — it is a display tool. PNG decode f
 
 | Component                     | Test                                                       | Expected Output                                         |
 | ----------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
-| `SyncDotConfig` calibration   | Mock rAF with known 16.67ms intervals                      | `speed_px_per_frame = speed_px_per_second / 60 ± 0.001` |
-| `SyncDotConfig` calibration   | Mock rAF with 10% jitter                                   | `rAF_jitter_ms > 2`; warning emitted                    |
+| `SyncMarker` Gray encode      | Encode integers 0..1023 to 10-bit Gray code                | Adjacent values differ by 1 bit; decode round-trips     |
+| `SyncMarker` phase step       | Given `phase_step_rad`, compute `φ(display_frame)`         | Always in [0, 2π); wraps correctly                      |
 | `toCanvas` / `toFrame`        | Round-trip: `toFrame(toCanvas(x,y))` for 100 random points | Recover within ±0.01px                                  |
 | `findNearestPoint`            | Place point at (100,100); query at (105,103)               | Returns that point                                      |
 | `findNearestPoint`            | Query at (200,200) with no points nearby                   | Returns null                                            |
@@ -1428,13 +1386,13 @@ Each step is independently testable and produces observable output.
 
 ### Step 6 — Experiment Recording Screen (Screen 3)
 
-- Implement Visual Metronome (`VisualMetronome.tsx`)
-  - rAF calibration on mount
-  - Animation loop with frame_index counter
-- Layout: left = metronome canvas, right = camera preview grid
+- Implement Sync Marker (`SyncMarker.tsx`)
+  - rAF loop with display_frame counter
+  - Render border + Gray code strip + phased sine grating
+- Layout: left = marker canvas, right = camera preview grid
 - Record / Stop buttons → WS commands
 - Upload progress per camera
-- **Observable output:** Metronome animates; recording completes; "frames:ready" received
+- **Observable output:** Sync Marker animates; recording completes; "frames:ready" received
 
 ### Step 7 — Frame Scrubber + Trajectory Canvas (Screen 4, Phase A)
 
@@ -1560,9 +1518,9 @@ function log(
 | wsClient         | parse error          | error | `raw_text`                                           |
 | webrtc           | peer connected       | info  | `peerId`                                             |
 | webrtc           | ICE failed           | warn  | `peerId`, `state`                                    |
-| VisualMetronome  | calibration complete | info  | `rAF_interval_ms`, `jitter_ms`, `speed_px_per_frame` |
-| VisualMetronome  | jitter warning       | warn  | `jitter_ms`                                          |
-| VisualMetronome  | tab hidden           | warn  | `frame_index`                                        |
+| SyncMarker       | started              | info  | `roi_px`, `bits`, `cycles`                           |
+| SyncMarker       | jitter warning       | warn  | `jitter_ms`                                          |
+| SyncMarker       | tab hidden           | warn  | `display_frame`                                      |
 | MediaRecorder    | start                | info  | `mimeType`, `bitrate`                                |
 | MediaRecorder    | stop                 | info  | `chunk_count`, `total_bytes`                         |
 | Upload           | progress             | debug | `percent`                                            |
@@ -1594,7 +1552,7 @@ window.__debugStore = {
   resultsStore: useResultsStore.getState,
 };
 window.__debugWS = wsClient;
-window.__debugMetronome = metronomeRef; // access frame_index, config
+window.__debugSyncMarker = syncMarkerRef; // access display_frame, config
 ```
 
 ---
