@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--gray-bits", type=int, default=10)
     parser.add_argument("--grating-cycles", type=int, default=4)
     parser.add_argument("--phase-step-rad", type=float, default=None)
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     experiment_dir = args.experiments_dir / args.experiment_id
@@ -54,6 +55,7 @@ def main() -> int:
         spec=spec,
         display_hz=float(args.display_hz),
         sample_stride=int(args.sample_stride),
+        debug=bool(args.debug),
     )
     if not results:
         raise SystemExit("No sync marker could be decoded from the extracted frames.")
