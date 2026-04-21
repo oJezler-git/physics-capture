@@ -53,7 +53,7 @@ export function SyncMarkerComponent({ config }: { config?: Partial<SyncMarkerRen
     <div className="relative h-full w-full">
       <div
         ref={wrapperRef}
-        className="h-full w-full overflow-hidden rounded-2xl border border-slate-800 bg-black"
+        className="h-full w-full overflow-hidden bg-black"
       >
         <canvas ref={canvasRef} className="h-full w-full" />
       </div>

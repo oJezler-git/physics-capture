@@ -142,18 +142,33 @@ export class SyncMarkerRenderer {
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, width, height);
 
-    // Outer border for robust detection + warpPerspective rectification.
+    // High-contrast border system for robust detection + warp rectification.
+    // We use a white-black-white "sandwich" to ensure there are always strong gradients.
     const border = Math.max(2, Math.floor(this.config.borderPx));
+    
+    // 1. Outer White Border
     this.ctx.strokeStyle = '#ffffff';
     this.ctx.lineWidth = border;
     this.ctx.strokeRect(border / 2, border / 2, width - border, height - border);
 
+    // 2. Inner Black "Dead Zone" (helps isolate content from border artifacts)
+    const deadZone = Math.max(1, Math.floor(border * 0.4));
+    this.ctx.strokeStyle = '#000000';
+    this.ctx.lineWidth = deadZone;
+    this.ctx.strokeRect(border + deadZone / 2, border + deadZone / 2, width - 2 * border - deadZone, height - 2 * border - deadZone);
+
+    // 3. Content Frame (Thin White)
+    const contentFrame = border + deadZone;
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(contentFrame + 0.5, contentFrame + 0.5, width - 2 * contentFrame - 1, height - 2 * contentFrame - 1);
+
     // Inner content region.
     const pad = Math.max(0, Math.floor(this.config.paddingPx));
-    const innerX = border + pad;
-    const innerY = border + pad;
-    const innerW = Math.max(1, width - 2 * (border + pad));
-    const innerH = Math.max(1, height - 2 * (border + pad));
+    const innerX = contentFrame + pad;
+    const innerY = contentFrame + pad;
+    const innerW = Math.max(1, width - 2 * (contentFrame + pad));
+    const innerH = Math.max(1, height - 2 * (contentFrame + pad));
 
     const grayBits = Math.max(1, Math.min(16, Math.floor(this.config.grayBits)));
     const grayRowH = Math.max(16, Math.floor(innerH * 0.28));

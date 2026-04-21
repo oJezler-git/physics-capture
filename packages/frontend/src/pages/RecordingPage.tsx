@@ -35,6 +35,11 @@ export const RecordingPage = () => {
     if (!experimentId) return;
     setIsRecording(true);
 
+    // Give the browser a moment to complete the layout transition (Focus Mode)
+    // before the MediaRecorder starts capturing. This ensures frame 0 matches
+    // the stable layout used for the rest of the clip.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
     cameras.forEach((camera) => {
       if (!camera.stream) return;
       const recorder = createRecorder(camera.stream);
@@ -95,50 +100,54 @@ export const RecordingPage = () => {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 rise-in">
-      <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-6">
-        <div>
-          <p className="eyebrow">Phase 03 - Capture</p>
-          <h1 className="mt-1 text-3xl">Record Experiment Run</h1>
-          <p className="subtle-copy mt-2">Session {experimentId?.slice(0, 8).toUpperCase()}</p>
-        </div>
+      {!isRecording && (
+        <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-6 transition-all duration-300">
+          <div>
+            <p className="eyebrow">Phase 03 - Capture</p>
+            <h1 className="mt-1 text-3xl">Record Experiment Run</h1>
+            <p className="subtle-copy mt-2">Session {experimentId?.slice(0, 8).toUpperCase()}</p>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {isRecording ? (
-            <div className="rounded-full border border-rose-400/45 bg-rose-500/10 px-4 py-2">
-              <span className="font-mono text-base font-semibold text-rose-100">
-                REC {formatTime(elapsed)}
-              </span>
-            </div>
-          ) : null}
-
-          {!isRecording ? (
-            <button
-              onClick={handleStart}
-              className="btn-main"
-              disabled={uploadPhase !== 'idle'}
-            >
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={handleStart} className="btn-main" disabled={uploadPhase !== 'idle'}>
               Start Recording
             </button>
-          ) : (
-            <button onClick={handleStop} className="btn-alt border-rose-300/45 text-rose-100">
-              Stop Capture
-            </button>
-          )}
-        </div>
-      </header>
-
-      <div className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
-        <section className="surface-panel p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="eyebrow">Visual Sync Lane</p>
-            <span className="ui-pill">{isRecording ? 'Capturing' : 'Idle'}</span>
           </div>
-          <div className="h-[360px]">
+        </header>
+      )}
+
+      {isRecording && (
+        <div className="flex items-center justify-between px-6 py-4 bg-rose-500/10 border border-rose-400/25 rounded-2xl animate-pulse">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]" />
+            <span className="font-mono text-xl font-bold tracking-tight text-rose-100 uppercase">
+              Live Capture: {formatTime(elapsed)}
+            </span>
+          </div>
+          <button
+            onClick={handleStop}
+            className="px-6 py-2.5 rounded-xl border border-rose-300/40 bg-black/40 text-sm font-bold uppercase tracking-wider text-rose-100 hover:bg-rose-500/20 transition-all"
+          >
+            End Recording & Extract
+          </button>
+        </div>
+      )}
+
+      <div className={`grid gap-6 ${isRecording ? 'grid-cols-1' : 'lg:grid-cols-[1.8fr_1fr]'}`}>
+        <section className={`surface-panel p-5 ${isRecording ? 'h-[75vh]' : 'h-[400px] lg:h-[500px]'}`}>
+          {!isRecording && (
+            <div className="mb-3 flex items-center justify-between">
+              <p className="eyebrow">Visual Sync Lane</p>
+              <span className="ui-pill">Idle</span>
+            </div>
+          )}
+          <div className="h-full">
             <SyncMarkerComponent config={{ grayBits: 10, gratingCycles: 4 }} />
           </div>
         </section>
 
-        <section className="surface-panel flex min-h-[420px] flex-col p-5">
+        {!isRecording && (
+          <section className="surface-panel flex min-h-[420px] flex-col p-5">
           <div className="mb-3 flex items-center justify-between">
             <p className="eyebrow">Live Monitors</p>
             <span className="ui-pill">{cameras.length} sources</span>
@@ -238,6 +247,7 @@ export const RecordingPage = () => {
             )}
           </div>
         </section>
+        )}
       </div>
     </div>
   );
