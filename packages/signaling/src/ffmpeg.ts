@@ -10,14 +10,18 @@ export async function extractFrames(
   // Ensure frames directory exists before extraction.
   await fs.promises.mkdir(framesDir, { recursive: true });
 
-  // ffmpeg command: extract to lossless pngs
+  // ffmpeg command: extract to sequential JPGs
   // -y: overwrite output files
-  // -fps_mode passthrough: keep all frames, even if duplicates
-  // frame_%06d.png: 6-digit zero-padded filename
+  // -vf: lock dimensions to the first decoded frame (handles mid-stream resolution changes),
+  //      and generate monotonic timestamps (avoids non-monotone PTS issues on some WebM/VP9 captures)
+  // %06d.jpg: 6-digit zero-padded filename (starts at 000001.jpg)
   const ffmpeg = spawn("ffmpeg", [
     "-y",
+    "-fflags",
+    "+genpts",
     "-i", videoPath,
-    "-fps_mode", "passthrough",
+    "-vf",
+    "scale=trunc(iw/2)*2:trunc(ih/2)*2:eval=init,setsar=1,setpts=N/(if(gte(FRAME_RATE\\,1)\\,FRAME_RATE\\,30)*TB),format=yuvj420p",
     path.join(framesDir, "%06d.jpg"),
   ]);
 

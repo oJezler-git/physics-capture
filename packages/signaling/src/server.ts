@@ -5,6 +5,7 @@ import { createServer } from "http";
 import multer from "multer";
 import path from "path";
 import fs, { existsSync } from "fs";
+import { spawn } from "child_process";
 import dgram from "dgram";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -29,6 +30,53 @@ const PORT = process.env.PORT || 3001;
 const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.env.PYTHON_GRPC_PORT ?? "50052"}`;
 
 const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
+
+async function runSyncMarkerDecode(experimentId: string): Promise<void> {
+  const python = process.env.PHYSICSCAPTURE_PYTHON_BIN ?? "python";
+  const displayHz = process.env.SYNC_MARKER_DISPLAY_HZ ?? "60";
+  const sampleStride = process.env.SYNC_MARKER_SAMPLE_STRIDE ?? "5";
+
+  const experimentDir = path.join(EXPERIMENTS_DIR, experimentId);
+  const framesRoot = path.join(experimentDir, "frames");
+  if (!existsSync(framesRoot)) return;
+
+  const entries = await fs.promises.readdir(framesRoot, { withFileTypes: true });
+  const cameraIds = entries
+    .filter((entry) => entry.isDirectory() && /^cam\d+$/.test(entry.name))
+    .map((entry) => Number(entry.name.replace("cam", "")))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+
+  if (cameraIds.length === 0) return;
+
+  const scriptPath = path.resolve(__dirname, "../../cv-service/sync/sync_marker_cli.py");
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(
+      python,
+      [
+        scriptPath,
+        "--experiments-dir",
+        EXPERIMENTS_DIR,
+        "--experiment-id",
+        experimentId,
+        "--camera-ids",
+        cameraIds.join(","),
+        "--display-hz",
+        displayHz,
+        "--sample-stride",
+        sampleStride,
+      ],
+      { stdio: "inherit" },
+    );
+
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`sync marker decode exited with code ${code}`));
+    });
+  });
+}
 
 const isPrivateIPv4 = (address: string) =>
   /^10\./.test(address) ||
@@ -274,6 +322,13 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
 
     // Extraction
     const frameCount = await extractFrames(destPath, framesDir);
+
+    // Best-effort: generate sync.json once frames exist (safe to re-run; it overwrites atomically).
+    try {
+      await runSyncMarkerDecode(experiment_id);
+    } catch (err) {
+      console.warn("[sync] Sync Marker decode failed:", err);
+    }
 
     res.json({ experiment_id, camera_id, stored_path: destPath, frame_count: frameCount });
   } catch (err: any) {
