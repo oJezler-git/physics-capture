@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 import dgram from "dgram";
 import os from "os";
 import { fileURLToPath } from "url";
+import { status as GrpcStatus } from "@grpc/grpc-js";
 import { extractFrames } from "./ffmpeg.js";
 import { trackBalls, computePhysics } from "./grpc-client.js";
 
@@ -32,7 +33,9 @@ const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.e
 const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
 
 async function runSyncMarkerDecode(experimentId: string): Promise<void> {
-  const python = process.env.PHYSICSCAPTURE_PYTHON_BIN ?? "python";
+  const venvPython = path.resolve(__dirname, "../../../.venv/Scripts/python.exe");
+  const python =
+    process.env.PHYSICSCAPTURE_PYTHON_BIN ?? (existsSync(venvPython) ? venvPython : "python");
   const displayHz = process.env.SYNC_MARKER_DISPLAY_HZ ?? "60";
   const sampleStride = process.env.SYNC_MARKER_SAMPLE_STRIDE ?? "5";
 
@@ -450,6 +453,32 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
   } catch (err: any) {
     console.error("Physics endpoint error:", err);
     const message = String(err?.message ?? "Failed to compute physics");
+    const grpcCode = typeof err?.code === "number" ? (err.code as number) : undefined;
+
+    const isGrpcUnavailable =
+      grpcCode === GrpcStatus.UNAVAILABLE ||
+      message.includes("ECONNREFUSED") ||
+      message.includes("No connection established") ||
+      message.includes("UNAVAILABLE");
+
+    if (isGrpcUnavailable) {
+      return res.status(503).json({
+        error:
+          `Physics service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
+      });
+    }
+
+    if (grpcCode === GrpcStatus.DEADLINE_EXCEEDED || message.includes("DEADLINE_EXCEEDED")) {
+      return res.status(504).json({
+        error:
+          "Physics compute timed out. Retry, or increase PHYSICS_GRPC_DEADLINE_MS for slower machines / larger datasets.",
+      });
+    }
+
+    if (grpcCode === GrpcStatus.INVALID_ARGUMENT) {
+      return res.status(400).json({ error: message });
+    }
+
     res.status(500).json({ error: message });
   }
 });
@@ -468,6 +497,40 @@ app.post("/api/experiments/:experimentId/correct", async (req, res) => {
     console.error("Correction error:", err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/api/debug/sync/:experimentId/frame/:frameIndex/cam/:cameraId", (req, res) => {
+  const { experimentId, frameIndex, cameraId } = req.params;
+  const experimentDir = path.resolve(EXPERIMENTS_DIR, experimentId);
+  const venvPython = path.resolve(__dirname, "../../../.venv/Scripts/python.exe");
+  const python =
+    process.env.PHYSICSCAPTURE_PYTHON_BIN ?? (existsSync(venvPython) ? venvPython : "python");
+  const scriptPath = path.resolve(__dirname, "../../cv-service/sync/_debug_candidates_json.py");
+
+  const proc = spawn(python, [
+    scriptPath,
+    "--experiment-dir",
+    experimentDir,
+    "--camera-id",
+    cameraId,
+    "--frame-index",
+    frameIndex,
+  ]);
+
+  let output = "";
+  proc.stdout.on("data", (data) => (output += data.toString()));
+  proc.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`[DEBUG] Sync script failed with code ${code}. Output: ${output}`);
+      return res.status(500).json({ error: "Debug script failed" });
+    }
+    try {
+      res.json(JSON.parse(output));
+    } catch (err) {
+      console.error("[DEBUG] Failed to parse JSON:", output);
+      res.status(500).json({ error: "Failed to parse debug output" });
+    }
+  });
 });
 
 app.post("/api/track", async (req, res) => {

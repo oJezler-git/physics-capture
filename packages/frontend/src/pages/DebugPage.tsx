@@ -2,12 +2,16 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
+import { SyncDebugView } from '../components/SyncDebugView';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
+
+type DebugMode = 'sam2' | 'sync';
 
 export const DebugPage = () => {
   const [experiments, setExperiments] = useState<string[]>([]);
   const [selectedExp, setSelectedExp] = useState<string>('');
+  const [mode, setMode] = useState<DebugMode>('sam2');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
@@ -149,73 +153,96 @@ export const DebugPage = () => {
           {/* Subtle overlay header */}
           <div className="absolute top-6 left-8 z-30 pointer-events-none opacity-40">
             <h1 className="text-xl font-black uppercase tracking-[0.2em] text-slate-500">
-              Debug Lab <span className="text-orange-600/50">//</span> SAM2
+              Debug Lab <span className="text-orange-600/50">//</span> {mode.toUpperCase()}
             </h1>
           </div>
 
-          <div 
-            className="relative bg-black shadow-2xl overflow-hidden"
-            style={{ 
-              aspectRatio: `${dims.width} / ${dims.height}`,
-              maxHeight: '100%',
-              maxWidth: '100%',
-            }}
-          >
-            {frameSrc && (
-              <img
-                src={frameSrc}
-                className="h-full w-full object-contain block"
-                onLoad={(e) => {
-                  setDims({
-                    width: e.currentTarget.naturalWidth,
-                    height: e.currentTarget.naturalHeight,
-                  });
-                  setFrameImageState('ready');
-                }}
-                onError={() => setFrameImageState('error')}
-              />
-            )}
-            {!selectedExp && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
-                -- No Experiment Selected --
-              </div>
-            )}
-            {frameImageState === 'error' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500 font-bold uppercase tracking-tighter">
-                [ ERROR: FRAME NOT FOUND ]
-              </div>
-            )}
-
-            {isFrameMissing && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
-                <div className="text-center">
-                  <p className="text-6xl mb-4">⚠️</p>
-                  <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
-                  <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {safeFrame}</p>
-                </div>
-              </div>
-            )}
-
-            <TrajectoryCanvas
-              width={dims.width}
-              height={dims.height}
-              tracks={tracks}
-              currentFrame={safeFrame}
-              cameraId="0"
-            />
-
-            <BallSeedPicker
-              cameraId="0"
-              currentFrame={safeFrame}
-              seedFrameIdx={safeFrame}
-              maxBalls={maxBalls}
-              frameWidth={dims.width}
-              frameHeight={dims.height}
-              seeds={seeds}
-              onAddSeed={(s) => addSeed(s, maxBalls)}
-              mode={seedMode}
-            />
+          <div className="absolute top-6 right-8 z-30 flex gap-2">
+            <button
+              onClick={() => setMode('sam2')}
+              className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+                mode === 'sam2' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-900 text-slate-500 border border-slate-800'
+              }`}
+            >
+              SAM2
+            </button>
+            <button
+              onClick={() => setMode('sync')}
+              className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+                mode === 'sync' ? 'bg-sky-600 text-white shadow-lg' : 'bg-slate-900 text-slate-500 border border-slate-800'
+              }`}
+            >
+              Sync
+            </button>
           </div>
+
+          {mode === 'sam2' ? (
+            <div 
+              className="relative bg-black shadow-2xl overflow-hidden"
+              style={{ 
+                aspectRatio: `${dims.width} / ${dims.height}`,
+                maxHeight: '100%',
+                maxWidth: '100%',
+              }}
+            >
+              {frameSrc && (
+                <img
+                  src={frameSrc}
+                  className="h-full w-full object-contain block"
+                  onLoad={(e) => {
+                    setDims({
+                      width: e.currentTarget.naturalWidth,
+                      height: e.currentTarget.naturalHeight,
+                    });
+                    setFrameImageState('ready');
+                  }}
+                  onError={() => setFrameImageState('error')}
+                />
+              )}
+              {!selectedExp && (
+                <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
+                  -- No Experiment Selected --
+                </div>
+              )}
+              {frameImageState === 'error' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500 font-bold uppercase tracking-tighter">
+                  [ ERROR: FRAME NOT FOUND ]
+                </div>
+              )}
+
+              {isFrameMissing && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
+                  <div className="text-center">
+                    <p className="text-6xl mb-4">⚠️</p>
+                    <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
+                    <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {safeFrame}</p>
+                  </div>
+                </div>
+              )}
+
+              <TrajectoryCanvas
+                width={dims.width}
+                height={dims.height}
+                tracks={tracks}
+                currentFrame={safeFrame}
+                cameraId="0"
+              />
+
+              <BallSeedPicker
+                cameraId="0"
+                currentFrame={safeFrame}
+                seedFrameIdx={safeFrame}
+                maxBalls={maxBalls}
+                frameWidth={dims.width}
+                frameHeight={dims.height}
+                seeds={seeds}
+                onAddSeed={(s) => addSeed(s, maxBalls)}
+                mode={seedMode}
+              />
+            </div>
+          ) : (
+            <SyncDebugView experimentId={selectedExp} currentFrame={safeFrame} />
+          )}
 
           {hasFrameMismatch && (
             <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-500/60 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity">
