@@ -349,8 +349,9 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[WarpRes
         if _border_contrast_score(roi_gray) < MIN_BORDER_CONTRAST:
             logger.debug(f"Candidate {i}: Border contrast too low ({_border_contrast_score(roi_gray):.2f})")
             continue
-        # Magnitude guard: avoid "passing by accident" when a tiny marker exists inside a bigger rectangle.
-        if not np.isfinite(mag) or float(mag) < 90.0:
+        # Keep the warp gate aligned with the decoder's own signal floor.
+        # The extra margin here was rejecting otherwise-valid captures on blurrier/JPEG-compressed footage.
+        if not np.isfinite(mag) or float(mag) < MIN_GRATING_MAGNITUDE:
             logger.debug(f"Candidate {i}: Grating magnitude too low ({mag:.1f})")
             continue
 
@@ -706,6 +707,92 @@ def _correct_gray_sequence(
     return corrected_mod
 
 
+def _fit_timing_candidate(
+    *,
+    xs: list[int],
+    n_mods: list[int],
+    phis: list[float],
+    obs_bits: list[list[int]],
+    obs_conf: list[list[float]],
+    bins: list[int],
+    gray_bits: int,
+    phase_step_rad: float,
+    display_hz: float,
+    sample_stride: int,
+    use_gray_correction: bool,
+) -> Optional[tuple[str, float, float, float, float, float, float]]:
+    """
+    Returns (strategy, m, c, rms_phi, rms_ms, true_fps, dphi_dt) for a single fit attempt.
+    """
+    if not xs or not n_mods or not phis:
+        return None
+
+    mod = 1 << int(max(1, min(30, int(gray_bits))))
+    if use_gray_correction:
+        forward_deltas: list[int] = []
+        for i in range(1, len(n_mods)):
+            d = (n_mods[i] - n_mods[i - 1]) % mod
+            if 0 < d <= mod // 2:
+                forward_deltas.append(int(d))
+        observed_step = int(np.median(forward_deltas)) if forward_deltas else 0
+        expected_step = max(1, int(round(float(display_hz) * float(sample_stride) / 30.0)))
+        if observed_step <= 0:
+            typical_step = expected_step
+        elif observed_step < expected_step * 0.67 or observed_step > expected_step * 1.5:
+            typical_step = expected_step
+        else:
+            typical_step = observed_step
+        n_values = _correct_gray_sequence(
+            n_mods=n_mods,
+            obs_bits=obs_bits,
+            obs_conf=obs_conf,
+            gray_bits=int(gray_bits),
+            typical_step=typical_step,
+        )
+        strategy = "gray-corrected"
+    else:
+        n_values = _unwrap_mod_counter(n_mods, mod)
+        strategy = "simple-unwrap"
+
+    n_unwrapped: list[int] = [int(n_values[0])]
+    for i in range(1, len(n_values)):
+        d = (int(n_values[i]) - int(n_values[i - 1])) % mod
+        n_unwrapped.append(int(n_unwrapped[-1] + d))
+
+    x_arr = np.array(xs, dtype=np.float64)
+    phi_unwrapped = np.array(
+        [TAU * float(nu) + float(phi) for nu, phi in zip(n_unwrapped, phis)],
+        dtype=np.float64,
+    )
+
+    fit_x = x_arr
+    fit_y = phi_unwrapped
+    m = c = rms_phi = 0.0
+    for _ in range(3):
+        m, c, rms_phi = _fit_line(fit_x, fit_y)
+        pred = m * fit_x + c
+        residual = fit_y - pred
+        mad = float(np.median(np.abs(residual - np.median(residual)))) if residual.size else 0.0
+        if mad <= 0:
+            break
+        keep = np.abs(residual) <= (OUTLIER_MAD_THRESHOLD * mad)
+        if int(keep.sum()) < 8 or int(keep.sum()) == len(fit_x):
+            break
+        fit_x = fit_x[keep]
+        fit_y = fit_y[keep]
+
+    phase_step = float(phase_step_rad)
+    delta_phi_per_display_frame = TAU + phase_step
+    display_hz = float(display_hz)
+    if not np.isfinite(display_hz) or display_hz <= 1.0:
+        display_hz = 60.0
+    dphi_dt = delta_phi_per_display_frame * display_hz
+    true_fps = abs(dphi_dt / m) if m != 0 else float("inf")
+    rms_ms = abs(float(rms_phi) / dphi_dt) * 1000.0 if dphi_dt != 0 else float("inf")
+
+    return strategy, float(m), float(c), float(rms_phi), float(rms_ms), float(true_fps), float(dphi_dt)
+
+
 def decode_camera_sync(
     *,
     experiment_dir: Path,
@@ -771,6 +858,9 @@ def decode_camera_sync(
     if best is not None:
         H, roi_w, roi_h = best
     if H is None or roi_w is None or roi_h is None:
+        logger.warning(
+            f"cam{camera_id}: could not locate marker border (frames={len(frame_files)}, probes={min(max_probes, len(probe_indices))})",
+        )
         _dbg(
             debug,
             f"cam{camera_id}: could not locate marker border (frames={len(frame_files)}, probes={min(max_probes, len(probe_indices))})",
@@ -810,70 +900,61 @@ def decode_camera_sync(
         obs_conf.append(obs[1])
 
     if len(xs) < 8:
+        logger.warning(
+            f"cam{camera_id}: insufficient decoded samples ({len(xs)}/{len(sampled_indices)})",
+        )
         _dbg(
             debug,
             f"cam{camera_id}: insufficient decoded samples ({len(xs)}/{len(sampled_indices)})",
         )
         return None
 
-    mod = 1 << int(max(1, min(30, int(spec.gray_bits))))
-    # Estimate typical forward increment in display frames between sampled camera frames.
-    forward_deltas: list[int] = []
-    for i in range(1, len(n_mods)):
-        d = (n_mods[i] - n_mods[i - 1]) % mod
-        if 0 < d <= mod // 2:
-            forward_deltas.append(int(d))
-    typical = int(np.median(forward_deltas)) if forward_deltas else int(round(float(display_hz) * float(stride) / 30.0))
-    typical = max(1, typical)
+    attempts: list[tuple[str, float, float, float, float, float, float]] = []
+    for use_gray_correction in (True, False):
+        candidate = _fit_timing_candidate(
+            xs=xs,
+            n_mods=n_mods,
+            phis=phis,
+            obs_bits=obs_bits,
+            obs_conf=obs_conf,
+            bins=bins,
+            gray_bits=int(spec.gray_bits),
+            phase_step_rad=float(spec.phase_step_rad),
+            display_hz=float(display_hz),
+            sample_stride=int(stride),
+            use_gray_correction=use_gray_correction,
+        )
+        if candidate is not None:
+            attempts.append(candidate)
 
-    # Correct occasional Gray bit glitches by combining (a) bit agreement and (b) step consistency.
-    corrected_mod = _correct_gray_sequence(
-        n_mods=n_mods,
-        obs_bits=obs_bits,
-        obs_conf=obs_conf,
-        gray_bits=int(spec.gray_bits),
-        typical_step=typical,
-    )
+    if not attempts:
+        _dbg(debug, f"cam{camera_id}: rejected fit (no valid timing candidate, points={len(xs)})")
+        logger.warning(f"cam{camera_id}: rejected fit (no valid timing candidate, points={len(xs)})")
+        return None
 
-    # Unwrap corrected modulo counter into an increasing display-frame counter.
-    n_unwrapped: list[int] = [corrected_mod[0]]
-    for i in range(1, len(corrected_mod)):
-        d = (corrected_mod[i] - corrected_mod[i - 1]) % mod
-        n_unwrapped.append(int(n_unwrapped[-1] + d))
+    # Prefer the lowest RMS candidate that still looks like a plausible camera FPS.
+    valid = [cand for cand in attempts if 5.0 <= cand[5] <= 120.0]
+    chosen = min(valid or attempts, key=lambda cand: cand[4])
+    strategy, m, c, rms_phi, rms_ms, true_fps, dphi_dt = chosen
 
-    x_arr = np.array(xs, dtype=np.float64)
-    Phi_unwrapped = np.array([TAU * float(nu) + float(phi) for nu, phi in zip(n_unwrapped, phis)], dtype=np.float64)
+    if debug and len(attempts) > 1:
+        details = ", ".join(
+            f"{name}: fps={fps:.3f} rms_ms={rms_ms:.3f}"
+            for name, _m, _c, _rphi, rms_ms, fps, _dphi_dt in attempts
+        )
+        _dbg(debug, f"cam{camera_id}: fit candidates {details}")
 
-    m, c, rms_phi = _fit_line(x_arr, Phi_unwrapped)
-
-    # Simple outlier rejection + refit (robust-ish).
-    pred = m * x_arr + c
-    residual = Phi_unwrapped - pred
-    mad = float(np.median(np.abs(residual - np.median(residual)))) if residual.size else 0.0
-    if mad > 0:
-        keep = np.abs(residual) <= (OUTLIER_MAD_THRESHOLD * mad)
-        if int(keep.sum()) >= 8:
-            m, c, rms_phi = _fit_line(x_arr[keep], Phi_unwrapped[keep])
-
-    phase_step = float(spec.phase_step_rad)
-    delta_phi_per_display_frame = TAU + phase_step
-    display_hz = float(display_hz)
-    if not np.isfinite(display_hz) or display_hz <= 1.0:
-        display_hz = 60.0
-
-    dphi_dt = delta_phi_per_display_frame * display_hz
-    true_fps = abs(dphi_dt / m) if m != 0 else 30.0
-
-    rms_ms = abs(float(rms_phi) / dphi_dt) * 1000.0 if dphi_dt != 0 else float("inf")
     if not np.isfinite(true_fps) or true_fps < 5.0 or true_fps > 120.0:
-        _dbg(debug, f"cam{camera_id}: rejected fit (true_fps={true_fps:.3f})")
-        logger.warning(f"cam{camera_id}: rejected fit (unrealistic true_fps={true_fps:.3f})")
+        _dbg(debug, f"cam{camera_id}: rejected fit ({strategy}, true_fps={true_fps:.3f})")
+        logger.warning(f"cam{camera_id}: rejected fit ({strategy}, unrealistic true_fps={true_fps:.3f})")
         return None
     # Residual is in milliseconds of timestamp error equivalent. In practice this will depend on
     # video compression, marker ROI size, and exposure. Start permissive and tighten once capture is stable.
     if not np.isfinite(rms_ms) or rms_ms > MAX_FIT_RMS_MS:
-        _dbg(debug, f"cam{camera_id}: rejected fit (rms_ms={rms_ms:.3f}, points={len(xs)})")
-        logger.warning(f"cam{camera_id}: rejected fit (rms_ms={rms_ms:.3f} exceeds {MAX_FIT_RMS_MS}, points={len(xs)})")
+        _dbg(debug, f"cam{camera_id}: rejected fit ({strategy}, rms_ms={rms_ms:.3f}, points={len(xs)})")
+        logger.warning(
+            f"cam{camera_id}: rejected fit ({strategy}, rms_ms={rms_ms:.3f} exceeds {MAX_FIT_RMS_MS}, points={len(xs)})",
+        )
         return None
 
     # Output timestamps for every extracted camera frame.
