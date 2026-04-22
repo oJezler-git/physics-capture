@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Iterable, Optional
@@ -10,7 +11,24 @@ import cv2
 import numpy as np
 
 
+logger = logging.getLogger(__name__)
+
 TAU = math.tau
+
+# --- TYPE ALIASES ---
+
+# (H_matrix, (width, height))
+WarpResult = tuple[np.ndarray, tuple[int, int]]
+# (observed_bits, confidence_scores, decoded_counter)
+GrayObservation = tuple[list[int], list[float], int]
+# (phase_rad, best_cycles_bin, magnitude)
+GratingResult = tuple[float, int, float]
+# (phase_rad, best_cycles_bin)
+GratingPhase = tuple[float, int]
+# (slope_m, intercept_c, rms_residual_rad)
+LineFitResult = tuple[float, float, float]
+# (total_score, n_mod, magnitude, k_best)
+ScoredROI = tuple[float, int, float, int]
 
 # --- THRESHOLDS & HEURISTICS ---
 
@@ -80,9 +98,10 @@ def _border_contrast_score(roi_gray: np.ndarray) -> float:
     return float(max(0.0, min(1.0, contrast / 0.35)))
 
 
-def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Optional[tuple[float, int, float]]:
+def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Optional[GratingResult]:
     h, w = roi_gray.shape[:2]
     if w < 8 or h < 8:
+        logger.debug(f"Grating ROI too small: {w}x{h}")
         return None
     cycles = int(grating_cycles)
     if cycles <= 0:
@@ -95,6 +114,7 @@ def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Opti
     x1 = int(0.90 * w)
     crop = roi_gray[y0:y1, x0:x1]
     if crop.size == 0:
+        logger.debug("Grating crop is empty")
         return None
 
     signal = crop.mean(axis=0).astype(np.float64)
@@ -108,6 +128,7 @@ def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Opti
 
     n = int(signal.shape[0])
     if n < 16:
+        logger.debug(f"Grating signal too short: {n}")
         return None
 
     xs = np.arange(n, dtype=np.float64)
@@ -133,6 +154,7 @@ def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Opti
             k_best = int(k)
 
     if not np.isfinite(best_mag) or best_mag < MIN_GRATING_MAGNITUDE:
+        logger.debug(f"Grating magnitude too low: {best_mag:.2f} (min {MIN_GRATING_MAGNITUDE})")
         return None
 
     phi = float(math.atan2(b_cos, a_sin))
@@ -141,13 +163,15 @@ def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Opti
     return float(phi), int(k_best), float(best_mag)
 
 
-def _score_rectified_roi(roi_gray: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[float, int, float, int]]:
+def _score_rectified_roi(roi_gray: np.ndarray, spec: SyncMarkerSpec) -> Optional[ScoredROI]:
     """
     Returns (score, decoded_counter_mod, grating_mag, grating_cycles_best) or None.
     """
     obs = _read_gray_observation(roi_gray, int(spec.gray_bits))
     gr = _decode_grating_phase_mag(roi_gray, int(spec.grating_cycles))
     if obs is None or gr is None:
+        if obs is None: logger.debug("ROI Score: Gray observation failed")
+        if gr is None: logger.debug("ROI Score: Grating decode failed")
         return None
     _, conf, n_mod = obs
     _phi, k_best, mag = gr
@@ -270,7 +294,7 @@ def _order_quad_points(pts: np.ndarray) -> np.ndarray:
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
-def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[np.ndarray, tuple[int, int]]]:
+def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[WarpResult]:
     """
     Analyzes a raw camera frame to locate the sync marker border and compute
     the perspective transform (H) required to rectify it into a standard ROI.
@@ -281,6 +305,7 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[n
     """
     candidates = _find_candidate_quads(frame_bgr)
     if not candidates:
+        logger.debug("Warp: No candidate quads found in frame")
         return None
 
     dst_w = int(spec.roi_width_px)
@@ -292,7 +317,7 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[n
     # Score candidates and pick the best match (prevents locking onto the live preview window).
     best_score = float("-inf")
     best_H: Optional[np.ndarray] = None
-    for quad in candidates:
+    for i, quad in enumerate(candidates):
         src = _order_quad_points(quad)
 
         # Aspect ratio sanity (use edge lengths; axis-aligned bounding boxes break under rotation).
@@ -316,14 +341,17 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[n
 
         scored = _score_rectified_roi(roi_gray, spec)
         if scored is None:
+            logger.debug(f"Candidate {i}: ROI scoring failed")
             continue
         score, _n_mod, mag, _k = scored
         # Require some border contrast; this tends to reject the live preview rectangle.
         # However, we relax this to 0.0 and rely on final_score and mag to protect against noise.
         if _border_contrast_score(roi_gray) < MIN_BORDER_CONTRAST:
+            logger.debug(f"Candidate {i}: Border contrast too low ({_border_contrast_score(roi_gray):.2f})")
             continue
         # Magnitude guard: avoid "passing by accident" when a tiny marker exists inside a bigger rectangle.
         if not np.isfinite(mag) or float(mag) < 90.0:
+            logger.debug(f"Candidate {i}: Grating magnitude too low ({mag:.1f})")
             continue
 
         # Adjust score by relative area: we strongly prefer larger markers.
@@ -335,6 +363,7 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[tuple[n
             best_H = H
 
     if best_H is None:
+        logger.debug(f"Warp: None of {len(candidates)} candidates passed validation")
         return None
     return best_H, (dst_w, dst_h)
 
@@ -388,27 +417,31 @@ def _decode_gray_bits(roi_gray: np.ndarray, gray_bits: int) -> Optional[int]:
 def _read_gray_observation(
     roi_gray: np.ndarray,
     gray_bits: int,
-) -> Optional[tuple[list[int], list[float], int]]:
+) -> Optional[GrayObservation]:
     """
     Returns (observed_bits_msb_first, per_bit_confidence, decoded_counter_mod).
     Confidence is proportional to distance from the adaptive threshold.
     """
     h, w = roi_gray.shape[:2]
     if gray_bits <= 0 or w < gray_bits:
+        logger.debug(f"Gray Obs: ROI too small ({w}x{h}) or invalid bits ({gray_bits})")
         return None
 
     y0 = int(0.05 * h)
     y1 = int(0.35 * h)
     if y1 <= y0 + 8:
+        logger.debug("Gray Obs: Vertical crop too small")
         return None
 
     x0 = int(0.08 * w)
     x1 = int(0.92 * w)
     if x1 <= x0 + gray_bits:
+        logger.debug("Gray Obs: Horizontal crop too small")
         return None
 
     strip = roi_gray[y0:y1, x0:x1]
     if strip.size == 0:
+        logger.debug("Gray Obs: Strip is empty")
         return None
 
     # Threshold for bit decisions.
@@ -425,6 +458,7 @@ def _read_gray_observation(
             cx1 = int((i + 1) * cell_w)
         cell = strip[:, cx0:cx1]
         if cell.size == 0:
+            logger.debug(f"Gray Obs: Cell {i} is empty")
             return None
         mean = float(cell.mean())
         bits.append(1 if mean > thr else 0)
@@ -448,9 +482,10 @@ def _gray_encode_bits(value: int, bits: int) -> list[int]:
     return out
 
 
-def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional[tuple[float, int]]:
+def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional[GratingPhase]:
     h, w = roi_gray.shape[:2]
     if w < 8 or h < 8:
+        logger.debug(f"Grating ROI too small: {w}x{h}")
         return None
     cycles = int(grating_cycles)
     if cycles <= 0:
@@ -463,6 +498,7 @@ def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional
     x1 = int(0.90 * w)
     crop = roi_gray[y0:y1, x0:x1]
     if crop.size == 0:
+        logger.debug("Grating crop is empty")
         return None
 
     signal = crop.mean(axis=0).astype(np.float64)
@@ -476,6 +512,7 @@ def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional
 
     n = int(signal.shape[0])
     if n < 16:
+        logger.debug(f"Grating signal too short: {n}")
         return None
 
     xs = np.arange(n, dtype=np.float64)
@@ -501,6 +538,7 @@ def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional
             k_best = int(k)
 
     if not np.isfinite(best_mag) or best_mag < MIN_GRATING_MAGNITUDE:
+        logger.debug(f"Grating magnitude too low: {best_mag:.2f} (min {MIN_GRATING_MAGNITUDE})")
         return None
 
     # Phase for signal ~ sin(ωx + φ): a_sin ∝ cosφ, b_cos ∝ sinφ.
@@ -510,7 +548,7 @@ def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional
     return phi, int(k_best)
 
 
-def _fit_line(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float, float]:
+def _fit_line(xs: np.ndarray, ys: np.ndarray) -> LineFitResult:
     """
     Performs a linear regression (y = mx + c) on timing points.
 
@@ -829,11 +867,13 @@ def decode_camera_sync(
     rms_ms = abs(float(rms_phi) / dphi_dt) * 1000.0 if dphi_dt != 0 else float("inf")
     if not np.isfinite(true_fps) or true_fps < 5.0 or true_fps > 120.0:
         _dbg(debug, f"cam{camera_id}: rejected fit (true_fps={true_fps:.3f})")
+        logger.warning(f"cam{camera_id}: rejected fit (unrealistic true_fps={true_fps:.3f})")
         return None
     # Residual is in milliseconds of timestamp error equivalent. In practice this will depend on
     # video compression, marker ROI size, and exposure. Start permissive and tighten once capture is stable.
     if not np.isfinite(rms_ms) or rms_ms > MAX_FIT_RMS_MS:
         _dbg(debug, f"cam{camera_id}: rejected fit (rms_ms={rms_ms:.3f}, points={len(xs)})")
+        logger.warning(f"cam{camera_id}: rejected fit (rms_ms={rms_ms:.3f} exceeds {MAX_FIT_RMS_MS}, points={len(xs)})")
         return None
 
     # Output timestamps for every extracted camera frame.
