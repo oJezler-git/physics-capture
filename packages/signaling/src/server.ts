@@ -32,6 +32,8 @@ const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.e
 
 const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
 
+const servedFramesCount = new Map<string, number>();
+
 async function runSyncMarkerDecode(experimentId: string): Promise<void> {
   const venvPython = path.resolve(__dirname, "../../../.venv/Scripts/python.exe");
   const python =
@@ -158,7 +160,20 @@ app.use(express.json());
 
 // Global request logger
 app.use((req, res, next) => {
-  console.log(`[REQ] ${req.method} ${req.url}`);
+  const frameMatch = req.url.match(/\/api\/experiments\/([^\/]+)\/frames\/([^\/]+)\//);
+  if (frameMatch) {
+    const key = `${frameMatch[1]}-${frameMatch[2]}`;
+    const count = (servedFramesCount.get(key) || 0) + 1;
+    servedFramesCount.set(key, count);
+
+    if (count <= 5) {
+      console.log(`[REQ] ${req.method} ${req.url}`);
+    } else if (count === 6) {
+      console.log(`[REQ] ${req.method} ${req.url} (further logs for this camera hidden)`);
+    }
+  } else {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+  }
   next();
 });
 
@@ -187,10 +202,10 @@ app.get("/api/experiments/:experimentId/metadata", (req, res) => {
 
   const frames = fs
     .readdirSync(cam0Dir)
-    .filter((f: string) => f.toLowerCase().endsWith(".jpg"))
+    .filter((f: string) => /\.(jpg|jpeg|png)$/i.test(f))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
-  // Extract physical indices from filenames like 000001.jpg
+  // Extract physical indices from filenames like 000001.png
   const sequenceToPhysical = frames.map((filename) => {
     const match = filename.match(/(\d+)/);
     return match ? parseInt(match[0], 10) - 1 : 0;
@@ -308,7 +323,7 @@ app.post("/api/calibrate", async (req, res) => {
 
 app.post("/api/upload-video", upload.single("file"), async (req, res) => {
   try {
-    const { experiment_id, camera_id } = req.body;
+    const { experiment_id, camera_id, recording_mode } = req.body;
     const file = req.file;
     if (!file || !experiment_id || !camera_id) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -317,6 +332,7 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     const experimentDir = path.join(EXPERIMENTS_DIR, experiment_id);
     const rawDir = path.join(experimentDir, "raw");
     const framesDir = path.join(experimentDir, "frames", `cam${camera_id}`);
+    const outputFormat = recording_mode === "legacy" ? "jpg" : "png";
     
     await fs.promises.mkdir(rawDir, { recursive: true });
     
@@ -324,7 +340,7 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     await fs.promises.rename(file.path, destPath);
 
     // Extraction
-    const frameCount = await extractFrames(destPath, framesDir);
+    const frameCount = await extractFrames(destPath, framesDir, outputFormat);
 
     // Best-effort: generate sync.json once frames exist (safe to re-run; it overwrites atomically).
     try {
@@ -566,12 +582,12 @@ app.post("/api/track", async (req, res) => {
     );
 
     // Fetch frame map to translate tracker indices to physical indices
-    const experimentPath = path.resolve(EXPERIMENTS_DIR, experiment_id);
-    const cam0Dir = path.join(experimentPath, "frames", "cam0");
-    const frames = fs
-      .readdirSync(cam0Dir)
-      .filter((f: string) => f.toLowerCase().endsWith(".jpg"))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  const experimentPath = path.resolve(EXPERIMENTS_DIR, experiment_id);
+  const cam0Dir = path.join(experimentPath, "frames", "cam0");
+  const frames = fs
+    .readdirSync(cam0Dir)
+    .filter((f: string) => /\.(jpg|jpeg|png)$/i.test(f))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     const sequenceToPhysical = frames.map((filename) => {
       const match = filename.match(/(\d+)/);
@@ -723,8 +739,6 @@ app.post("/api/track", async (req, res) => {
   }
 });
 
-const servedFramesCount = new Map<string, number>();
-
 app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req, res) => {
   try {
     const { experimentId, cameraId, frameFile } = req.params;
@@ -737,8 +751,7 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
     }
 
     const key = `${experimentId}-${cameraId}`;
-    const count = (servedFramesCount.get(key) || 0) + 1;
-    servedFramesCount.set(key, count);
+    const count = servedFramesCount.get(key) || 0;
 
     // Support both numeric-only (new) and frame_ prefixed (old) formats
     let framePath = path.join(
@@ -749,13 +762,7 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       frameFile,
     );
 
-    if (count <= 5) {
-      console.log(`[signal] [API] Serving frame: ${framePath}`);
-    } else if (count === 6) {
-      console.log(`[signal] [API] Serving frames for ${key} (further logs for this experiment hidden)`);
-    }
-
-    // Backward compatibility check
+    // Backward compatibility check for legacy JPEG frame dumps.
     if (!existsSync(framePath) && /^\d{6}\.jpg$/i.test(frameFile)) {
       const legacyPath = path.join(
         EXPERIMENTS_DIR,
@@ -769,7 +776,11 @@ app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req
       }
     }
 
-    console.log("[API] Serving frame:", framePath);
+    if (count <= 5) {
+      console.log(`[API] Serving frame: ${framePath}`);
+    } else if (count === 6) {
+      console.log(`[API] Serving frames for ${key} (further logs hidden)`);
+    }
 
     if (!existsSync(framePath)) {
       console.warn("[API] Frame not found at:", framePath);
