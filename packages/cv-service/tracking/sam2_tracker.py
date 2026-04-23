@@ -1,6 +1,9 @@
 # packages/cv-service/tracking/sam2_tracker.py
 import logging
 import os
+import re
+import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Tuple
 from PIL import Image
@@ -89,7 +92,12 @@ class SAM2Tracker:
         frames_dir: Path to extracted PNG frames
         seeds: List of dicts with {ball_id, frame_idx, x, y}
         """
-        frame_files = sorted(list(frames_dir.glob("*.png")) + list(frames_dir.glob("*.jpg")))
+        frame_files = self._discover_frame_files(frames_dir)
+        if not frame_files:
+            raise FileNotFoundError(
+                f"No image frames found in {frames_dir}. Expected .jpg, .jpeg, or .png files."
+            )
+
         # Get image dimensions for coordinate normalization
         with Image.open(frame_files[0]) as img:
             width, height = img.size
@@ -97,71 +105,77 @@ class SAM2Tracker:
         if self.predictor is None:
             return self._fallback_track(frame_files, seeds)
 
-        # Apply inference mode and autocast for massive hardware acceleration
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            inference_state = self.predictor.init_state(video_path=str(frames_dir))
+        # Apply inference mode and autocast for massive hardware acceleration.
+        autocast_ctx = (
+            torch.autocast("cuda", dtype=torch.bfloat16)
+            if "cuda" in str(self.device)
+            else nullcontext()
+        )
+        with torch.inference_mode(), autocast_ctx:
+            with self._prepare_sam2_frames(frame_files) as sam2_frames_dir:
+                inference_state = self.predictor.init_state(video_path=str(sam2_frames_dir))
 
-            # Add initial seed points.
-            for seed in seeds:
-                # Expecting normalized x, y (0-1) from frontend
-                x_px = float(seed["x"]) * width
-                y_px = float(seed["y"]) * height
-                
-                frame_idx = seed.get("frame_idx", 0)
-                obj_id = seed["ball_id"] + 1 # 1-indexed for SAM2
-                
-                points = np.array([[x_px, y_px]], dtype=np.float32)
-                labels = np.array([1], dtype=np.int32)
-                self.predictor.add_new_points(
-                    inference_state=inference_state,
-                    frame_idx=frame_idx,
-                    obj_id=obj_id,
-                    points=points,
-                    labels=labels,
-                )
+                # Add initial seed points.
+                for seed in seeds:
+                    # Expecting normalized x, y (0-1) from frontend
+                    x_px = float(seed["x"]) * width
+                    y_px = float(seed["y"]) * height
 
-            # Propagate through video.
-            total_frames = len(frame_files)
-            
-            # Keep track of last valid positions to "hold" during occlusions/jumps
-            last_valid = {} # obj_id -> {x, y}
+                    frame_idx = seed.get("frame_idx", 0)
+                    obj_id = seed["ball_id"] + 1 # 1-indexed for SAM2
 
-            for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
-                frame_results = []
-                for i, obj_id in enumerate(obj_ids):
-                    # Keep mask on GPU for centroid calculation
-                    centroid, area = self._get_centroid_and_area_gpu(masks[i])
-                    
-                    obj_key = int(obj_id)
-                    
-                    # If mask is present, update last valid and use high confidence
-                    if area > 10: # Minimum pixel threshold
-                        x_norm = centroid[0] / width
-                        y_norm = centroid[1] / height
-                        last_valid[obj_key] = {"x": x_norm, "y": y_norm}
-                        confidence = 1.0
-                    else:
-                        # Mask lost! Use last known position if available
-                        if obj_key in last_valid:
-                            x_norm = last_valid[obj_key]["x"]
-                            y_norm = last_valid[obj_key]["y"]
-                            confidence = 0.0 # Flag as lost but hold position
-                        else:
-                            # Never found?
-                            x_norm, y_norm = 0.0, 0.0
-                            confidence = 0.0
-
-                    frame_results.append(
-                        {
-                            "ball_id": obj_key - 1,
-                            "x": x_norm,
-                            "y": y_norm,
-                            "confidence": confidence,
-                        }
+                    points = np.array([[x_px, y_px]], dtype=np.float32)
+                    labels = np.array([1], dtype=np.int32)
+                    self.predictor.add_new_points(
+                        inference_state=inference_state,
+                        frame_idx=frame_idx,
+                        obj_id=obj_id,
+                        points=points,
+                        labels=labels,
                     )
-                # Yield streaming item: (frame_int, points, progress_pct)
-                idx = int(frame_idx)
-                yield (idx, frame_results, idx / max(1, total_frames - 1))
+
+                # Propagate through video.
+                total_frames = len(frame_files)
+
+                # Keep track of last valid positions to "hold" during occlusions/jumps
+                last_valid = {} # obj_id -> {x, y}
+
+                for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
+                    frame_results = []
+                    for i, obj_id in enumerate(obj_ids):
+                        # Keep mask on GPU for centroid calculation
+                        centroid, area = self._get_centroid_and_area_gpu(masks[i])
+
+                        obj_key = int(obj_id)
+
+                        # If mask is present, update last valid and use high confidence
+                        if area > 10: # Minimum pixel threshold
+                            x_norm = centroid[0] / width
+                            y_norm = centroid[1] / height
+                            last_valid[obj_key] = {"x": x_norm, "y": y_norm}
+                            confidence = 1.0
+                        else:
+                            # Mask lost! Use last known position if available
+                            if obj_key in last_valid:
+                                x_norm = last_valid[obj_key]["x"]
+                                y_norm = last_valid[obj_key]["y"]
+                                confidence = 0.0 # Flag as lost but hold position
+                            else:
+                                # Never found?
+                                x_norm, y_norm = 0.0, 0.0
+                                confidence = 0.0
+
+                        frame_results.append(
+                            {
+                                "ball_id": obj_key - 1,
+                                "x": x_norm,
+                                "y": y_norm,
+                                "confidence": confidence,
+                            }
+                        )
+                    # Yield streaming item: (frame_int, points, progress_pct)
+                    idx = int(frame_idx)
+                    yield (idx, frame_results, idx / max(1, total_frames - 1))
 
     def _fallback_track(self, frame_files: List[Path], seeds: List[dict]):
         """
@@ -182,6 +196,40 @@ class SAM2Tracker:
                     }
                 )
             yield (frame_idx, frame_results, frame_idx / max(1, total_frames - 1))
+
+    def _discover_frame_files(self, frames_dir: Path) -> List[Path]:
+        frame_files = [
+            path
+            for path in frames_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ]
+        return sorted(frame_files, key=self._frame_sort_key)
+
+    @staticmethod
+    def _frame_sort_key(path: Path):
+        match = re.search(r"\d+", path.stem)
+        return (int(match.group(0)) if match else 0, path.name.lower())
+
+    def _prepare_sam2_frames(self, frame_files: List[Path]):
+        """
+        SAM2's video loader is happiest with a simple JPEG sequence. If the capture
+        pipeline produced PNG frames, normalize them into a temporary JPEG folder
+        before initializing the video state.
+        """
+
+        needs_conversion = any(path.suffix.lower() == ".png" for path in frame_files)
+        if not needs_conversion:
+            return _PassthroughFrameDir(frame_files[0].parent)
+
+        temp_dir = tempfile.TemporaryDirectory(prefix="sam2_frames_")
+        sam2_dir = Path(temp_dir.name)
+
+        for src in frame_files:
+            dst = sam2_dir / f"{src.stem}.jpg"
+            with Image.open(src) as img:
+                img.convert("RGB").save(dst, format="JPEG", quality=95, optimize=True)
+
+        return _TemporaryFrameDir(sam2_dir, temp_dir)
 
     def _get_centroid_and_area_gpu(self, mask: torch.Tensor) -> Tuple[Tuple[float, float], float]:
         """
@@ -229,3 +277,24 @@ class SAM2Tracker:
         if mask.ndim != 2:
             return np.zeros((1, 1), dtype=np.float32)
         return np.clip(mask, a_min=0.0, a_max=None)
+
+
+class _PassthroughFrameDir:
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __enter__(self) -> Path:
+        return self.path
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _TemporaryFrameDir(_PassthroughFrameDir):
+    def __init__(self, path: Path, temp_dir: tempfile.TemporaryDirectory):
+        super().__init__(path)
+        self._temp_dir = temp_dir
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._temp_dir.cleanup()
+        return None
