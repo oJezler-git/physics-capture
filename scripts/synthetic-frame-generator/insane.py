@@ -373,8 +373,10 @@ def _slat_bounce(p, v, ball_r, e=WALL_RESTITUTION):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def generate():
-    base_dir   = Path("packages/experiments") / EXP_NAME
-    frames_dir = base_dir / "frames" / "cam0"
+    # Resolve project root (3 levels up from scripts/synthetic-frame-generator/)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    base_dir     = project_root / "packages" / "experiments" / EXP_NAME
+    frames_dir   = base_dir / "frames" / "cam0"
     if base_dir.exists():
         shutil.rmtree(base_dir)
     frames_dir.mkdir(parents=True)
