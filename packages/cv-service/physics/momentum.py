@@ -58,15 +58,15 @@ def compute_physics(
     cor = None
     if len(masses_kg) == 2:
         # e = |v2_after - v1_after| / |v1_before - v2_before|
-        # Assumes collision reversal: v1_before > v2_before
+        # Use magnitudes so the reported coefficient is always non-negative.
         rel_v_before = v_before[0] - v_before[1]
         rel_v_after = v_after[1] - v_after[0]
         if rel_v_before.nominal_value != 0:
-            cor = rel_v_after / rel_v_before
+            cor = abs(rel_v_after / rel_v_before)
     elif len(masses_kg) == 1:
         # Wall collision
         if v_before[0].nominal_value != 0:
-            cor = -v_after[0] / v_before[0]
+            cor = abs(v_after[0] / v_before[0])
             
     return PhysicsOutput(
         p_before_per_ball=p_before_per_ball,

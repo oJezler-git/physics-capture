@@ -98,3 +98,39 @@ def test_full_pipeline_synthetic(tmp_path):
     # Check CoR
     cor = results["momentum"]["system"]["cor"]["value"]
     assert pytest.approx(cor, abs=0.01) == 0.5
+
+
+def test_full_pipeline_synthetic_without_calibration_file(tmp_path):
+    experiment_id = "test_experiment_no_calibration"
+    exp_dir = tmp_path / experiment_id
+    results_dir = exp_dir / "results"
+    calibration_dir = exp_dir / "calibration"
+
+    results_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+
+    total_frames = 20
+    timestamps_ms = [i * (1000.0 / 30.0) for i in range(total_frames)]
+    frames = [
+        {
+            "frame_idx": i,
+            "x_px": float(i),
+            "y_px": 10.0,
+            "confidence": 1.0,
+        }
+        for i in range(total_frames)
+    ]
+
+    with open(results_dir / "sync.json", "w") as f:
+        json.dump({"cameras": {"cam0": {"timestamps_ms": timestamps_ms}}}, f)
+    with open(results_dir / "tracks.json", "w") as f:
+        json.dump({"balls": [{"ball_id": 0, "camera_id": 0, "frames": frames}]}, f)
+
+    results = run_physics_pipeline(
+        experiment_id=experiment_id,
+        base_dir=tmp_path,
+        masses=[{"ball_id": 0, "mass_g": 100.0, "uncertainty_g": 1.0}],
+        ke_mode="point_mass",
+    )
+
+    assert results["momentum"]["system"]["p_before"]["value_kgmps"] is not None

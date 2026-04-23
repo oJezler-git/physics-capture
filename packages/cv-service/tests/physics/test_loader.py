@@ -1,0 +1,49 @@
+import json
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+from physics.loader import load_experiment_data
+
+
+def test_load_experiment_data_scales_normalized_tracks(tmp_path: Path):
+    experiment_dir = tmp_path / "exp"
+    frames_dir = experiment_dir / "frames" / "cam0"
+    results_dir = experiment_dir / "results"
+    calibration_dir = experiment_dir / "calibration"
+
+    frames_dir.mkdir(parents=True)
+    results_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+
+    Image.new("RGB", (1280, 720), color="black").save(frames_dir / "000001.jpg")
+
+    with open(results_dir / "sync.json", "w") as f:
+        json.dump({"cameras": {"cam0": {"timestamps_ms": [0.0, 33.3333333333]}}}, f)
+
+    with open(results_dir / "tracks.json", "w") as f:
+        json.dump(
+            {
+                "balls": [
+                    {
+                        "ball_id": 0,
+                        "camera_id": 0,
+                        "frames": [
+                            {"frame_idx": 0, "x_px": 0.25, "y_px": 0.5, "confidence": 1.0},
+                            {"frame_idx": 1, "x_px": 0.5, "y_px": 0.5, "confidence": 1.0},
+                        ],
+                    }
+                ]
+            },
+            f,
+        )
+
+    with open(calibration_dir / "cam0_intrinsics.json", "w") as f:
+        json.dump({"scale_px_per_mm": 1.0, "scale_uncertainty_px_per_mm": 0.001}, f)
+
+    tracks, scale = load_experiment_data(experiment_dir)
+
+    assert pytest.approx(scale.scale_px_per_mm, abs=1e-9) == 1.0
+    assert pytest.approx(tracks[0].x_px[0], abs=1e-6) == 320.0
+    assert pytest.approx(tracks[0].x_px[1], abs=1e-6) == 640.0
