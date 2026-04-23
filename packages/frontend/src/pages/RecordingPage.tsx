@@ -151,7 +151,7 @@ export const RecordingPage = () => {
             </div>
           )}
           <div className="h-full">
-            <SyncMarkerComponent config={{ grayBits: 10, gratingCycles: 4 }} />
+            <SyncMarkerComponent config={{ grayBits: 14, gratingCycles: 4 }} />
           </div>
         </section>
 

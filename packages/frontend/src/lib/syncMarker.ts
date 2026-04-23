@@ -83,7 +83,7 @@ export class SyncMarkerRenderer {
     this.ctx = ctx;
 
     this.config = {
-      grayBits: 10,
+      grayBits: 14,
       gratingCycles: 4,
       phaseStepRad: TAU / 32,
       borderPx: 10,
