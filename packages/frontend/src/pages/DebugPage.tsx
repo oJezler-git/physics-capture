@@ -1,19 +1,25 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { SyncDebugView } from '../components/SyncDebugView';
+import { useResultsStore } from '../stores/resultsStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
+import type { PhysicsResult } from '../types';
 
 type DebugMode = 'sam2' | 'sync';
+
+const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
+  `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
+
+const DEFAULT_MASS_G = 50;
+const DEFAULT_MASS_UNCERTAINTY_G = 1;
 
 export const DebugPage = () => {
   const [experiments, setExperiments] = useState<string[]>([]);
   const [selectedExp, setSelectedExp] = useState<string>('');
   const [mode, setMode] = useState<DebugMode>('sam2');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle',
   );
@@ -22,6 +28,7 @@ export const DebugPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [seedMode, setSeedMode] = useState<SeedMode>('click');
+  const [physicsError, setPhysicsError] = useState<string | null>(null);
 
   const {
     seeds,
@@ -39,21 +46,26 @@ export const DebugPage = () => {
     progress,
     reset: resetTracking,
   } = useTrackingStore();
+  const {
+    physicsResult,
+    status: physicsStatus,
+    requestPhysics,
+    onPhysicsResult,
+    onPhysicsFailed,
+    reset: resetPhysics,
+  } = useResultsStore();
 
-  const { experimentId: storeExpId, ballConfigs } = useSessionStore();
+  const { ballConfigs } = useSessionStore();
 
   // Load experiments list
   const fetchExperiments = useCallback(async () => {
-    setIsLoading(true);
     try {
       const res = await fetch('/api/experiments');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setExperiments(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch experiments');
-    } finally {
-      setIsLoading(false);
+      console.error('Failed to fetch experiments', err);
     }
   }, []);
 
@@ -63,6 +75,9 @@ export const DebugPage = () => {
 
   // Adjust frame count when experiment is selected
   useEffect(() => {
+    resetPhysics();
+    setPhysicsError(null);
+
     if (!selectedExp) {
       setFrameCount(1);
       setFrameMap([]);
@@ -81,7 +96,7 @@ export const DebugPage = () => {
       }
     };
     loadMeta();
-  }, [selectedExp, setFrameCount, setFrameMap]);
+  }, [selectedExp, resetPhysics, setFrameCount, setFrameMap]);
 
   // Playback engine
   useEffect(() => {
@@ -121,9 +136,31 @@ export const DebugPage = () => {
   const isFrameMissing = selectedExp && !frameFile;
   const actualFileCount = frameMap.filter(Boolean).length;
   const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
+  const fallbackBallIds = Array.from(
+    new Set([
+      ...tracks.map((track) => track.ballId),
+      ...seeds.map((seed) => seed.ballId),
+    ]),
+  ).sort((a, b) => a - b);
+  const physicsMassConfigs =
+    ballConfigs.length > 0
+      ? ballConfigs
+      : fallbackBallIds.length > 0
+        ? fallbackBallIds.map((ballId) => ({
+            ballId,
+            mass_g: DEFAULT_MASS_G,
+            uncertainty_g: DEFAULT_MASS_UNCERTAINTY_G,
+          }))
+        : Array.from({ length: maxBalls }, (_, ballId) => ({
+            ballId,
+            mass_g: DEFAULT_MASS_G,
+            uncertainty_g: DEFAULT_MASS_UNCERTAINTY_G,
+          }));
 
   const handleRunTrack = async () => {
     if (!selectedExp || seeds.length === 0) return;
+    resetPhysics();
+    setPhysicsError(null);
     setStatus('tracking');
     try {
       const response = await fetch('/api/track', {
@@ -139,14 +176,50 @@ export const DebugPage = () => {
       if (!response.ok) throw new Error('Tracking failed');
       const data = await response.json();
       onTrackingComplete(data.tracks.map((t: any) => ({ ...t, cameraId: '0' })));
+      await handleRunPhysics();
     } catch (err) {
       console.error(err);
       setStatus('idle');
     }
   };
 
+  const handleRunPhysics = async () => {
+    if (!selectedExp) return;
+
+    requestPhysics();
+    setPhysicsError(null);
+
+    try {
+      const response = await fetch(`/api/experiments/${selectedExp}/physics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ massConfigs: physicsMassConfigs }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Physics request failed (${response.status})`;
+        try {
+          const payload = (await response.json()) as { error?: unknown };
+          if (typeof payload?.error === 'string' && payload.error.trim()) {
+            errorMessage = payload.error;
+          }
+        } catch {
+          // Ignore non-JSON bodies.
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = (await response.json()) as PhysicsResult;
+      onPhysicsResult(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to compute physics';
+      onPhysicsFailed(message);
+      setPhysicsError(message);
+    }
+  };
+
   return (
-    <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex min-h-[100dvh] w-full overflow-hidden bg-slate-950 text-slate-100">
       <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
         {/* Left Side: Massive Preview */}
         <div className="flex min-h-0 flex-col bg-black relative items-center justify-center">
@@ -307,7 +380,11 @@ export const DebugPage = () => {
 
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
-                  onClick={() => onTrackingComplete([])}
+                  onClick={() => {
+                    onTrackingComplete([]);
+                    resetPhysics();
+                    setPhysicsError(null);
+                  }}
                   className="rounded-lg border border-slate-700 bg-slate-800 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
                 >
                   Clear
@@ -317,7 +394,14 @@ export const DebugPage = () => {
                   disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
                   className={`rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${status === 'tracking' ? 'bg-slate-800 text-slate-500' : 'bg-orange-600 text-white hover:bg-orange-500 shadow-lg shadow-orange-900/20'}`}
                 >
-                  {status === 'tracking' ? 'Processing...' : 'Run SAM2'}
+                  {status === 'tracking' ? 'Processing...' : 'Run SAM2 + Physics'}
+                </button>
+                <button
+                  onClick={handleRunPhysics}
+                  disabled={physicsStatus === 'computing' || !selectedExp}
+                  className={`rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${physicsStatus === 'computing' ? 'bg-slate-800 text-slate-500' : 'bg-sky-600 text-white hover:bg-sky-500 shadow-lg shadow-sky-900/20'}`}
+                >
+                  {physicsStatus === 'computing' ? 'Testing Physics...' : 'Run Physics'}
                 </button>
               </div>
             </div>
@@ -411,6 +495,107 @@ export const DebugPage = () => {
                     style={{ width: `${progress * 100}%` }}
                   />
                 </div>
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Physics
+            </h3>
+            {physicsError ? (
+              <div className="rounded-xl border border-rose-500/40 bg-rose-950/80 px-4 py-3 text-xs text-rose-200">
+                <span className="font-black opacity-60 mr-2">ERROR:</span>
+                {physicsError}
+              </div>
+            ) : null}
+            {ballConfigs.length === 0 ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
+                No session mass profile found. Physics will use a 50 g / 1 g fallback for the
+                tracked balls.
+              </div>
+            ) : null}
+            {physicsStatus === 'computing' ? (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-950/40 px-4 py-5 text-xs text-sky-100">
+                Recomputing physics from the latest SAM2 tracks...
+              </div>
+            ) : physicsResult ? (
+              <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      Momentum
+                    </span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-100">
+                      {formatWithUncertainty(
+                        physicsResult.system.momentum_conserved_pct.value,
+                        physicsResult.system.momentum_conserved_pct.uncertainty,
+                        2,
+                      )}
+                      %
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      Restitution
+                    </span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-100">
+                      {formatWithUncertainty(
+                        physicsResult.system.coeff_of_restitution.value,
+                        physicsResult.system.coeff_of_restitution.uncertainty,
+                        3,
+                      )}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      KE Before
+                    </span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-100">
+                      {formatWithUncertainty(
+                        physicsResult.system.ke_before_total.value,
+                        physicsResult.system.ke_before_total.uncertainty,
+                        4,
+                      )}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
+                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                      KE After
+                    </span>
+                    <span className="mt-1 block text-sm font-semibold text-slate-100">
+                      {formatWithUncertainty(
+                        physicsResult.system.ke_after_total.value,
+                        physicsResult.system.ke_after_total.uncertainty,
+                        4,
+                      )}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {physicsResult.balls.map((ball) => (
+                    <div
+                      key={`debug-physics-ball-${ball.ballId}`}
+                      className="rounded-lg border border-slate-800 bg-black/30 px-3 py-2 text-[11px] text-slate-300"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-bold uppercase tracking-widest text-slate-500">
+                          Ball {ball.ballId + 1}
+                        </span>
+                        <span className="font-mono text-slate-400">
+                          v {formatWithUncertainty(ball.v_before.value, ball.v_before.uncertainty, 3)}{' '}
+                          {'->'} {formatWithUncertainty(ball.v_after.value, ball.v_after.uncertainty, 3)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-5 text-xs text-slate-500">
+                Run SAM2 tracking first, then physics will be computed from the saved tracks.
               </div>
             )}
           </section>

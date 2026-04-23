@@ -7,6 +7,13 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import type { CorrectionKeyframe } from '../types';
 
+const SAM2_MODEL_OPTIONS = [
+  { value: 'facebook/sam2-hiera-tiny', label: 'Tiny (Fastest)' },
+  { value: 'facebook/sam2-hiera-small', label: 'Small' },
+  { value: 'facebook/sam2-hiera-base-plus', label: 'Base+' },
+  { value: 'facebook/sam2-hiera-large', label: 'Large (Best)' },
+];
+
 export const TrackingPage = () => {
   const navigate = useNavigate();
   const { cameras, ballConfigs, advancePhase, experimentId } = useSessionStore();
@@ -40,6 +47,7 @@ export const TrackingPage = () => {
   const [seedFrameIdx, setSeedFrameIdx] = useState(0);
   const [trackStartFrameIdx, setTrackStartFrameIdx] = useState(0);
   const [trackEndFrameIdx, setTrackEndFrameIdx] = useState(0);
+  const [selectedModel, setSelectedModel] = useState<string>('facebook/sam2-hiera-tiny');
   const [dims, setDims] = useState({ width: 1280, height: 720 });
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const maxBalls = useMemo(() => {
@@ -52,7 +60,7 @@ export const TrackingPage = () => {
     : -1;
 
   const currentFrameEntry = frameMap[currentFrame];
-  const frameFile = currentFrameEntry || `${String(currentFrame + 1).padStart(6, '0')}.jpg`;
+  const frameFile = currentFrameEntry || `${String(currentFrame + 1).padStart(6, '0')}.png`;
   const physicalFrame = currentFrame;
 
   const frameSrc =
@@ -241,6 +249,7 @@ export const TrackingPage = () => {
       console.log('[Tracking] Starting tracking request', {
         experimentId,
         seedCount: requestSeeds.length,
+        modelId: selectedModel,
       });
 
       const response = await fetch('/api/track', {
@@ -251,6 +260,7 @@ export const TrackingPage = () => {
           seeds: requestSeeds,
           start_frame_idx: trackStartFrameIdx,
           end_frame_idx: trackEndFrameIdx,
+          model_id: selectedModel,
           clientId: 'pc',
         }),
       });
@@ -307,7 +317,7 @@ export const TrackingPage = () => {
   };
 
   return (
-    <div className="flex h-screen w-full flex-col bg-slate-950 text-slate-100 overflow-hidden rise-in">
+    <div className="flex min-h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-slate-100 rise-in">
       <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
         {/* Left Side: Massive Preview */}
         <div className="flex min-h-0 flex-col bg-black relative group">
@@ -569,6 +579,21 @@ export const TrackingPage = () => {
                     className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-orange-400 focus:border-orange-500 outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Model</p>
+                <select
+                  value={selectedModel}
+                  onChange={(event) => setSelectedModel(event.target.value)}
+                  className="w-full rounded border border-slate-800 bg-black px-2 py-2 text-[10px] font-mono text-emerald-300 outline-none focus:border-emerald-500"
+                >
+                  {SAM2_MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               
               <div className="space-y-2 pt-2">

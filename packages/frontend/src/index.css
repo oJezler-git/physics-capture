@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Outfit:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -17,9 +17,7 @@
     --text-main: #e8eef9;
     --text-dim: #97a8c4;
     --text-faint: #6f819f;
-    --accent-hot: #ff7244;
-    --accent-cold: #4cc3ff;
-    --accent-lime: #9ad46f;
+    --accent: #ff7244;
   }
 
   * {
@@ -34,7 +32,8 @@
 
   body {
     margin: 0;
-    font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+    min-height: 100dvh;
+    font-family: 'Outfit', 'Segoe UI', sans-serif;
     background:
       radial-gradient(circle at 12% 8%, rgba(76, 195, 255, 0.16), transparent 34%),
       radial-gradient(circle at 88% 2%, rgba(255, 114, 68, 0.14), transparent 30%),
@@ -42,6 +41,8 @@
       linear-gradient(155deg, var(--ink-950) 0%, var(--ink-900) 38%, #060c16 100%);
     color: var(--text-main);
     letter-spacing: 0.01em;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
   }
 
   body::before {
@@ -64,7 +65,33 @@
   h4 {
     margin: 0;
     font-family: 'Archivo Black', 'Arial Black', sans-serif;
-    letter-spacing: 0.03em;
+    line-height: 1.06;
+    letter-spacing: 0.015em;
+    text-wrap: balance;
+  }
+
+  p,
+  li {
+    max-width: 65ch;
+    text-wrap: pretty;
+  }
+
+  table,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 72%, white 28%);
+    outline-offset: 2px;
+  }
+
+  button:active:not(:disabled) {
+    transform: translateY(1px) scale(0.985);
   }
 }
 
@@ -84,7 +111,7 @@
 
   .eyebrow {
     color: var(--text-faint);
-    @apply text-[10px] font-semibold uppercase tracking-[0.28em];
+    @apply text-[11px] font-semibold tracking-[0.08em];
   }
 
   .subtle-copy {
@@ -93,7 +120,7 @@
   }
 
   .ui-pill {
-    @apply inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em];
+    @apply inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.08em];
     border-color: color-mix(in srgb, var(--line) 78%, transparent);
     color: var(--text-dim);
     background: rgba(9, 18, 30, 0.8);
@@ -101,7 +128,7 @@
 
   .btn-main {
     @apply rounded-2xl px-5 py-3 text-sm font-semibold transition duration-300;
-    border: 1px solid color-mix(in srgb, var(--accent-hot) 45%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     color: #fff4ef;
     background: linear-gradient(130deg, #ff7244 0%, #e85b2b 100%);
     box-shadow:
@@ -126,7 +153,7 @@
   }
 
   .btn-alt:hover:enabled {
-    border-color: color-mix(in srgb, var(--accent-cold) 45%, var(--line));
+    border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
     background: color-mix(in srgb, var(--ink-750) 80%, transparent);
   }
 
@@ -140,8 +167,8 @@
   }
 
   .field-shell:focus {
-    border-color: color-mix(in srgb, var(--accent-cold) 60%, transparent);
-    box-shadow: 0 0 0 2px rgba(76, 195, 255, 0.12);
+    border-color: color-mix(in srgb, var(--accent) 58%, transparent);
+    box-shadow: 0 0 0 2px rgba(255, 114, 68, 0.16);
   }
 
   .metric-card {
@@ -164,6 +191,17 @@
 
 .rise-in {
   animation: rise-in 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .custom-scrollbar {

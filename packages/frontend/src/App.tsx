@@ -123,13 +123,15 @@ function App() {
     const isFullBleed = location.pathname === '/debug' || location.pathname === '/tracking';
 
     return (
-      <div className="relative min-h-screen overflow-hidden selection:bg-orange-300/25">
+      <div className="relative min-h-[100dvh] overflow-hidden selection:bg-orange-300/25">
         <div className="pointer-events-none absolute -left-28 top-[-8rem] h-[24rem] w-[24rem] rounded-full bg-sky-400/10 blur-3xl" />
         <div className="pointer-events-none absolute bottom-[-12rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-orange-500/10 blur-3xl" />
         {!isPhoneRoute ? <ConnectionStatus /> : null}
         <ToastViewport />
 
-        <main className={`relative z-10 w-full min-h-screen ${isFullBleed ? '' : 'mx-auto max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10'}`}>
+        <main
+          className={`relative z-10 w-full min-h-[100dvh] ${isFullBleed ? '' : 'mx-auto max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10'}`}
+        >
           <Routes>
             <Route path="/" element={<Navigate to="/setup" replace />} />
             <Route

@@ -8,8 +8,8 @@ export const LoadingSkeleton = ({ lines = 3, className = '' }: LoadingSkeletonPr
     {Array.from({ length: lines }).map((_, index) => (
       <div
         key={`skeleton-${index}`}
-        className="h-3 animate-pulse rounded bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800"
-        style={{ width: `${100 - index * 10}%` }}
+        className="h-3 animate-pulse rounded bg-gradient-to-r from-slate-900 via-slate-700 to-slate-900"
+        style={{ width: `${100 - index * 10}%`, animationDelay: `${index * 90}ms` }}
       />
     ))}
   </div>
