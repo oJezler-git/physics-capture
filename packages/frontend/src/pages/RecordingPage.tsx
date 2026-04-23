@@ -5,6 +5,8 @@ import { useTrackingStore } from '../stores/trackingStore';
 import { SyncMarkerComponent } from '../components/SyncMarker';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
 
+const SYNC_CONFIG = { grayBits: 14, gratingCycles: 4 };
+
 export const RecordingPage = () => {
   const navigate = useNavigate();
   const { experimentId, cameras, advancePhase, recordingMode } = useSessionStore();
@@ -151,7 +153,7 @@ export const RecordingPage = () => {
             </div>
           )}
           <div className="h-full">
-            <SyncMarkerComponent config={{ grayBits: 14, gratingCycles: 4 }} />
+            <SyncMarkerComponent config={SYNC_CONFIG} />
           </div>
         </section>
 

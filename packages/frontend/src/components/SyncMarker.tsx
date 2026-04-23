@@ -8,7 +8,7 @@ export function SyncMarkerComponent({ config }: { config?: Partial<SyncMarkerRen
   const [isInterrupted, setIsInterrupted] = useState(false);
   const [metrics, setMetrics] = useState<SyncMarkerCadenceMetrics | null>(null);
 
-  const mergedConfig: Partial<SyncMarkerRenderConfig> = useMemo(() => ({ ...config }), [config]);
+  const mergedConfig: Partial<SyncMarkerRenderConfig> = useMemo(() => ({ ...config }), [JSON.stringify(config)]);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
