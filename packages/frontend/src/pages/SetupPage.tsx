@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useSessionStore } from '../stores/sessionStore';
 import { wsClient } from '../lib/wsClient';
-import type { BallMassConfig } from '../types';
+import type { BallMassConfig, RecordingMode } from '../types';
 
 type ConnectionMode = 'local' | 'public';
 type ConnectionSource = 'auto' | 'env' | 'browser';
@@ -64,12 +64,12 @@ const getConnectionDetails = (autoDetectedHost: string) => {
   let source: ConnectionSource = 'browser';
   let host = browserHost;
   if (isLoopbackHostname(browserHost)) {
-    if (autoDetectedHost) {
-      source = 'auto';
-      host = autoDetectedHost;
-    } else if (configuredHost) {
+    if (configuredHost) {
       source = 'env';
       host = configuredHost;
+    } else if (autoDetectedHost) {
+      source = 'auto';
+      host = autoDetectedHost;
     }
   }
 
@@ -97,7 +97,16 @@ const ballTone = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
 export const SetupPage = () => {
   const navigate = useNavigate();
-  const { experimentId, cameras, ballConfigs, createExperiment, setBallConfig, advancePhase } =
+  const {
+    experimentId,
+    cameras,
+    ballConfigs,
+    recordingMode,
+    createExperiment,
+    setBallConfig,
+    setRecordingMode,
+    advancePhase,
+  } =
     useSessionStore();
 
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
@@ -108,6 +117,7 @@ export const SetupPage = () => {
 
   useEffect(() => {
     if (!isLoopbackHostname(window.location.hostname)) return;
+    if (parseHost(import.meta.env.VITE_APP_HOST || '')) return;
 
     const controller = new AbortController();
 
@@ -136,6 +146,7 @@ export const SetupPage = () => {
   if (roomId) params.set('room', roomId);
   if (inviteCode) params.set('code', inviteCode);
   if (sessionId) params.set('sid', sessionId);
+  if (recordingMode) params.set('recording', recordingMode);
   const phoneUrl = `${connection.webOrigin}/phone${params.size ? `?${params.toString()}` : ''}`;
   const wsUrl = `${connection.wsOrigin}/ws`;
 
@@ -197,6 +208,30 @@ export const SetupPage = () => {
     }
   };
 
+  const recordingProfiles: Array<{
+    mode: RecordingMode;
+    label: string;
+    description: string;
+    disabled?: boolean;
+  }> = [
+    {
+      mode: 'legacy',
+      label: 'Legacy',
+      description: 'Original lower-bitrate path. Small files, weakest detail.',
+    },
+    {
+      mode: 'browser-high',
+      label: 'Browser High',
+      description: 'Recommended browser-only path with higher capture quality.',
+    },
+    {
+      mode: 'future-extreme',
+      label: 'Extreme',
+      description: 'Future frame-capture path. Not implemented yet.',
+      disabled: true,
+    },
+  ];
+
   const canProceed = experimentId && cameras.length > 0 && ballConfigs.length > 0;
 
   return (
@@ -255,6 +290,31 @@ export const SetupPage = () => {
               <div className="space-y-4">
                 <div className="surface-soft space-y-3 p-4">
                   <p className="eyebrow">Invite Details</p>
+                  <p className="pt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
+                    Recording profile
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {recordingProfiles.map((profile) => (
+                      <button
+                        key={profile.mode}
+                        type="button"
+                        disabled={profile.disabled}
+                        onClick={() => setRecordingMode(profile.mode)}
+                        className={`rounded-xl border px-3 py-3 text-left transition ${
+                          recordingMode === profile.mode
+                            ? 'border-sky-400/60 bg-sky-500/10 text-sky-100'
+                            : 'border-slate-700 bg-slate-950/80 text-slate-300 hover:border-slate-500'
+                        } ${profile.disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+                      >
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em]">
+                          {profile.label}
+                        </div>
+                        <div className="mt-1 text-[10px] leading-4 text-slate-400">
+                          {profile.description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Quick code</p>
                   <div className="flex items-center gap-2">
                     <p className="break-all font-mono text-sm text-slate-200">{inviteCode}</p>

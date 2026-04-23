@@ -1,5 +1,7 @@
 // packages/frontend/src/lib/mediaRecorder.ts
 
+import type { RecordingMode } from '../types';
+
 export interface CameraSettings {
   width: number;
   height: number;
@@ -24,6 +26,12 @@ export interface UploadResult {
 
 const recorderChunks = new WeakMap<MediaRecorder, Blob[]>();
 
+function isAppleMobileBrowser(): boolean {
+  const userAgent = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  return /iPhone|iPad|iPod/i.test(userAgent) || /iPhone|iPad|iPod/i.test(platform);
+}
+
 function extensionFromMimeType(mimeType: string): string {
   if (mimeType.includes("mp4")) return "mp4";
   if (mimeType.includes("webm")) return "webm";
@@ -31,13 +39,43 @@ function extensionFromMimeType(mimeType: string): string {
   return "webm";
 }
 
-export async function acquireCamera(): Promise<{ stream: MediaStream; settings: CameraSettings }> {
+export function pickPreferredRecorderMimeType(mode: RecordingMode): string {
+  if (mode === 'legacy') {
+    const legacyOrder = [
+      'video/webm;codecs=vp8',
+      'video/webm;codecs=vp9',
+      'video/mp4;codecs=avc1',
+      'video/mp4',
+    ];
+    return legacyOrder.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || 'video/webm';
+  }
+
+  const appleFirst = [
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+  ];
+  const defaultOrder = [
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+  ];
+  const candidates = isAppleMobileBrowser() ? appleFirst : defaultOrder;
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || 'video/webm';
+}
+
+export async function acquireCamera(
+  mode: RecordingMode = 'browser-high',
+): Promise<{ stream: MediaStream; settings: CameraSettings }> {
+  const isLegacy = mode === 'legacy';
   const constraints: MediaStreamConstraints = {
     video: {
       facingMode: { ideal: 'environment' },
-      width: { ideal: 3840 },
-      height: { ideal: 2160 },
-      frameRate: { ideal: 60, max: 60 },
+      width: { ideal: isLegacy ? 1920 : 3840 },
+      height: { ideal: isLegacy ? 1080 : 2160 },
+      frameRate: { ideal: isLegacy ? 30 : 60, max: isLegacy ? 30 : 60 },
     },
   };
 
@@ -56,19 +94,13 @@ export async function acquireCamera(): Promise<{ stream: MediaStream; settings: 
   return { stream, settings: cameraSettings };
 }
 
-export function createRecorder(stream: MediaStream): MediaRecorder {
-  const candidates = [
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/mp4;codecs=avc1',
-    'video/mp4',
-  ];
-
-  const mimeType = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || 'video/webm';
+export function createRecorder(stream: MediaStream, mode: RecordingMode = 'browser-high'): MediaRecorder {
+  const mimeType = pickPreferredRecorderMimeType(mode);
+  const videoBitsPerSecond = mode === 'legacy' ? 20_000_000 : 100_000_000;
   
   const recorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 100_000_000,
+    videoBitsPerSecond,
   });
 
   recorderChunks.set(recorder, []);
@@ -85,7 +117,7 @@ export function createRecorder(stream: MediaStream): MediaRecorder {
 
 export async function startRecording(recorder: MediaRecorder): Promise<void> {
   recorderChunks.set(recorder, []);
-  recorder.start(1000);
+  recorder.start();
 }
 
 export async function stopRecording(recorder: MediaRecorder): Promise<Blob> {
@@ -100,7 +132,6 @@ export async function stopRecording(recorder: MediaRecorder): Promise<Blob> {
     recorder.onstop = () => {
       resolve(new Blob(chunks, { type: recorder.mimeType }));
     };
-    recorder.requestData();
     recorder.stop();
   });
 }
@@ -110,12 +141,18 @@ export async function uploadVideo(
   experimentId: string,
   cameraId: number,
   durationMs: number,
+  recordingMode: RecordingMode,
   onProgress: (loaded: number, total: number) => void
 ): Promise<UploadResult> {
+  if (blob.size === 0) {
+    throw new Error('Recorded video is empty. The browser did not emit any video chunks.');
+  }
+
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append('experiment_id', experimentId);
     formData.append('camera_id', cameraId.toString());
+    formData.append('recording_mode', recordingMode);
     formData.append('mime_type', blob.type);
     formData.append('duration_ms', durationMs.toString());
     const ext = extensionFromMimeType(blob.type);

@@ -1,5 +1,11 @@
 import { wsClient } from './wsClient';
 import { useSessionStore } from '../stores/sessionStore';
+import {
+  describeCandidate,
+  getRtcConfiguration,
+  toIceCandidateInit,
+  toSessionDescriptionInit,
+} from './rtcConfig';
 
 interface PeerEntry {
   peerId: string;
@@ -26,21 +32,28 @@ class PeerManager {
   private async handleOffer(peerId: string, offer: RTCSessionDescriptionInit) {
     console.log(`[WebRTC] Received offer from ${peerId}`);
 
-    const conn = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    const conn = new RTCPeerConnection(getRtcConfiguration());
 
     const entry: PeerEntry = { peerId, conn, stream: null };
     this.peers.set(peerId, entry);
 
     conn.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`[WebRTC] ICE -> ${peerId} ${describeCandidate(event.candidate)}`);
         wsClient.send({
           type: 'peer:ice',
           data: { ...event.candidate.toJSON(), peerId } as any,
           to: peerId,
         });
       }
+    };
+
+    conn.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE state (${peerId}): ${conn.iceConnectionState}`);
+    };
+
+    conn.onconnectionstatechange = () => {
+      console.log(`[WebRTC] Connection state (${peerId}): ${conn.connectionState}`);
     };
 
     conn.ontrack = (event) => {
@@ -84,7 +97,7 @@ class PeerManager {
     };
 
     try {
-      await conn.setRemoteDescription(new RTCSessionDescription(offer));
+      await conn.setRemoteDescription(new RTCSessionDescription(toSessionDescriptionInit(offer)));
       const answer = await conn.createAnswer();
       await conn.setLocalDescription(answer);
 
@@ -102,7 +115,7 @@ class PeerManager {
     const entry = this.peers.get(peerId);
     if (entry) {
       try {
-        await entry.conn.addIceCandidate(new RTCIceCandidate(candidate));
+        await entry.conn.addIceCandidate(new RTCIceCandidate(toIceCandidateInit(candidate)));
       } catch (err) {
         console.error(`[WebRTC] Error adding ICE candidate for ${peerId}`, err);
       }

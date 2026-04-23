@@ -1,6 +1,7 @@
 // --- Core domain types ---
 
 export type SessionPhase = 'setup' | 'calibration' | 'recording' | 'tracking' | 'results';
+export type RecordingMode = 'legacy' | 'browser-high' | 'future-extreme';
 
 export interface CameraDevice {
   id: string; // UUID, assigned on registration

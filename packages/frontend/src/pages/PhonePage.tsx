@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { wsClient } from '../lib/wsClient';
+import { useSessionStore } from '../stores/sessionStore';
+import { acquireCamera, createRecorder } from '../lib/mediaRecorder';
+import {
+  describeCandidate,
+  getRtcConfiguration,
+  toIceCandidateInit,
+  toSessionDescriptionInit,
+} from '../lib/rtcConfig';
 
 type RecordState = 'idle' | 'recording' | 'uploading' | 'done' | 'error';
 
 export const PhonePage = () => {
   const [searchParams] = useSearchParams();
   const room = searchParams.get('room');
+  const requestedMode = searchParams.get('recording');
+  const recordingMode = requestedMode === 'legacy' || requestedMode === 'future-extreme' ? requestedMode : 'browser-high';
+  const setRecordingMode = useSessionStore((state) => state.setRecordingMode);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -78,6 +89,7 @@ export const PhonePage = () => {
 
     let cancelled = false;
     phoneClientIdRef.current = getPhoneClientId(room);
+    setRecordingMode(recordingMode);
 
     // Initialize camera and WebSocket
     init(() => cancelled);
@@ -90,7 +102,7 @@ export const PhonePage = () => {
       window.removeEventListener('ws:webrtc', handleWebRTC);
       window.removeEventListener('ws:record', handleRecordCommand);
     };
-  }, [room, teardownPeerConnection]);
+  }, [room, recordingMode, setRecordingMode, teardownPeerConnection]);
 
   useEffect(() => {
     if (!room) return;
@@ -147,20 +159,14 @@ export const PhonePage = () => {
 
       // 1. Get Camera
       dbg('Requesting camera...');
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
-        },
-        audio: false,
-      });
+      const { stream: mediaStream, settings } = await acquireCamera(recordingMode);
       if (isCancelled()) {
         mediaStream.getTracks().forEach((t) => t.stop());
         return;
       }
-      dbg('Camera granted');
+      dbg(
+        `Camera granted ${settings.width}x${settings.height} @ ${settings.frameRate}fps (${settings.facingMode || 'unknown'} / ${settings.deviceId || 'n/a'})`,
+      );
       setStream(mediaStream);
       localStreamRef.current = mediaStream;
       if (videoRef.current) videoRef.current.srcObject = mediaStream;
@@ -182,9 +188,16 @@ export const PhonePage = () => {
     const { type, data } = event.detail;
 
     if (type === 'peer:answer') {
-      await peerConnectionRef.current?.setRemoteDescription(new RTCSessionDescription(data));
+      dbg('Received WebRTC answer');
+      await peerConnectionRef.current?.setRemoteDescription(
+        new RTCSessionDescription(toSessionDescriptionInit(data)),
+      );
     } else if (type === 'peer:ice') {
-      await peerConnectionRef.current?.addIceCandidate(new RTCIceCandidate(data));
+      try {
+        await peerConnectionRef.current?.addIceCandidate(new RTCIceCandidate(toIceCandidateInit(data)));
+      } catch (err) {
+        dbg(`Failed to add ICE candidate: ${(err as Error).message}`);
+      }
     }
   };
 
@@ -198,15 +211,31 @@ export const PhonePage = () => {
   const setupPeerConnection = async () => {
     teardownPeerConnection();
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    const pc = new RTCPeerConnection(getRtcConfiguration());
     peerConnectionRef.current = pc;
 
     stream!.getTracks().forEach((track) => pc.addTrack(track, stream!));
 
+    const videoSender = pc.getSenders().find((sender) => sender.track?.kind === 'video');
+    if (videoSender) {
+      try {
+        const parameters: any = videoSender.getParameters();
+        parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
+        parameters.encodings[0] = {
+          ...parameters.encodings[0],
+          maxBitrate: 2_500_000,
+        };
+        parameters.degradationPreference = 'maintain-framerate';
+        await videoSender.setParameters(parameters);
+        dbg('Preview bitrate capped for WebRTC monitor stream');
+      } catch (err) {
+        dbg(`Preview bitrate cap unavailable: ${(err as Error).message}`);
+      }
+    }
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        dbg(`ICE -> pc ${describeCandidate(event.candidate)}`);
         wsClient.send({
           type: 'peer:ice',
           data: { ...event.candidate.toJSON(), peerId: phoneClientIdRef.current } as any,
@@ -214,7 +243,14 @@ export const PhonePage = () => {
         });
       }
     };
+    pc.oniceconnectionstatechange = () => {
+      dbg(`iceConnectionState=${pc.iceConnectionState}`);
+    };
+    pc.onicegatheringstatechange = () => {
+      dbg(`iceGatheringState=${pc.iceGatheringState}`);
+    };
     pc.onconnectionstatechange = () => {
+      dbg(`connectionState=${pc.connectionState}`);
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         teardownPeerConnection();
         if (wsClient.connected && stream) {
@@ -229,6 +265,7 @@ export const PhonePage = () => {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    dbg('Sent WebRTC offer');
     wsClient.send({
       type: 'peer:offer',
       data: { ...offer, peerId: phoneClientIdRef.current } as any,
@@ -251,14 +288,7 @@ export const PhonePage = () => {
     if (!stream) return;
 
     chunksRef.current = [];
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9'
-      : 'video/mp4';
-
-    const recorder = new MediaRecorder(stream, {
-      mimeType,
-      videoBitsPerSecond: 100_000_000, // 100 Mbps target for high quality
-    });
+    const recorder = createRecorder(stream, recordingMode);
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -266,7 +296,8 @@ export const PhonePage = () => {
 
     recorder.onstop = uploadRecording;
 
-    recorder.start(1000); // 1s chunks
+    dbg(`Recorder configured ${recorder.mimeType} @ ${recorder.videoBitsPerSecond}bps`);
+    recorder.start();
     mediaRecorderRef.current = recorder;
     setRecordState('recording');
   };
@@ -282,8 +313,21 @@ export const PhonePage = () => {
     const blob = new Blob(chunksRef.current, { type: mediaRecorderRef.current?.mimeType });
     const experimentId = experimentIdRef.current;
 
+    if (blob.size === 0) {
+      setRecordState('error');
+      setErrorMessage(
+        `Recording came back empty (${mediaRecorderRef.current?.mimeType || 'unknown mime type'}).`,
+      );
+      return;
+    }
+
     const formData = new FormData();
-    formData.append('video', blob, `recording_${Date.now()}.webm`);
+    const uploadExt = blob.type.includes('mp4')
+      ? 'mp4'
+      : blob.type.includes('webm')
+        ? 'webm'
+        : 'bin';
+    formData.append('video', blob, `recording_${Date.now()}.${uploadExt}`);
 
     try {
       const xhr = new XMLHttpRequest();

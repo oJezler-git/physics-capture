@@ -1,17 +1,19 @@
 import { create } from 'zustand';
-import type { CameraDevice, BallMassConfig, SessionPhase } from '../types';
+import type { CameraDevice, BallMassConfig, RecordingMode, SessionPhase } from '../types';
 
 interface SessionState {
   experimentId: string | null;
   cameras: CameraDevice[]; // all registered cameras (PC + phones)
   ballConfigs: BallMassConfig[]; // 1–3 balls, mass + uncertainty
   phase: SessionPhase; // 'setup' | 'calibration' | 'recording' | 'tracking' | 'results'
+  recordingMode: RecordingMode;
 
   // Actions
   createExperiment: (id: string) => void;
   addCamera: (cam: CameraDevice) => void;
   removeCamera: (id: string) => void;
   setBallConfig: (index: number, config: BallMassConfig) => void;
+  setRecordingMode: (mode: RecordingMode) => void;
   advancePhase: () => void;
   setPhase: (phase: SessionPhase) => void;
 }
@@ -23,6 +25,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   cameras: [],
   ballConfigs: [],
   phase: 'setup',
+  recordingMode: 'browser-high',
 
   createExperiment: (id) => set({ experimentId: id, phase: 'setup' }),
 
@@ -61,6 +64,8 @@ export const useSessionStore = create<SessionState>((set) => ({
       newConfigs[index] = config;
       return { ballConfigs: newConfigs };
     }),
+
+  setRecordingMode: (mode) => set({ recordingMode: mode }),
 
   advancePhase: () =>
     set((state) => {

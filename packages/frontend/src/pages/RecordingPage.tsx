@@ -7,7 +7,7 @@ import { createRecorder, startRecording, stopRecording, uploadVideo } from '../l
 
 export const RecordingPage = () => {
   const navigate = useNavigate();
-  const { experimentId, cameras, advancePhase } = useSessionStore();
+  const { experimentId, cameras, advancePhase, recordingMode } = useSessionStore();
   const setTrackingFrameCount = useTrackingStore((state) => state.setFrameCount);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -42,7 +42,7 @@ export const RecordingPage = () => {
 
     cameras.forEach((camera) => {
       if (!camera.stream) return;
-      const recorder = createRecorder(camera.stream);
+      const recorder = createRecorder(camera.stream, recordingMode);
       recorders.current.set(camera.id, recorder);
       startRecording(recorder);
     });
@@ -65,6 +65,7 @@ export const RecordingPage = () => {
           experimentId,
           cameraIndex >= 0 ? cameraIndex : 0,
           elapsed * 1000,
+          recordingMode,
           (loaded, total) => {
             const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
             setUploadProgress((prev) => ({ ...prev, [cameraId]: pct }));
@@ -109,6 +110,14 @@ export const RecordingPage = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <span className="ui-pill">
+              Capture mode:{' '}
+              {recordingMode === 'legacy'
+                ? 'Legacy'
+                : recordingMode === 'browser-high'
+                  ? 'Browser high'
+                  : 'Extreme preview'}
+            </span>
             <button onClick={handleStart} className="btn-main" disabled={uploadPhase !== 'idle'}>
               Start Recording
             </button>
