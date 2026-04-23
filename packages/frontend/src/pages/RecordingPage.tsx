@@ -5,7 +5,7 @@ import { useTrackingStore } from '../stores/trackingStore';
 import { SyncMarkerComponent } from '../components/SyncMarker';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
 
-const SYNC_CONFIG = { grayBits: 14, gratingCycles: 4 };
+const SYNC_CONFIG = { grayBits: 10, gratingCycles: 4 };
 
 export const RecordingPage = () => {
   const navigate = useNavigate();
