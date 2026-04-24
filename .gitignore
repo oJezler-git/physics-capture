@@ -40,6 +40,10 @@ htmlcov/
 *.lcov
 coverage.xml
 
+# Documentation
+solution.md
+
+
 
 # Runtime experiment artifacts
 /experiments/

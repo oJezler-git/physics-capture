@@ -18,7 +18,7 @@ Renders a video of exactly what the tracker "sees" after the perspective warp.
 - **Goal:** Check for warp stability, motion blur, or interference from other elements.
 - **Command:**
   ```powershell
-  .venv/Scripts/python.exe packages/cv-service/sync/_debug_render_roi_video.py --experiment-id <ID> --camera-id 0
+  .venv/Scripts/python.exe packages/cv-service/sync/_debug_render_roi_video.py --experiment-id b27c433b-9818-4b61-a393-a3d0a15de706 --camera-id 0
   ```
 - **Output:** `packages/experiments/<ID>/results/_debug_roi_cam0.mp4` (includes F/G/P/M overlay).
 
