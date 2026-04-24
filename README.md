@@ -164,12 +164,27 @@ Then hit **Refresh (🔄)** in the Debug Lab.
 - `proto/`: Shared gRPC protocol definitions.
 - `experiments/`: Local storage for recorded video, frames, and tracking results (gitignored).
 
-## Development
+## Testing
 
-- **Testing:**
-  - Frontend: `npm run test:frontend`
-  - Signaling: `npm run test:signaling`
-  - CV Service: `npm run test:cv` (requires `pytest`)
+This project maintains a robust testing suite for all components to ensure production-quality stability.
+
+### Commands
+
+#### Backend (CV Service)
+The CV service uses `pytest` and maintains coverage reporting.
+- **Run tests:** `export PYTHONPATH=$PYTHONPATH:$(pwd)/packages/cv-service && .venv/Scripts/python -m pytest packages/cv-service/tests`
+- **Check coverage:** `export PYTHONPATH=$PYTHONPATH:$(pwd)/packages/cv-service && .venv/Scripts/python -m pytest --cov=packages/cv-service --cov-config=packages/cv-service/.coveragerc packages/cv-service/tests`
+
+#### Backend (Signaling)
+The signaling service uses `vitest` for both unit and inter-process gRPC integration tests.
+- **Run tests:** `npm test --workspace=signaling`
+
+#### Frontend
+The frontend uses `vitest` for UI logic and state management.
+- **Run tests:** `npm test --workspace=frontend`
+
+#### Full Project (CI)
+The unified CI pipeline runs automatically on every push or pull request to `main` via `.github/workflows/full-ci.yml`, ensuring that all backend and frontend components remain verified.
 
 ## License
 
