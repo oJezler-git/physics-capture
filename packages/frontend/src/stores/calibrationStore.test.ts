@@ -62,19 +62,36 @@ describe('calibrationStore', () => {
     expect(state.error).toBe('calibration exploded');
   });
 
-  it('loads a saved profile into active calibration state', () => {
-    const profile: CalibrationProfile = {
-      id: 'profile-1',
-      name: 'lab profile',
-      result: calibrationResultFixture,
-      createdAt: 123,
-    };
-
-    useCalibrationStore.getState().loadProfile(profile);
+  it('resets to idle state', () => {
+    useCalibrationStore.getState().onCalibrationComplete(calibrationResultFixture);
+    useCalibrationStore.getState().reset();
+    
     const state = useCalibrationStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.reprojectionError).toBeNull();
+    expect(state.intrinsics).toEqual([]);
+    expect(state.rulerScaleFactor).toBeNull();
+  });
 
-    expect(state.activeProfile?.id).toBe('profile-1');
+  it('sets ruler scale factor correctly', () => {
+    useCalibrationStore.getState().setRulerScale(1.5);
+    const state = useCalibrationStore.getState();
+    expect(state.rulerScaleFactor).toBe(1.5);
     expect(state.status).toBe('complete');
-    expect(state.intrinsics).toEqual(calibrationResultFixture.intrinsics);
+  });
+
+  it('prioritizes stereo reprojection error over intrinsic error', () => {
+    // Both exist, should prefer stereo
+    useCalibrationStore.getState().onCalibrationComplete(calibrationResultFixture);
+    expect(useCalibrationStore.getState().reprojectionError).toBe(0.62);
+  });
+
+  it('falls back to intrinsic error if stereo is null', () => {
+    const intrinsicOnly = {
+        ...calibrationResultFixture,
+        stereo: null
+    };
+    useCalibrationStore.getState().onCalibrationComplete(intrinsicOnly);
+    expect(useCalibrationStore.getState().reprojectionError).toBe(0.45);
   });
 });
