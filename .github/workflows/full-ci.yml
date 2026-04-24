@@ -50,8 +50,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          sudo apt-get update && sudo apt-get install -y git
           pip install -r packages/cv-service/requirements.txt
-          pip install pytest pytest-asyncio pillow
+          pip install pytest pytest-asyncio pillow pytest-cov
+
 
       - name: Run CV Service tests with coverage
         run: |
