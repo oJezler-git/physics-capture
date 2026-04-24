@@ -16,6 +16,12 @@ def test_full_pipeline_synthetic(tmp_path):
     results_dir.mkdir(parents=True)
     calibration_dir.mkdir(parents=True)
     
+    # 1b. Create dummy frames dir to satisfy loader check
+    frame_dir = exp_dir / "frames" / "cam0"
+    frame_dir.mkdir(parents=True)
+    from PIL import Image
+    Image.new("RGB", (1280, 720)).save(frame_dir / "000001.png")
+    
     # 2. Generate synthetic data
     # Ball 0: moving right, collision at frame 50
     total_frames = 100
@@ -108,6 +114,12 @@ def test_full_pipeline_synthetic_without_calibration_file(tmp_path):
 
     results_dir.mkdir(parents=True)
     calibration_dir.mkdir(parents=True)
+    
+    # Add dummy frames dir for loader
+    frame_dir = exp_dir / "frames" / "cam0"
+    frame_dir.mkdir(parents=True)
+    from PIL import Image
+    Image.new("RGB", (1280, 720)).save(frame_dir / "000001.png")
 
     total_frames = 20
     timestamps_ms = [i * (1000.0 / 30.0) for i in range(total_frames)]
