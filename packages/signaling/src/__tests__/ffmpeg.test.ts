@@ -16,21 +16,28 @@ describe('extractFrames - Unit', () => {
   });
 
   it('calls ffmpeg with correct arguments for PNG', async () => {
-    const mockProcess = {
-      on: vi.fn((event, cb) => {
-        if (event === 'close') setTimeout(() => cb(0), 10);
-      }),
-      stderr: { on: vi.fn() },
-    };
-    mockSpawn.mockReturnValue(mockProcess);
+    // We need to ensure readdir returns the expected files for both the tempDir scan and the final framesDir scan.
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir) => {
+        if (dir.includes('.ffmpeg-tmp-')) {
+            return ['000001.png', '000002.png', '000003.png', '000004.png', '000005.png'];
+        }
+        return [];
+    });
+    vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
     
-    // Mock readdir to return 5 frames after "extraction"
-    (fs.promises.readdir as any).mockResolvedValue(['000001.png', '000002.png', '000003.png', '000004.png', '000005.png']);
+    // Mock the spawned process
+    const mockProcess = {
+        stderr: { on: vi.fn() },
+        on: vi.fn((event, cb) => {
+            if (event === 'close') setTimeout(() => cb(0), 10);
+        }),
+    };
+    (spawn as any).mockReturnValue(mockProcess);
 
     const count = await extractFrames('video.mp4', 'frames_dir', 'png');
     
     expect(count).toBe(5);
-    expect(mockSpawn).toHaveBeenCalledWith('ffmpeg', expect.arrayContaining(['-i', 'video.mp4']));
+    expect(spawn).toHaveBeenCalledWith('ffmpeg', expect.arrayContaining(['-i', 'video.mp4']), expect.any(Object));
   });
 
   it('rejects if ffmpeg fails', async () => {

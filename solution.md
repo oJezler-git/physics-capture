@@ -1,3 +1,63 @@
+Looking at this, the fix has three interlocking parts: a per-extraction **UUID-named temp directory** acts as FFmpeg's `cwd`, so the output pattern can be purely relative (`%06d.png` — no drive letter, no colon). Only after FFmpeg exits cleanly do we **atomically swap** the temp dir's contents into `framesDir`. The temp dir lives next to `framesDir` (same filesystem parent) so `fs.rename` works without cross-device issues and is cleaned up in a `finally` block regardless of outcome.Here's a full breakdown of every design decision:
+
+---
+
+### The root cause
+
+The original code builds the FFmpeg output path with `path.join(framesDir, '%06d.png')`, which on Windows produces something like `C:\Users\…\frames\%06d.png`. FFmpeg's **image2 muxer** treats the `:` after the drive letter as a key=value option separator (e.g. `C` = `\Users\…`), so it never sees a valid path and throws `Invalid argument` or `No such file or directory` — even with quoting, because this happens inside FFmpeg's own argument parser, not the shell.
+
+---
+
+### Fix 1 — Relative output pattern + `cwd` (kills the root cause)
+
+```ts
+const relativeOutputPattern = `%06d.${outputFormat}`;
+const ffmpeg = spawn("ffmpeg", ffmpegArgs, { cwd: tempDir });
+```
+
+FFmpeg now only ever sees `%06d.png` as the output path. It resolves that relative to its working directory (`cwd`), which is set to `tempDir`. No drive letter, no colon, no muxer confusion.
+
+---
+
+### Fix 2 — UUID temp directory (concurrency safety)
+
+```ts
+const sessionId = crypto.randomUUID();
+const tempDir = path.join(path.dirname(framesDir), `.ffmpeg-tmp-${sessionId}`);
+```
+
+Every concurrent call to `extractFrames` gets its own uniquely-named directory. Two simultaneous extractions running with `cwd: tempDir` and `%06d.png` output will write to completely separate folders — they can never stomp on each other's frames.
+
+The temp dir is placed **next to** `framesDir` (same parent, same drive letter) rather than in `os.tmpdir()`. This is critical for the next point.
+
+---
+
+### Fix 3 — Atomic commit (atomicity / no corrupt state)
+
+```ts
+// Only runs if ffmpeg resolved cleanly:
+await fs.promises.rm(framesDir, { recursive: true, force: true });
+await fs.promises.mkdir(framesDir, { recursive: true });
+// then rename each file from tempDir → framesDir
+```
+
+The original code cleared `framesDir` _before_ spawning FFmpeg, so any crash or non-zero exit left the directory empty and any reader would see 0 frames. Now `framesDir` is only touched **after** the `Promise<void>` resolves (i.e., `code === 0`). A failed extraction leaves the previous frame set untouched.
+
+`rename` is used instead of `copyFile` + `unlink` because both paths are on the same volume, making it an O(1) metadata operation. The `catch` branch is a defensive fallback for unusual setups where that assumption breaks down.
+
+---
+
+### Fix 4 — `finally` cleanup
+
+```ts
+} finally {
+  await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+}
+```
+
+The temp directory is removed regardless of outcome — success, FFmpeg failure, or an unexpected thrown exception — and cleanup errors are suppressed so they can't shadow the real error.
+
+```
 // packages/signaling/src/ffmpeg.ts
 import { spawn } from "child_process";
 import path from "path";
@@ -114,3 +174,4 @@ export async function extractFrames(
       .catch(() => undefined);
   }
 }
+```
