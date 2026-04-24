@@ -19,9 +19,10 @@ const qualityTone = (error: number | null) => {
 
 export const CalibrationPage = () => {
   const navigate = useNavigate();
-  const { experimentId, cameras, advancePhase } = useSessionStore();
+  const { experimentId, cameras, ballConfigs, setBallConfig, advancePhase } = useSessionStore();
   const activeCamera = cameras.find((camera) => camera.status === 'live');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const ballTone = ['#4cc3ff', '#9ad46f', '#ff7244'];
 
   useEffect(() => {
     if (activeCamera?.stream && videoRef.current) {
@@ -170,6 +171,29 @@ export const CalibrationPage = () => {
     return distancePx / knownDistanceMm;
   }, [rulerPoints, knownDistanceMm]);
 
+  const updateBallMass = (index: number, field: 'mass_g' | 'uncertainty_g', value: number) => {
+    const current = ballConfigs[index] || {
+      ballId: index,
+      mass_g: 0,
+      uncertainty_g: 0,
+    };
+    setBallConfig(index, { ...current, [field]: value });
+  };
+
+  const addBall = () => {
+    if (ballConfigs.length >= 3) return;
+    setBallConfig(ballConfigs.length, {
+      ballId: ballConfigs.length,
+      mass_g: 50,
+      uncertainty_g: 1,
+    });
+  };
+
+  const hasMassConfig =
+    ballConfigs.length > 0 &&
+    ballConfigs.every(
+      (config) => Number.isFinite(config.mass_g) && config.mass_g > 0 && Number.isFinite(config.uncertainty_g) && config.uncertainty_g > 0,
+    );
   const calibrationReady = status === 'complete' || rulerScaleFactor !== null;
 
   return (
@@ -341,9 +365,59 @@ export const CalibrationPage = () => {
         </div>
       </section>
 
+      <section className="surface-panel space-y-5 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow">Mass Profile</p>
+            <h2 className="mt-1 text-2xl">Ball Configuration</h2>
+          </div>
+          <button onClick={addBall} disabled={ballConfigs.length >= 3} className="btn-alt py-2">
+            Add Ball
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {ballConfigs.map((config, index) => (
+            <article key={index} className="surface-soft space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow text-[9px]">Ball {index + 1}</span>
+                <span
+                  className="h-3 w-3 rounded-full"
+                  style={{ background: ballTone[index % ballTone.length] }}
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Mass (g)</span>
+                  <input
+                    type="number"
+                    value={config.mass_g}
+                    onChange={(event) =>
+                      updateBallMass(index, 'mass_g', Number.parseFloat(event.target.value))
+                    }
+                    className="field-shell"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-400">Uncertainty (+/- g)</span>
+                  <input
+                    type="number"
+                    value={config.uncertainty_g}
+                    onChange={(event) =>
+                      updateBallMass(index, 'uncertainty_g', Number.parseFloat(event.target.value))
+                    }
+                    className="field-shell"
+                  />
+                </label>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <div className="flex justify-end">
         <button
-          disabled={!calibrationReady}
+          disabled={!calibrationReady || !hasMassConfig}
           onClick={() => {
             advancePhase();
             navigate('/recording');

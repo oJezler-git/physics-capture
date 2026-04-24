@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useSessionStore } from '../stores/sessionStore';
 import { wsClient } from '../lib/wsClient';
-import type { BallMassConfig, RecordingMode } from '../types';
+import type { RecordingMode } from '../types';
 
 type ConnectionMode = 'local' | 'public';
 type ConnectionSource = 'auto' | 'env' | 'browser';
@@ -93,27 +93,28 @@ const getConnectionDetails = (autoDetectedHost: string) => {
   };
 };
 
-const ballTone = ['#4cc3ff', '#9ad46f', '#ff7244'];
-
 export const SetupPage = () => {
   const navigate = useNavigate();
-  const {
-    experimentId,
-    cameras,
-    ballConfigs,
-    recordingMode,
-    createExperiment,
-    setBallConfig,
-    setRecordingMode,
-    advancePhase,
-  } =
+  const { experimentId, cameras, recordingMode, createExperiment, setBallConfig, setRecordingMode, advancePhase } =
     useSessionStore();
 
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<'url' | 'code' | 'session' | null>(null);
   const [autoDetectedHost, setAutoDetectedHost] = useState('');
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (initializedRef.current || experimentId) return;
+    initializedRef.current = true;
+
+    const nextId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    createExperiment(nextId);
+    setBallConfig(0, { ballId: 0, mass_g: 50, uncertainty_g: 1 });
+    setBallConfig(1, { ballId: 1, mass_g: 50, uncertainty_g: 1 });
+  }, [createExperiment, experimentId, setBallConfig]);
 
   useEffect(() => {
     if (!isLoopbackHostname(window.location.hostname)) return;
@@ -171,43 +172,6 @@ export const SetupPage = () => {
     }
   };
 
-  const handleNewSession = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const nextId =
-        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
-      createExperiment(nextId);
-      setBallConfig(0, { ballId: 0, mass_g: 50, uncertainty_g: 1 });
-      setBallConfig(1, { ballId: 1, mass_g: 50, uncertainty_g: 1 });
-    } catch {
-      setError('Could not create a new session. Check backend services and retry.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateBallMass = (index: number, field: keyof BallMassConfig, value: number) => {
-    const current = ballConfigs[index] || {
-      ballId: index,
-      mass_g: 0,
-      uncertainty_g: 0,
-    };
-    setBallConfig(index, { ...current, [field]: value });
-  };
-
-  const addBall = () => {
-    if (ballConfigs.length < 3) {
-      setBallConfig(ballConfigs.length, {
-        ballId: ballConfigs.length,
-        mass_g: 50,
-        uncertainty_g: 1,
-      });
-    }
-  };
-
   const recordingProfiles: Array<{
     mode: RecordingMode;
     label: string;
@@ -232,7 +196,7 @@ export const SetupPage = () => {
     },
   ];
 
-  const canProceed = experimentId && cameras.length > 0 && ballConfigs.length > 0;
+  const canProceed = Boolean(experimentId);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 rise-in">
@@ -245,23 +209,11 @@ export const SetupPage = () => {
             code.
           </p>
         </div>
-        {!experimentId ? (
-          <button onClick={handleNewSession} disabled={loading} className="btn-main">
-            {loading ? 'Creating Session...' : 'Create Session'}
-          </button>
-        ) : (
-          <div className="ui-pill">Session active</div>
-        )}
+        <div className="ui-pill">Session active</div>
       </header>
 
-      {error ? (
-        <div className="surface-soft border-rose-400/45 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-          {error}
-        </div>
-      ) : null}
-
       {experimentId ? (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_1fr]">
+        <div className="grid grid-cols-1 gap-6">
           <section className="surface-panel space-y-5 p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -405,76 +357,21 @@ export const SetupPage = () => {
               </div>
             </div>
           </section>
-
-          <section className="surface-panel space-y-5 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="eyebrow">Mass Profile</p>
-                <h2 className="mt-1 text-2xl">Ball Configuration</h2>
-              </div>
-              <button onClick={addBall} disabled={ballConfigs.length >= 3} className="btn-alt py-2">
-                Add Ball
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {ballConfigs.map((config, index) => (
-                <article key={index} className="surface-soft space-y-3 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="eyebrow text-[9px]">Ball {index + 1}</span>
-                    <span
-                      className="h-3 w-3 rounded-full"
-                      style={{ background: ballTone[index % ballTone.length] }}
-                    />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">Mass (g)</span>
-                      <input
-                        type="number"
-                        value={config.mass_g}
-                        onChange={(event) =>
-                          updateBallMass(index, 'mass_g', parseFloat(event.target.value))
-                        }
-                        className="field-shell"
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">Uncertainty (+/- g)</span>
-                      <input
-                        type="number"
-                        value={config.uncertainty_g}
-                        onChange={(event) =>
-                          updateBallMass(index, 'uncertainty_g', parseFloat(event.target.value))
-                        }
-                        className="field-shell"
-                      />
-                    </label>
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            <div className="pt-3">
-              <button
-                disabled={!canProceed}
-                onClick={() => {
-                  advancePhase();
-                  navigate('/calibration');
-                }}
-                className="btn-main w-full"
-              >
-                Continue to Calibration
-              </button>
-              {!canProceed ? (
-                <p className="mt-2 text-center text-xs text-slate-500">
-                  At least one recording device must be connected.
-                </p>
-              ) : null}
-            </div>
-          </section>
         </div>
       ) : null}
+
+      <section className="surface-panel p-6">
+        <button
+          disabled={!canProceed}
+          onClick={() => {
+            advancePhase();
+            navigate('/calibration');
+          }}
+          className="btn-main w-full"
+        >
+          Continue to Calibration
+        </button>
+      </section>
     </div>
   );
 };
