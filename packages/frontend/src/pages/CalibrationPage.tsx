@@ -192,7 +192,11 @@ export const CalibrationPage = () => {
   const hasMassConfig =
     ballConfigs.length > 0 &&
     ballConfigs.every(
-      (config) => Number.isFinite(config.mass_g) && config.mass_g > 0 && Number.isFinite(config.uncertainty_g) && config.uncertainty_g > 0,
+      (config) =>
+        Number.isFinite(config.mass_g) &&
+        config.mass_g > 0 &&
+        Number.isFinite(config.uncertainty_g) &&
+        config.uncertainty_g > 0,
     );
   const calibrationReady = status === 'complete' || rulerScaleFactor !== null;
 
@@ -246,7 +250,11 @@ export const CalibrationPage = () => {
           ) : null}
 
           <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto]">
-            <button onClick={handleRunCalibration} disabled={isBusy || !experimentId} className="btn-main">
+            <button
+              onClick={handleRunCalibration}
+              disabled={isBusy || !experimentId}
+              className="btn-main"
+            >
               {isBusy ? 'Running...' : 'Run Calibration'}
             </button>
             <input
@@ -255,7 +263,11 @@ export const CalibrationPage = () => {
               className="field-shell"
               placeholder="Profile name"
             />
-            <button onClick={handleSaveProfile} disabled={status !== 'complete'} className="btn-alt">
+            <button
+              onClick={handleSaveProfile}
+              disabled={status !== 'complete'}
+              className="btn-alt"
+            >
               Save Profile
             </button>
           </div>
@@ -314,12 +326,20 @@ export const CalibrationPage = () => {
             className="relative aspect-video cursor-crosshair overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
           >
             {activeCamera?.stream ? (
-              <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full object-cover" />
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 h-full w-full object-cover"
+              />
             ) : (
               <div className="absolute inset-0 grid place-items-center text-center">
                 <div>
                   <p className="eyebrow">No Live Camera</p>
-                  <p className="mt-1 text-sm text-slate-400">Connect a phone feed for ruler marking.</p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Connect a phone feed for ruler marking.
+                  </p>
                 </div>
               </div>
             )}
@@ -347,7 +367,9 @@ export const CalibrationPage = () => {
           </div>
 
           <div className="surface-soft space-y-3 p-4">
-            <label className="text-xs uppercase tracking-[0.18em] text-slate-500">Known Distance (mm)</label>
+            <label className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Known Distance (mm)
+            </label>
             <input
               type="number"
               min={1}
@@ -355,7 +377,9 @@ export const CalibrationPage = () => {
               onChange={(event) => setKnownDistanceMm(Number(event.target.value))}
               className="field-shell"
             />
-            <p className="text-sm text-slate-300">px/mm: {computedScale ? computedScale.toFixed(4) : '--'}</p>
+            <p className="text-sm text-slate-300">
+              px/mm: {computedScale ? computedScale.toFixed(4) : '--'}
+            </p>
             {rulerScaleFactor ? (
               <p className="rounded-xl border border-lime-400/35 bg-lime-400/10 px-3 py-2 text-xs text-lime-100">
                 Active scale {rulerScaleFactor.toFixed(4)} px/mm

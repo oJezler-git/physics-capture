@@ -145,7 +145,7 @@ export class SyncMarkerRenderer {
     // High-contrast border system for robust detection + warp rectification.
     // We use a white-black-white "sandwich" to ensure there are always strong gradients.
     const border = Math.max(2, Math.floor(this.config.borderPx));
-    
+
     // 1. Outer White Border
     this.ctx.strokeStyle = '#ffffff';
     this.ctx.lineWidth = border;
@@ -155,13 +155,23 @@ export class SyncMarkerRenderer {
     const deadZone = Math.max(1, Math.floor(border * 0.4));
     this.ctx.strokeStyle = '#000000';
     this.ctx.lineWidth = deadZone;
-    this.ctx.strokeRect(border + deadZone / 2, border + deadZone / 2, width - 2 * border - deadZone, height - 2 * border - deadZone);
+    this.ctx.strokeRect(
+      border + deadZone / 2,
+      border + deadZone / 2,
+      width - 2 * border - deadZone,
+      height - 2 * border - deadZone,
+    );
 
     // 3. Content Frame (Thin White)
     const contentFrame = border + deadZone;
     this.ctx.strokeStyle = '#ffffff';
     this.ctx.lineWidth = 1;
-    this.ctx.strokeRect(contentFrame + 0.5, contentFrame + 0.5, width - 2 * contentFrame - 1, height - 2 * contentFrame - 1);
+    this.ctx.strokeRect(
+      contentFrame + 0.5,
+      contentFrame + 0.5,
+      width - 2 * contentFrame - 1,
+      height - 2 * contentFrame - 1,
+    );
 
     // Inner content region.
     const pad = Math.max(0, Math.floor(this.config.paddingPx));

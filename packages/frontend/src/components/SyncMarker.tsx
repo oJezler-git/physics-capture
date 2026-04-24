@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SyncMarkerRenderConfig, SyncMarkerCadenceMetrics } from '../lib/syncMarker';
 import { SyncMarkerRenderer } from '../lib/syncMarker';
 
@@ -8,7 +8,10 @@ export function SyncMarkerComponent({ config }: { config?: Partial<SyncMarkerRen
   const [isInterrupted, setIsInterrupted] = useState(false);
   const [metrics, setMetrics] = useState<SyncMarkerCadenceMetrics | null>(null);
 
-  const mergedConfig: Partial<SyncMarkerRenderConfig> = useMemo(() => ({ ...config }), [JSON.stringify(config)]);
+  const mergedConfig: Partial<SyncMarkerRenderConfig> = useMemo(
+    () => ({ ...config }),
+    [JSON.stringify(config)],
+  );
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -51,10 +54,7 @@ export function SyncMarkerComponent({ config }: { config?: Partial<SyncMarkerRen
 
   return (
     <div className="relative h-full w-full">
-      <div
-        ref={wrapperRef}
-        className="h-full w-full overflow-hidden bg-black"
-      >
+      <div ref={wrapperRef} className="h-full w-full overflow-hidden bg-black">
         <canvas ref={canvasRef} className="h-full w-full" />
       </div>
 

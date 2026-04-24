@@ -93,10 +93,19 @@ const getConnectionDetails = (autoDetectedHost: string) => {
   };
 };
 
+const ballTone = ['#4cc3ff', '#9ad46f', '#ff7244'];
+
 export const SetupPage = () => {
   const navigate = useNavigate();
-  const { experimentId, cameras, recordingMode, createExperiment, setBallConfig, setRecordingMode, advancePhase } =
-    useSessionStore();
+  const {
+    experimentId,
+    cameras,
+    recordingMode,
+    createExperiment,
+    setBallConfig,
+    setRecordingMode,
+    advancePhase,
+  } = useSessionStore();
 
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [copied, setCopied] = useState<'url' | 'code' | 'session' | null>(null);

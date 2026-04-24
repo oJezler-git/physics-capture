@@ -24,7 +24,6 @@ export const TrackingPage = () => {
     setFrameCount,
     frameMap,
     setFrameMap,
-    sequenceToPhysical,
     tracks,
     status,
     progress,
@@ -77,8 +76,6 @@ export const TrackingPage = () => {
     status !== 'tracking' &&
     frameImageState === 'ready' &&
     activeCameraIndex >= 0;
-  const activeCamera = cameras.find((camera) => camera.id === resolvedActiveCameraId);
-  const activeCameraSeedCount = seeds.filter((seed) => seed.cameraId === resolvedActiveCameraId).length;
   const camerasMissingSeeds = cameras.filter((camera) => {
     const cameraSeedCount = seeds.filter((seed) => seed.cameraId === camera.id).length;
     return cameraSeedCount < maxBalls;
@@ -127,9 +124,12 @@ export const TrackingPage = () => {
 
   useEffect(() => {
     if (isPlaying && frameCount > 0) {
-      playRef.current = setInterval(() => {
-        setFrame((prev) => (prev + 1) % frameCount);
-      }, 1000 / (30 * playbackSpeed));
+      playRef.current = setInterval(
+        () => {
+          setFrame((prev) => (prev + 1) % frameCount);
+        },
+        1000 / (30 * playbackSpeed),
+      );
     } else if (playRef.current) {
       clearInterval(playRef.current);
     }
@@ -324,8 +324,12 @@ export const TrackingPage = () => {
           {/* Subtle overlay header */}
           <div className="absolute top-6 left-8 z-30 pointer-events-none transition-opacity group-hover:opacity-100 opacity-40">
             <div className="space-y-0.5">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-500/80">Phase 04 // Tracking</p>
-              <h1 className="text-xl font-bold tracking-tight text-slate-400">Trajectory Analysis</h1>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-500/80">
+                Phase 04 // Tracking
+              </p>
+              <h1 className="text-xl font-bold tracking-tight text-slate-400">
+                Trajectory Analysis
+              </h1>
             </div>
           </div>
 
@@ -363,7 +367,9 @@ export const TrackingPage = () => {
                 <div className="text-center">
                   <p className="text-6xl mb-4">⚠️</p>
                   <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
-                  <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {physicalFrame}</p>
+                  <p className="text-[10px] opacity-40 mt-2 font-mono">
+                    PHYSICAL_IDX: {physicalFrame}
+                  </p>
                 </div>
               </div>
             )}
@@ -410,7 +416,9 @@ export const TrackingPage = () => {
         <aside className="custom-scrollbar overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-8 space-y-10">
           <section className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Session</h3>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                Session
+              </h3>
               <button
                 disabled={tracks.length === 0 || status === 'tracking'}
                 onClick={() => {
@@ -422,7 +430,7 @@ export const TrackingPage = () => {
                 Finish Tracking
               </button>
             </div>
-            
+
             <div className="surface-soft p-4 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
               <div className="flex flex-wrap gap-2">
                 {cameras.map((camera) => (
@@ -444,10 +452,15 @@ export const TrackingPage = () => {
                 <span className="ui-pill border-slate-800 text-slate-400">{statusLabel}</span>
                 {status === 'tracking' && (
                   <div className="flex items-center gap-3">
-                     <div className="w-20 h-1.5 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
-                        <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${progressPct}%` }} />
-                     </div>
-                     <span className="text-[10px] font-mono text-sky-400 font-bold">{progressPct}%</span>
+                    <div className="w-20 h-1.5 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
+                      <div
+                        className="h-full bg-sky-500 transition-all duration-300"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono text-sky-400 font-bold">
+                      {progressPct}%
+                    </span>
                   </div>
                 )}
               </div>
@@ -455,7 +468,9 @@ export const TrackingPage = () => {
           </section>
 
           <section className="space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Playback</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+              Playback
+            </h3>
             <FrameScrubber
               currentFrame={currentFrame}
               frameCount={Math.max(frameCount, 1)}
@@ -471,7 +486,9 @@ export const TrackingPage = () => {
 
           <section className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Seeding</h3>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                Seeding
+              </h3>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -497,17 +514,22 @@ export const TrackingPage = () => {
                 </button>
               </div>
             </div>
-            
+
             <div className="surface-soft space-y-3 p-4 rounded-2xl border border-slate-800 bg-slate-950">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-500">
                   Active Frame Seeds
                 </span>
                 <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] text-sky-400 border border-sky-500/20">
-                  {seeds.filter((s) => s.cameraId === resolvedActiveCameraId && s.frameIdx === currentFrame).length} / {maxBalls}
+                  {
+                    seeds.filter(
+                      (s) => s.cameraId === resolvedActiveCameraId && s.frameIdx === currentFrame,
+                    ).length
+                  }{' '}
+                  / {maxBalls}
                 </span>
               </div>
-              
+
               {!hasRequiredSeedCoverage ? (
                 <p className="text-[9px] text-amber-500/80 font-bold uppercase tracking-widest leading-relaxed">
                   Missing: {camerasMissingSeeds.map((camera) => camera.label).join(', ')}
@@ -521,12 +543,16 @@ export const TrackingPage = () => {
           </section>
 
           <section className="space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">SAM2 Engine</h3>
-            
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+              SAM2 Engine
+            </h3>
+
             <div className="surface-soft space-y-5 p-4 rounded-2xl border border-slate-800 bg-slate-950">
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Seed</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                    Seed
+                  </p>
                   <input
                     type="number"
                     min={1}
@@ -544,7 +570,9 @@ export const TrackingPage = () => {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Start</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                    Start
+                  </p>
                   <input
                     type="number"
                     min={1}
@@ -562,7 +590,9 @@ export const TrackingPage = () => {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">End</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                    End
+                  </p>
                   <input
                     type="number"
                     min={1}
@@ -582,7 +612,9 @@ export const TrackingPage = () => {
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">Model</p>
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                  Model
+                </p>
                 <select
                   value={selectedModel}
                   onChange={(event) => setSelectedModel(event.target.value)}
@@ -595,7 +627,7 @@ export const TrackingPage = () => {
                   ))}
                 </select>
               </div>
-              
+
               <div className="space-y-2 pt-2">
                 <button
                   type="button"
@@ -619,7 +651,9 @@ export const TrackingPage = () => {
           {tracks.length > 0 && flaggedFrames.length > 0 && (
             <section className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5 space-y-3 backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-400">Anomaly Alerts</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-400">
+                  Anomaly Alerts
+                </p>
                 <span className="rounded-full bg-rose-500 px-2.5 py-0.5 font-mono text-[10px] text-white font-bold">
                   {flaggedFrames.length}
                 </span>

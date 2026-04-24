@@ -16,9 +16,13 @@ export const PhonePage = () => {
   const [searchParams] = useSearchParams();
   const room = searchParams.get('room');
   const requestedCameraId = Number.parseInt(searchParams.get('camera') ?? '0', 10);
-  const resolvedCameraId = Number.isFinite(requestedCameraId) && requestedCameraId >= 0 ? requestedCameraId : 0;
+  const resolvedCameraId =
+    Number.isFinite(requestedCameraId) && requestedCameraId >= 0 ? requestedCameraId : 0;
   const requestedMode = searchParams.get('recording');
-  const recordingMode = requestedMode === 'legacy' || requestedMode === 'future-extreme' ? requestedMode : 'browser-high';
+  const recordingMode =
+    requestedMode === 'legacy' || requestedMode === 'future-extreme'
+      ? requestedMode
+      : 'browser-high';
   const setRecordingMode = useSessionStore((state) => state.setRecordingMode);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -196,7 +200,9 @@ export const PhonePage = () => {
       );
     } else if (type === 'peer:ice') {
       try {
-        await peerConnectionRef.current?.addIceCandidate(new RTCIceCandidate(toIceCandidateInit(data)));
+        await peerConnectionRef.current?.addIceCandidate(
+          new RTCIceCandidate(toIceCandidateInit(data)),
+        );
       } catch (err) {
         dbg(`Failed to add ICE candidate: ${(err as Error).message}`);
       }

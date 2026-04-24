@@ -129,7 +129,11 @@ export const ResultsPage = () => {
               Momentum, energy and velocity bands with uncertainty propagation.
             </p>
           </div>
-          <button onClick={handleComputePhysics} disabled={status === 'computing'} className="btn-main">
+          <button
+            onClick={handleComputePhysics}
+            disabled={status === 'computing'}
+            className="btn-main"
+          >
             {status === 'computing' ? 'Computing...' : 'Compute Physics'}
           </button>
         </div>
@@ -209,7 +213,9 @@ export const ResultsPage = () => {
               <div className="mt-4 space-y-6">
                 {chartSeries.map((series) => (
                   <div key={`chart-${series.ballId}`} className="h-[230px] w-full">
-                    <p className="mb-2 text-sm font-semibold text-slate-200">Ball {series.ballId + 1}</p>
+                    <p className="mb-2 text-sm font-semibold text-slate-200">
+                      Ball {series.ballId + 1}
+                    </p>
                     <ResponsiveContainer>
                       <LineChart
                         data={series.rows}

@@ -33,10 +33,10 @@ function isAppleMobileBrowser(): boolean {
 }
 
 function extensionFromMimeType(mimeType: string): string {
-  if (mimeType.includes("mp4")) return "mp4";
-  if (mimeType.includes("webm")) return "webm";
-  if (mimeType.includes("x-matroska") || mimeType.includes("matroska")) return "mkv";
-  return "webm";
+  if (mimeType.includes('mp4')) return 'mp4';
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('x-matroska') || mimeType.includes('matroska')) return 'mkv';
+  return 'webm';
 }
 
 export function pickPreferredRecorderMimeType(mode: RecordingMode): string {
@@ -47,7 +47,9 @@ export function pickPreferredRecorderMimeType(mode: RecordingMode): string {
       'video/mp4;codecs=avc1',
       'video/mp4',
     ];
-    return legacyOrder.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || 'video/webm';
+    return (
+      legacyOrder.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || 'video/webm'
+    );
   }
 
   const appleFirst = [
@@ -94,10 +96,13 @@ export async function acquireCamera(
   return { stream, settings: cameraSettings };
 }
 
-export function createRecorder(stream: MediaStream, mode: RecordingMode = 'browser-high'): MediaRecorder {
+export function createRecorder(
+  stream: MediaStream,
+  mode: RecordingMode = 'browser-high',
+): MediaRecorder {
   const mimeType = pickPreferredRecorderMimeType(mode);
   const videoBitsPerSecond = mode === 'legacy' ? 20_000_000 : 100_000_000;
-  
+
   const recorder = new MediaRecorder(stream, {
     mimeType,
     videoBitsPerSecond,
@@ -124,7 +129,7 @@ export async function stopRecording(recorder: MediaRecorder): Promise<Blob> {
   const chunks = recorderChunks.get(recorder) ?? [];
 
   return new Promise((resolve) => {
-    if (recorder.state === "inactive") {
+    if (recorder.state === 'inactive') {
       resolve(new Blob(chunks, { type: recorder.mimeType }));
       return;
     }
@@ -142,7 +147,7 @@ export async function uploadVideo(
   cameraId: number,
   durationMs: number,
   recordingMode: RecordingMode,
-  onProgress: (loaded: number, total: number) => void
+  onProgress: (loaded: number, total: number) => void,
 ): Promise<UploadResult> {
   if (blob.size === 0) {
     throw new Error('Recorded video is empty. The browser did not emit any video chunks.');

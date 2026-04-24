@@ -14,7 +14,6 @@ import { DebugPage } from './pages/DebugPage';
 import { useSessionStore } from './stores/sessionStore';
 import { useCalibrationStore } from './stores/calibrationStore';
 import { useTrackingStore } from './stores/trackingStore';
-import { useResultsStore } from './stores/resultsStore';
 
 const phaseOrder = ['setup', 'calibration', 'recording', 'tracking', 'results'] as const;
 type GuardPhase = (typeof phaseOrder)[number];
@@ -83,7 +82,6 @@ function PhaseGuard({ phase, children }: { phase: GuardPhase; children: ReactEle
   const { phase: sessionPhase, experimentId } = useSessionStore();
   const { status: calibrationStatus, rulerScaleFactor } = useCalibrationStore();
   const { frameCount } = useTrackingStore();
-  const { physicsResult } = useResultsStore();
 
   const requestedIndex = phaseOrder.indexOf(phase);
   const currentIndex = phaseOrder.indexOf(sessionPhase);
@@ -102,7 +100,6 @@ function PhaseGuard({ phase, children }: { phase: GuardPhase; children: ReactEle
   if (phase === 'tracking' && frameCount === 0) {
     return <Navigate to="/recording" replace />;
   }
-
 
   return children;
 }

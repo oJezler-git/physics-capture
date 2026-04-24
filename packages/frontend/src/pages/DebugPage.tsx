@@ -137,10 +137,7 @@ export const DebugPage = () => {
   const actualFileCount = frameMap.filter(Boolean).length;
   const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
   const fallbackBallIds = Array.from(
-    new Set([
-      ...tracks.map((track) => track.ballId),
-      ...seeds.map((seed) => seed.ballId),
-    ]),
+    new Set([...tracks.map((track) => track.ballId), ...seeds.map((seed) => seed.ballId)]),
   ).sort((a, b) => a - b);
   const physicsMassConfigs =
     ballConfigs.length > 0
@@ -234,7 +231,9 @@ export const DebugPage = () => {
             <button
               onClick={() => setMode('sam2')}
               className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
-                mode === 'sam2' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-900 text-slate-500 border border-slate-800'
+                mode === 'sam2'
+                  ? 'bg-orange-600 text-white shadow-lg'
+                  : 'bg-slate-900 text-slate-500 border border-slate-800'
               }`}
             >
               SAM2
@@ -242,7 +241,9 @@ export const DebugPage = () => {
             <button
               onClick={() => setMode('sync')}
               className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
-                mode === 'sync' ? 'bg-sky-600 text-white shadow-lg' : 'bg-slate-900 text-slate-500 border border-slate-800'
+                mode === 'sync'
+                  ? 'bg-sky-600 text-white shadow-lg'
+                  : 'bg-slate-900 text-slate-500 border border-slate-800'
               }`}
             >
               Sync
@@ -250,9 +251,9 @@ export const DebugPage = () => {
           </div>
 
           {mode === 'sam2' ? (
-            <div 
+            <div
               className="relative bg-black shadow-2xl overflow-hidden"
-              style={{ 
+              style={{
                 aspectRatio: `${dims.width} / ${dims.height}`,
                 maxHeight: '100%',
                 maxWidth: '100%',
@@ -288,7 +289,9 @@ export const DebugPage = () => {
                   <div className="text-center">
                     <p className="text-6xl mb-4">⚠️</p>
                     <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
-                    <p className="text-[10px] opacity-40 mt-2 font-mono">PHYSICAL_IDX: {safeFrame}</p>
+                    <p className="text-[10px] opacity-40 mt-2 font-mono">
+                      PHYSICAL_IDX: {safeFrame}
+                    </p>
                   </div>
                 </div>
               )}
@@ -490,7 +493,7 @@ export const DebugPage = () => {
                   <span className="font-mono">{Math.round(progress * 100)}%</span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full border border-slate-800 bg-slate-950">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-sky-500 to-orange-500 transition-all duration-300"
                     style={{ width: `${progress * 100}%` }}
                   />
@@ -500,9 +503,7 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
-              Physics
-            </h3>
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Physics</h3>
             {physicsError ? (
               <div className="rounded-xl border border-rose-500/40 bg-rose-950/80 px-4 py-3 text-xs text-rose-200">
                 <span className="font-black opacity-60 mr-2">ERROR:</span>
@@ -585,8 +586,10 @@ export const DebugPage = () => {
                           Ball {ball.ballId + 1}
                         </span>
                         <span className="font-mono text-slate-400">
-                          v {formatWithUncertainty(ball.v_before.value, ball.v_before.uncertainty, 3)}{' '}
-                          {'->'} {formatWithUncertainty(ball.v_after.value, ball.v_after.uncertainty, 3)}
+                          v{' '}
+                          {formatWithUncertainty(ball.v_before.value, ball.v_before.uncertainty, 3)}{' '}
+                          {'->'}{' '}
+                          {formatWithUncertainty(ball.v_after.value, ball.v_after.uncertainty, 3)}
                         </span>
                       </div>
                     </div>

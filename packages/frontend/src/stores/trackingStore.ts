@@ -42,13 +42,12 @@ export const useTrackingStore = create<TrackingState>((set) => ({
 
   setFrame: (frameOrUpdater) =>
     set((state) => {
-      const nextFrame = typeof frameOrUpdater === 'function' 
-        ? frameOrUpdater(state.currentFrame) 
-        : frameOrUpdater;
-      
+      const nextFrame =
+        typeof frameOrUpdater === 'function' ? frameOrUpdater(state.currentFrame) : frameOrUpdater;
+
       const safeFrame = isNaN(nextFrame) ? 0 : nextFrame;
       const bound = state.frameCount > 0 ? state.frameCount - 1 : 0;
-      
+
       return {
         currentFrame: Math.max(0, Math.min(safeFrame, bound)),
       };
@@ -64,9 +63,9 @@ export const useTrackingStore = create<TrackingState>((set) => ({
       accepted = true;
       return {
         seeds: [
-          ...state.seeds.filter(s => !(s.ballId === seed.ballId && s.cameraId === seed.cameraId)),
-          seed
-        ]
+          ...state.seeds.filter((s) => !(s.ballId === seed.ballId && s.cameraId === seed.cameraId)),
+          seed,
+        ],
       };
     });
     return accepted;
@@ -85,8 +84,7 @@ export const useTrackingStore = create<TrackingState>((set) => ({
       progress: progress ?? state.progress,
     })),
 
-  onTrackingUpdate: (tracks, progress) =>
-    set({ tracks, progress }),
+  onTrackingUpdate: (tracks, progress) => set({ tracks, progress }),
 
   onTrackingComplete: (tracks) =>
     set({
@@ -109,7 +107,8 @@ export const useTrackingStore = create<TrackingState>((set) => ({
         correction,
       ],
       tracks: state.tracks.map((track) => {
-        if (track.ballId !== correction.ballId || track.cameraId !== correction.cameraId) return track;
+        if (track.ballId !== correction.ballId || track.cameraId !== correction.cameraId)
+          return track;
         return {
           ...track,
           points: track.points.map((point) => {

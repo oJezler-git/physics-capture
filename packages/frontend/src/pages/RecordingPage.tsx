@@ -233,7 +233,11 @@ export const RecordingPage = () => {
                 Start Recording
               </button>
             ) : (
-              <button onClick={handleManualUpload} className="btn-main" disabled={uploadPhase !== 'idle'}>
+              <button
+                onClick={handleManualUpload}
+                className="btn-main"
+                disabled={uploadPhase !== 'idle'}
+              >
                 Upload Selected Videos
               </button>
             )}
@@ -259,11 +263,15 @@ export const RecordingPage = () => {
       )}
 
       <div className={`grid gap-6 ${isRecording ? 'grid-cols-1' : 'lg:grid-cols-[1.8fr_1fr]'}`}>
-        <section className={`surface-panel p-5 ${isRecording ? 'h-[75vh]' : 'h-[400px] lg:h-[500px]'}`}>
+        <section
+          className={`surface-panel p-5 ${isRecording ? 'h-[75vh]' : 'h-[400px] lg:h-[500px]'}`}
+        >
           {!isRecording && (
             <div className="mb-3 flex items-center justify-between">
               <p className="eyebrow">Visual Sync Lane</p>
-              <span className="ui-pill">{captureSource === 'manual' ? 'Manual Upload' : 'Idle'}</span>
+              <span className="ui-pill">
+                {captureSource === 'manual' ? 'Manual Upload' : 'Idle'}
+              </span>
             </div>
           )}
           <div className="h-full">
@@ -277,7 +285,9 @@ export const RecordingPage = () => {
               <>
                 <div className="mb-3 flex items-center justify-between">
                   <p className="eyebrow">Manual Video Ingest</p>
-                  <span className="ui-pill">{manualSlots} slot{manualSlots > 1 ? 's' : ''}</span>
+                  <span className="ui-pill">
+                    {manualSlots} slot{manualSlots > 1 ? 's' : ''}
+                  </span>
                 </div>
                 <div className="mb-3 flex items-center gap-2">
                   <button
@@ -414,7 +424,9 @@ export const RecordingPage = () => {
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                       />
                     </svg>
-                    <span className="uppercase tracking-[0.14em]">Extracting frames (ffmpeg)...</span>
+                    <span className="uppercase tracking-[0.14em]">
+                      Extracting frames (ffmpeg)...
+                    </span>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
                     <div className="h-full w-full animate-pulse rounded-full bg-gradient-to-r from-sky-500/50 to-indigo-500/50" />

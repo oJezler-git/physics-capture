@@ -1,4 +1,10 @@
-import { computeCadenceMetrics, grayDecode, grayEncode, hammingDistance, phaseForFrame } from './syncMarker';
+import {
+  computeCadenceMetrics,
+  grayDecode,
+  grayEncode,
+  hammingDistance,
+  phaseForFrame,
+} from './syncMarker';
 
 describe('syncMarker gray code', () => {
   it('adjacent values differ by exactly 1 bit (10-bit Gray)', () => {
@@ -48,4 +54,3 @@ describe('syncMarker cadence metrics', () => {
     expect(metrics.jitterMs).toBeCloseTo(0, 6);
   });
 });
-

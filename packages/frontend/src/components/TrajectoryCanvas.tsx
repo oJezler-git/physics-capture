@@ -19,8 +19,8 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
   tracks,
   currentFrame,
   cameraId,
-  correctionEnabled = false,
-  onCorrection,
+  correctionEnabled: _correctionEnabled = false,
+  onCorrection: _onCorrection,
 }) => {
   // SVG points for each track
   const renderedTracks = useMemo(() => {

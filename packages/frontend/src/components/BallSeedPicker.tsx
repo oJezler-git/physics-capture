@@ -59,7 +59,10 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
 
   // Filter seeds by camera AND current frame so we only see markers on the "correct" frame
   const visibleSeeds = useMemo(
-    () => (cameraId ? seeds.filter((seed) => seed.cameraId === cameraId && seed.frameIdx === currentFrame) : []),
+    () =>
+      cameraId
+        ? seeds.filter((seed) => seed.cameraId === cameraId && seed.frameIdx === currentFrame)
+        : [],
     [cameraId, seeds, currentFrame],
   );
 
@@ -107,7 +110,12 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       return;
     }
 
-    console.log('[Seed] Placing seed:', { ballId: nextBallId, x: point.x, y: point.y, frameIdx: currentFrame });
+    console.log('[Seed] Placing seed:', {
+      ballId: nextBallId,
+      x: point.x,
+      y: point.y,
+      frameIdx: currentFrame,
+    });
 
     const accepted = onAddSeed({
       ballId: nextBallId,
