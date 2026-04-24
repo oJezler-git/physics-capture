@@ -27,13 +27,22 @@ const packageDef = protoLoader.loadSync(PROTO_PATH, {
 
 const proto = grpc.loadPackageDefinition(packageDef) as any;
 const PhysicsCapture = proto.physicscapture.v1.PhysicsCapture;
-const grpcPort = process.env.PYTHON_GRPC_PORT ?? "50052";
-const grpcHost = process.env.PYTHON_GRPC_HOST ?? "localhost";
 
-export const grpcClient = new PhysicsCapture(
-  `${grpcHost}:${grpcPort}`,
-  grpc.credentials.createInsecure()
-);
+export function createClient(host = process.env.PYTHON_GRPC_HOST ?? "localhost", port = process.env.PYTHON_GRPC_PORT ?? "50052") {
+  return new PhysicsCapture(
+    `${host}:${port}`,
+    grpc.credentials.createInsecure()
+  );
+}
+
+export let grpcClient = createClient();
+
+/**
+ * Update the default singleton client (useful for tests or dynamic reconfiguration)
+ */
+export function setClient(newClient: any) {
+  grpcClient = newClient;
+}
 
 export function mapGrpcError(raw: Error): GrpcError {
   const err = raw as any;

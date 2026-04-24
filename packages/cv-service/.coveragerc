@@ -1,0 +1,15 @@
+[run]
+branch = True
+source =
+    physics
+    sync
+    tracking
+omit =
+    */__init__.py
+    */generated/*
+    */tests/*
+    */__pycache__/*
+
+[report]
+show_missing = True
+fail_under = 80

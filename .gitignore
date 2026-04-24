@@ -34,6 +34,13 @@ dist/
 build/
 out/
 
+# Coverage
+.coverage
+htmlcov/
+*.lcov
+coverage.xml
+
+
 # Runtime experiment artifacts
 /experiments/
 /packages/experiments/
