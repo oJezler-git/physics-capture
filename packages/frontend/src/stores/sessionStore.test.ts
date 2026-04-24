@@ -19,4 +19,20 @@ describe('sessionStore.advancePhase', () => {
       expect(useSessionStore.getState().phase).toBe(phases[index + 1]);
     }
   });
+
+  it('manages camera addition and status merging', () => {
+    const cam = { id: 'cam-1', status: 'live' } as any;
+    useSessionStore.getState().addCamera(cam);
+    expect(useSessionStore.getState().cameras).toHaveLength(1);
+
+    // Update status to disconnected
+    useSessionStore.getState().addCamera({ id: 'cam-1', status: 'disconnected' } as any);
+    expect(useSessionStore.getState().cameras[0].status).toBe('disconnected');
+  });
+
+  it('removes a camera correctly', () => {
+    useSessionStore.getState().addCamera({ id: 'cam-1', status: 'live' } as any);
+    useSessionStore.getState().removeCamera('cam-1');
+    expect(useSessionStore.getState().cameras).toHaveLength(0);
+  });
 });

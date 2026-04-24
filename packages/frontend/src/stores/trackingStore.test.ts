@@ -45,4 +45,28 @@ describe('trackingStore addSeed', () => {
 
     expect(useTrackingStore.getState().corrections).toEqual([correctionB]);
   });
+
+  it('bounds current frame within 0 to frameCount-1', () => {
+    const store = useTrackingStore.getState();
+    store.setFrameCount(10);
+    
+    store.setFrame(5);
+    expect(useTrackingStore.getState().currentFrame).toBe(5);
+    
+    store.setFrame(100);
+    expect(useTrackingStore.getState().currentFrame).toBe(9);
+
+    store.setFrame(-5);
+    expect(useTrackingStore.getState().currentFrame).toBe(0);
+  });
+
+  it('resets to initial state', () => {
+    useTrackingStore.getState().setFrameCount(100);
+    useTrackingStore.getState().reset();
+    
+    const state = useTrackingStore.getState();
+    expect(state.frameCount).toBe(0);
+    expect(state.currentFrame).toBe(0);
+    expect(state.status).toBe('idle');
+  });
 });
