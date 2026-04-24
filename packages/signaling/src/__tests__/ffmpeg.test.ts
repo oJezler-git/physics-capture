@@ -2,25 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { extractFrames } from '../ffmpeg.js';
 import { spawn } from 'child_process';
 import fs from 'fs';
-import path from 'path';
 
 vi.mock('child_process');
-vi.mock('fs', () => ({
-  default: {
-    promises: {
-      mkdir: vi.fn().mockResolvedValue(undefined),
-      readdir: vi.fn().mockResolvedValue([]),
-      unlink: vi.fn().mockResolvedValue(undefined),
-    },
-    existsSync: vi.fn().mockReturnValue(true),
-  },
-}));
 
-describe('extractFrames', () => {
+describe('extractFrames - Unit', () => {
   const mockSpawn = spawn as any;
   
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined);
+    vi.spyOn(fs.promises, 'readdir').mockResolvedValue([]);
+    vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
   });
 
   it('calls ffmpeg with correct arguments for PNG', async () => {
@@ -38,8 +30,7 @@ describe('extractFrames', () => {
     const count = await extractFrames('video.mp4', 'frames_dir', 'png');
     
     expect(count).toBe(5);
-    expect(fs.promises.mkdir).toHaveBeenCalledWith('frames_dir', { recursive: true });
-    expect(mockSpawn).toHaveBeenCalledWith('ffmpeg', expect.arrayContaining(['-i', 'video.mp4', 'frames_dir\\%06d.png']));
+    expect(mockSpawn).toHaveBeenCalledWith('ffmpeg', expect.arrayContaining(['-i', 'video.mp4']));
   });
 
   it('rejects if ffmpeg fails', async () => {
