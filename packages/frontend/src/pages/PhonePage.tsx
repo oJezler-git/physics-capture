@@ -15,6 +15,8 @@ type RecordState = 'idle' | 'recording' | 'uploading' | 'done' | 'error';
 export const PhonePage = () => {
   const [searchParams] = useSearchParams();
   const room = searchParams.get('room');
+  const requestedCameraId = Number.parseInt(searchParams.get('camera') ?? '0', 10);
+  const resolvedCameraId = Number.isFinite(requestedCameraId) && requestedCameraId >= 0 ? requestedCameraId : 0;
   const requestedMode = searchParams.get('recording');
   const recordingMode = requestedMode === 'legacy' || requestedMode === 'future-extreme' ? requestedMode : 'browser-high';
   const setRecordingMode = useSessionStore((state) => state.setRecordingMode);
@@ -320,6 +322,11 @@ export const PhonePage = () => {
       );
       return;
     }
+    if (!experimentId) {
+      setRecordState('error');
+      setErrorMessage('Missing experiment id for upload.');
+      return;
+    }
 
     const formData = new FormData();
     const uploadExt = blob.type.includes('mp4')
@@ -327,30 +334,28 @@ export const PhonePage = () => {
       : blob.type.includes('webm')
         ? 'webm'
         : 'bin';
-    formData.append('video', blob, `recording_${Date.now()}.${uploadExt}`);
+    formData.append('experiment_id', experimentId);
+    formData.append('camera_id', String(resolvedCameraId));
+    formData.append('recording_mode', recordingMode);
+    formData.append('mime_type', blob.type || 'application/octet-stream');
+    formData.append('duration_ms', '0');
+    formData.append('file', blob, `cam${resolvedCameraId}_${Date.now()}.${uploadExt}`);
 
-    try {
-      const xhr = new XMLHttpRequest();
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setRecordState('done');
-        } else {
-          throw new Error('Upload failed');
-        }
-      };
-
-      xhr.onerror = () => {
-        throw new Error('Upload failed');
-      };
-
-      // In production, this would be the actual API endpoint
-      xhr.open('POST', `/api/upload/${experimentId}/phone`);
-      xhr.send(formData);
-    } catch (err: any) {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setRecordState('done');
+      } else {
+        setRecordState('error');
+        setErrorMessage(`Upload failed (${xhr.status})`);
+      }
+    };
+    xhr.onerror = () => {
       setRecordState('error');
-      setErrorMessage(err.message || 'Upload failed');
-    }
+      setErrorMessage('Upload failed');
+    };
+    xhr.open('POST', '/api/upload-video');
+    xhr.send(formData);
   };
 
   return (
