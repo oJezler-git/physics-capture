@@ -124,9 +124,33 @@ export const ResultsPage = () => {
       <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 transition-all duration-300 glitch-in stagger-1">
         <div className="space-y-1">
           <p className="eyebrow">Collision Analysis</p>
-          <h1 className="text-2xl sm:text-3xl">Final Report</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl">Final Report</h1>
+            {physicsResult?.syncStatus && (
+              <div
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                  physicsResult.syncStatus.isMock
+                    ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                    : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                }`}
+              >
+                {physicsResult.syncStatus.isMock ? (
+                  <span>Estimated (30 FPS)</span>
+                ) : (
+                  <span>
+                    Scientific Grade ({physicsResult.syncStatus.trueFps?.toFixed(2)} FPS)
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
           <p className="subtle-copy max-w-2xl text-xs">
             Momentum, energy and velocity bands with uncertainty propagation.
+            {physicsResult?.syncStatus && !physicsResult.syncStatus.isMock && (
+              <span className="ml-1 text-emerald-500/60">
+                (Timing jitter: {physicsResult.syncStatus.rmsMs?.toFixed(2)}ms RMS)
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-3">

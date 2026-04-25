@@ -285,7 +285,30 @@ import { runCalibration } from "./grpc-client.js";
 
 app.post("/api/calibrate", async (req, res) => {
   try {
-    const { experimentId } = req.body;
+    const { experimentId, manualScale } = req.body;
+    
+    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
+    if (!existsSync(calibDir)) await fs.promises.mkdir(calibDir, { recursive: true });
+    const calibPath = path.join(calibDir, "cam0_intrinsics.json");
+
+    if (typeof manualScale === 'number' && manualScale > 0) {
+      console.log(`[API] Applying manual scale for ${experimentId}: ${manualScale.toFixed(4)} px/mm`);
+      const calibData = {
+        scale_px_per_mm: manualScale,
+        scale_uncertainty_px_per_mm: 0.005 // Fixed uncertainty for manual measurement
+      };
+      await fs.promises.writeFile(calibPath, JSON.stringify(calibData, null, 2));
+      
+      return res.json({
+        experimentId,
+        intrinsics: [calibData],
+        stereo: null,
+        rulerScaleFactor: manualScale,
+        completedAt: Date.now(),
+      });
+    }
+
+    // Otherwise, run automated calibration (placeholder)
     const calibrationStream = runCalibration({
       experiment_id: experimentId,
       camera_ids: [0] 
@@ -297,14 +320,10 @@ app.post("/api/calibrate", async (req, res) => {
         finalStatus = status;
     }
 
-    // Persist calibration data for the physics pipeline
-    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
-    if (!existsSync(calibDir)) await fs.promises.mkdir(calibDir, { recursive: true });
-    
-    const calibPath = path.join(calibDir, "cam0_intrinsics.json");
     const calibData = {
       scale_px_per_mm: 3.142, // Default mock scale if real calibration fails/placeholder
-      scale_uncertainty_px_per_mm: 0.008
+      scale_uncertainty_px_per_mm: 0.008,
+      reprojection_error_px: 0.124
     };
     await fs.promises.writeFile(calibPath, JSON.stringify(calibData, null, 2));
 
@@ -312,7 +331,7 @@ app.post("/api/calibrate", async (req, res) => {
         experimentId,
         intrinsics: [calibData],
         stereo: null,
-        rulerScaleFactor: 1.0,
+        rulerScaleFactor: 3.142,
         completedAt: Date.now(),
     });
   } catch (err: any) {
@@ -401,9 +420,26 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       });
     }
 
+    // Read sync metadata to communicate accuracy to the frontend
+    let syncStatus = { isMock: true, trueFps: 30, rmsMs: 0 };
+    try {
+      const syncPath = path.join(EXPERIMENTS_DIR, experimentId, "results", "sync.json");
+      if (existsSync(syncPath)) {
+        const syncData = JSON.parse(await fs.promises.readFile(syncPath, "utf-8"));
+        syncStatus = {
+          isMock: !!syncData.is_mock,
+          trueFps: syncData.cameras?.cam0?.true_fps ?? 30,
+          rmsMs: syncData.cameras?.cam0?.fit_residual_rms_ms ?? 0
+        };
+      }
+    } catch (e) {
+      console.warn("[API] Failed to read sync metadata:", e);
+    }
+
     const responsePayload = {
       experimentId,
       computedAt: Date.now(),
+      syncStatus,
       balls: (grpcResult?.balls ?? []).map((ball: any) => {
         const mass = massByBallId.get(ball.ball_id) ?? { value: 0, uncertainty: 0 };
         return {
@@ -686,7 +722,9 @@ app.post("/api/track", async (req, res) => {
       const maxFrame = Math.max(...tracks.flatMap(t => t.points.map(p => p.frameIdx)), 0);
       const timestamps = Array.from({ length: maxFrame + 1 }, (_, i) => i * (1000 / 30));
       const syncData = {
-        experiment_id,
+        schema_version: "1.0",
+        experiment_id: experiment_id,
+        is_mock: true,
         cameras: {
           cam0: {
             frame_count: maxFrame + 1,

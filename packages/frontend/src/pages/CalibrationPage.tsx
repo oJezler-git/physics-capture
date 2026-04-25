@@ -299,13 +299,34 @@ export const CalibrationPage = () => {
               </div>
               <Button
                 variant="alt"
-                onClick={() => {
-                  if (computedScale) setRulerScale(computedScale);
+                onClick={async () => {
+                  if (!computedScale || !experimentId) return;
+
+                  setIsBusy(true);
+                  try {
+                    const response = await fetch('/api/calibrate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ experimentId, manualScale: computedScale }),
+                    });
+
+                    if (!response.ok) {
+                      throw new Error(`Scale submission failed (${response.status})`);
+                    }
+
+                    const result = await response.json();
+                    onCalibrationComplete(result);
+                    setRulerScale(computedScale);
+                  } catch (requestError) {
+                    console.error('Failed to save manual scale:', requestError);
+                  } finally {
+                    setIsBusy(false);
+                  }
                 }}
-                disabled={!computedScale}
+                disabled={!computedScale || isBusy}
                 className="py-2 text-sm"
               >
-                Use Ruler Scale
+                {isBusy ? 'Saving...' : 'Use Ruler Scale'}
               </Button>
             </div>
 

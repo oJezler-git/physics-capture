@@ -133,6 +133,11 @@ export interface PhysicsResult {
   system: SystemResult;
   velocityTimeSeries: VelocityTimeSeries[];
   computedAt: number;
+  syncStatus?: {
+    isMock: boolean;
+    trueFps?: number;
+    rmsMs?: number;
+  };
 }
 
 export interface VelocityTimeSeries {
