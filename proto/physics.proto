@@ -63,6 +63,8 @@ message TrackingRequest {
   string           experiment_id = 1;
   repeated BallSeed seeds        = 2;   // user click per ball per camera
   optional string  model_id      = 3;
+  optional int32   start_frame_idx = 4; // inclusive physical frame index
+  optional int32   end_frame_idx   = 5; // inclusive physical frame index
 }
 
 message BallSeed {

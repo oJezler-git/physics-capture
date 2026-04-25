@@ -38,6 +38,8 @@ export interface TrackingRequest {
   experiment_id: string;
   seeds: BallSeed[];
   model_id?: string;
+  start_frame_idx?: number;
+  end_frame_idx?: number;
 }
 
 export interface TrackedPoint {

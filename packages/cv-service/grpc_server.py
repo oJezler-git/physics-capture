@@ -90,6 +90,8 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         
         experiment_id = request.experiment_id
         seeds = request.seeds
+        start_frame_idx = request.start_frame_idx if request.HasField("start_frame_idx") else None
+        end_frame_idx = request.end_frame_idx if request.HasField("end_frame_idx") else None
         
         if not seeds:
             logger.warning("No seeds provided for tracking.")
@@ -120,7 +122,12 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
             
             try:
                 # Iterate through the tracker generator. 
-                tracker_gen = self.tracker.track(frames_dir, seeds_by_camera[camera_id])
+                tracker_gen = self.tracker.track(
+                    frames_dir,
+                    seeds_by_camera[camera_id],
+                    start_frame_idx=start_frame_idx,
+                    end_frame_idx=end_frame_idx,
+                )
                 for frame_idx, frame_results, progress in tracker_gen:
                     pb_points = []
                     for res in frame_results:
