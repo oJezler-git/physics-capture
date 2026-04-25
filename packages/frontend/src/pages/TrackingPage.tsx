@@ -5,6 +5,7 @@ import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
+import { Button } from '../components/ui/Button';
 import type { CorrectionKeyframe } from '../types';
 
 const SAM2_MODEL_OPTIONS = [
@@ -419,22 +420,23 @@ export const TrackingPage = () => {
               <h3 className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
                 Session
               </h3>
-              <button
+              <Button
+                variant="main"
                 disabled={tracks.length === 0 || status === 'tracking'}
                 onClick={() => {
                   advancePhase();
                   navigate('/results');
                 }}
-                className="btn-main px-4 py-1.5 text-[9px]"
+                className="px-4 py-1.5 text-[9px]"
               >
                 Finish Tracking
-              </button>
+              </Button>
             </div>
 
             <div className="surface-soft p-3 space-y-3 rounded-xl">
               <div className="flex flex-wrap gap-2">
                 {cameras.map((camera) => (
-                  <button
+                  <Button
                     key={camera.id}
                     onClick={() => setActiveCameraId(camera.id)}
                     className={`px-3 py-1.5 rounded-lg border text-[9px] font-medium uppercase tracking-wider transition-all ${
@@ -444,7 +446,7 @@ export const TrackingPage = () => {
                     }`}
                   >
                     {camera.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
 
@@ -490,7 +492,7 @@ export const TrackingPage = () => {
                 Seeding
               </h3>
               <div className="flex gap-1.5">
-                <button
+                <Button
                   type="button"
                   onClick={() => setSeedMode('click')}
                   className={`rounded-lg border px-3 py-1.5 text-[9px] font-medium uppercase tracking-wider transition-all ${
@@ -500,8 +502,8 @@ export const TrackingPage = () => {
                   }`}
                 >
                   Tap
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => setSeedMode('bbox')}
                   className={`rounded-lg border px-3 py-1.5 text-[9px] font-medium uppercase tracking-wider transition-all ${
@@ -511,7 +513,7 @@ export const TrackingPage = () => {
                   }`}
                 >
                   Box
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -629,21 +631,22 @@ export const TrackingPage = () => {
               </div>
 
               <div className="space-y-2 pt-1">
-                <button
+                <Button
                   type="button"
                   onClick={() => setSeedFrameIdx(currentFrame)}
                   className="w-full border border-[var(--line)] py-1.5 text-[9px] font-medium uppercase tracking-wider text-slate-400 hover:bg-[var(--bg-panel)] transition-colors rounded-lg"
                 >
                   Anchor Seed @ {currentFrame + 1}
-                </button>
+                </Button>
 
-                <button
+                <Button
+                  variant="main"
                   disabled={!hasRequiredSeedCoverage || status === 'tracking'}
                   onClick={handleRunAutoTracker}
-                  className="btn-main w-full py-2 text-[10px]"
+                  className="w-full py-2 text-[10px]"
                 >
                   Execute SAM2 Track
-                </button>
+                </Button>
               </div>
             </div>
           </section>
@@ -661,12 +664,12 @@ export const TrackingPage = () => {
               <p className="text-[9px] text-rose-200/60 leading-relaxed">
                 System detected low-confidence artifacts. Manual correction required.
               </p>
-              <button
+              <Button
                 onClick={goToNextFlagged}
                 className="w-full border border-rose-500/40 bg-rose-500/10 py-1.5 text-[9px] font-medium uppercase tracking-wider text-rose-300 hover:bg-rose-500/20 transition-colors rounded-lg"
               >
                 Jump to Anomaly
-              </button>
+              </Button>
             </section>
           )}
         </aside>

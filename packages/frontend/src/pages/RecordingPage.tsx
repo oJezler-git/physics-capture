@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { SyncMarkerComponent } from '../components/SyncMarker';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
+import { Button } from '../components/ui/Button';
 
 const SYNC_CONFIG = { grayBits: 8, gratingCycles: 4 };
 
@@ -199,7 +200,7 @@ export const RecordingPage = () => {
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex border border-[var(--line)] bg-[var(--bg-panel)] p-1 rounded-2xl">
-              <button
+              <Button
                 type="button"
                 onClick={() => setCaptureSource('live')}
                 disabled={liveRecordableCameras.length === 0}
@@ -210,8 +211,8 @@ export const RecordingPage = () => {
                 } ${liveRecordableCameras.length === 0 ? 'cursor-not-allowed opacity-50' : ''}`}
               >
                 Live Capture
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => setCaptureSource('manual')}
                 className={`rounded-xl px-4 py-1.5 text-[10px] font-semibold tracking-wide transition-all ${
@@ -221,35 +222,39 @@ export const RecordingPage = () => {
                 }`}
               >
                 Manual Upload
-              </button>
+              </Button>
             </div>
 
             {frameCount !== null ? (
-              <button
+              <Button
+                variant="main"
                 onClick={() => {
                   advancePhase();
                   navigate('/tracking');
                 }}
-                className="btn-main px-6 py-2"
+                className="px-6 py-2"
               >
                 Continue to Tracking
-              </button>
+              </Button>
             ) : captureSource === 'live' ? (
-              <button
+              <Button
+                variant="main"
+                sound="start"
                 onClick={handleStart}
-                className="btn-main px-6 py-2"
+                className="px-6 py-2"
                 disabled={uploadPhase !== 'idle' || liveRecordableCameras.length === 0}
               >
                 Start Recording
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                variant="main"
                 onClick={handleManualUpload}
-                className="btn-main px-6 py-2"
+                className="px-6 py-2"
                 disabled={uploadPhase !== 'idle'}
               >
                 Upload & Proceed
-              </button>
+              </Button>
             )}
           </div>
         </header>
@@ -263,12 +268,13 @@ export const RecordingPage = () => {
               Live Capture: {formatTime(elapsed)}
             </span>
           </div>
-          <button
+          <Button
             onClick={handleStop}
+            sound="stop"
             className="rounded-xl border border-[var(--accent)] bg-[var(--accent)] px-6 py-2 text-sm font-semibold tracking-wide text-zinc-950 transition-all hover:bg-[var(--accent-hover)]"
           >
             End Recording & Extract
-          </button>
+          </Button>
         </div>
       )}
 
@@ -343,10 +349,11 @@ export const RecordingPage = () => {
                 <div className="mb-4 flex items-center justify-between">
                   <p className="eyebrow">Manual Video Uploads</p>
                   <div className="flex gap-1.5">
-                    <button
+                    <Button
+                      variant="alt"
                       type="button"
                       onClick={() => setManualSlots((count) => Math.min(3, count + 1))}
-                      className="btn-alt p-1.5 text-[9px]"
+                      className="p-1.5 text-[9px]"
                       disabled={manualSlots >= 3}
                     >
                       <svg
@@ -362,11 +369,12 @@ export const RecordingPage = () => {
                           d="M12 6v6m0 0v6m0-6h6m-6 0H6"
                         />
                       </svg>
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="alt"
                       type="button"
                       onClick={() => setManualSlots((count) => Math.max(1, count - 1))}
-                      className="btn-alt p-1.5 text-[9px]"
+                      className="p-1.5 text-[9px]"
                       disabled={manualSlots <= 1}
                     >
                       <svg
@@ -382,7 +390,7 @@ export const RecordingPage = () => {
                           d="M20 12H4"
                         />
                       </svg>
-                    </button>
+                    </Button>
                   </div>
                 </div>
 

@@ -13,6 +13,7 @@ import { useResultsStore } from '../stores/resultsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { downloadBlob, exportCSV, exportJSON, exportPDF } from '../lib/export';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { Button } from '../components/ui/Button';
 import type { PhysicsResult } from '../types';
 
 const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
@@ -129,24 +130,25 @@ export const ResultsPage = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <button
+          <Button
+            variant="alt"
             onClick={handleComputePhysics}
             disabled={status === 'computing'}
-            className="btn-alt px-5 py-2 text-xs"
+            className="px-5 py-2 text-xs"
           >
             {status === 'computing' ? 'Recomputing...' : 'Recompute'}
-          </button>
+          </Button>
           {physicsResult && (
             <div className="flex gap-2">
-              <button onClick={handleExportCsv} className="btn-alt px-4 py-2 text-[10px]">
+              <Button variant="alt" onClick={handleExportCsv} className="px-4 py-2 text-[10px]">
                 CSV
-              </button>
-              <button onClick={handleExportJson} className="btn-alt px-4 py-2 text-[10px]">
+              </Button>
+              <Button variant="alt" onClick={handleExportJson} className="px-4 py-2 text-[10px]">
                 JSON
-              </button>
-              <button onClick={handleExportPdf} disabled={isExportingPdf} className="btn-main px-6 py-2 text-xs">
+              </Button>
+              <Button variant="main" onClick={handleExportPdf} disabled={isExportingPdf} className="px-6 py-2 text-xs">
                 {isExportingPdf ? 'Saving...' : 'Export PDF'}
-              </button>
+              </Button>
             </div>
           )}
         </div>

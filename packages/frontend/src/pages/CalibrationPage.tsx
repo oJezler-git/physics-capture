@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { Button } from '../components/ui/Button';
 import type { CalibrationProfile, CalibrationResult } from '../types';
 
 interface Point {
@@ -211,16 +212,17 @@ export const CalibrationPage = () => {
             scale in fallback mode.
           </p>
         </div>
-        <button
+        <Button
+          variant="main"
           disabled={!calibrationReady || !hasMassConfig}
           onClick={() => {
             advancePhase();
             navigate('/recording');
           }}
-          className="btn-main px-6 py-2"
+          className="px-6 py-2"
         >
           Continue to Recording
-        </button>
+        </Button>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[5fr_3fr] items-start">
@@ -264,26 +266,28 @@ export const CalibrationPage = () => {
             )}
 
             <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto]">
-              <button
+              <Button
+                variant="main"
                 onClick={handleRunCalibration}
                 disabled={isBusy || !experimentId}
-                className="btn-main py-2 text-sm"
+                className="py-2 text-sm"
               >
                 {isBusy ? 'Running...' : 'Run Calibration'}
-              </button>
+              </Button>
               <input
                 value={profileName}
                 onChange={(event) => setProfileName(event.target.value)}
                 className="field-shell py-2 text-sm"
                 placeholder="Profile name"
               />
-              <button
+              <Button
+                variant="alt"
                 onClick={handleSaveProfile}
                 disabled={status !== 'complete'}
-                className="btn-alt py-2 text-sm"
+                className="py-2 text-sm"
               >
                 Save Profile
-              </button>
+              </Button>
             </div>
           </section>
 
@@ -293,15 +297,16 @@ export const CalibrationPage = () => {
                 <p className="eyebrow">Fallback Pipeline</p>
                 <h2 className="mt-1 text-xl">Ruler Scale Capture</h2>
               </div>
-              <button
+              <Button
+                variant="alt"
                 onClick={() => {
                   if (computedScale) setRulerScale(computedScale);
                 }}
                 disabled={!computedScale}
-                className="btn-alt py-2 text-sm"
+                className="py-2 text-sm"
               >
                 Use Ruler Scale
-              </button>
+              </Button>
             </div>
 
             <p className="subtle-copy text-xs">
@@ -390,7 +395,7 @@ export const CalibrationPage = () => {
             ) : (
               <div className="custom-scrollbar max-h-[12rem] space-y-2 overflow-y-auto pr-1">
                 {profiles.map((profile) => (
-                  <button
+                  <Button
                     key={profile.id}
                     onClick={() => loadProfile(profile)}
                     className="surface-soft w-full px-3 py-2.5 text-left transition hover:border-[var(--accent)] rounded-xl border border-transparent"
@@ -399,7 +404,7 @@ export const CalibrationPage = () => {
                     <p className="text-[10px] text-slate-400 mt-0.5">
                       {new Date(profile.createdAt).toLocaleString()}
                     </p>
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
@@ -411,13 +416,14 @@ export const CalibrationPage = () => {
                 <p className="eyebrow">Mass Profile</p>
                 <h2 className="mt-1 text-xl">Ball Configuration</h2>
               </div>
-              <button
+              <Button
+                variant="alt"
                 onClick={addBall}
                 disabled={ballConfigs.length >= 3}
-                className="btn-alt py-1.5 px-3 text-[10px]"
+                className="py-1.5 px-3 text-[10px]"
               >
                 Add Ball
-              </button>
+              </Button>
             </div>
 
             <div className="space-y-3">

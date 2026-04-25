@@ -6,6 +6,7 @@ import { SyncDebugView } from '../components/SyncDebugView';
 import { useResultsStore } from '../stores/resultsStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { Button } from '../components/ui/Button';
 import type { PhysicsResult } from '../types';
 
 type DebugMode = 'sam2' | 'sync';
@@ -228,7 +229,7 @@ export const DebugPage = () => {
           </div>
 
           <div className="absolute top-6 right-8 z-30 flex gap-2">
-            <button
+            <Button
               onClick={() => setMode('sam2')}
               className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
                 mode === 'sam2'
@@ -237,8 +238,8 @@ export const DebugPage = () => {
               }`}
             >
               SAM2
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => setMode('sync')}
               className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
                 mode === 'sync'
@@ -247,7 +248,7 @@ export const DebugPage = () => {
               }`}
             >
               Sync
-            </button>
+            </Button>
           </div>
 
           {mode === 'sam2' ? (
@@ -356,12 +357,12 @@ export const DebugPage = () => {
                       </option>
                     ))}
                   </select>
-                  <button
+                  <Button
                     onClick={fetchExperiments}
                     className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 hover:text-[var(--accent)] transition-colors"
                   >
                     🔄
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -382,7 +383,7 @@ export const DebugPage = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
+                <Button
                   onClick={() => {
                     onTrackingComplete([]);
                     resetPhysics();
@@ -391,21 +392,23 @@ export const DebugPage = () => {
                   className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] py-2.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
                 >
                   Clear
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="main"
                   onClick={handleRunTrack}
                   disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
-                  className="btn-main py-2.5 text-[10px]"
+                  className="py-2.5 text-[10px]"
                 >
                   {status === 'tracking' ? 'Processing...' : 'Run SAM2 + Physics'}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="alt"
                   onClick={handleRunPhysics}
                   disabled={physicsStatus === 'computing' || !selectedExp}
-                  className="btn-alt py-2.5 text-[10px]"
+                  className="py-2.5 text-[10px]"
                 >
                   {physicsStatus === 'computing' ? 'Testing Physics...' : 'Run Physics'}
-                </button>
+                </Button>
               </div>
             </div>
           </section>
@@ -433,7 +436,7 @@ export const DebugPage = () => {
             </h3>
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                <button
+                <Button
                   type="button"
                   onClick={() => setSeedMode('click')}
                   className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
@@ -443,8 +446,8 @@ export const DebugPage = () => {
                   }`}
                 >
                   Tap
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => setSeedMode('bbox')}
                   className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
@@ -454,7 +457,7 @@ export const DebugPage = () => {
                   }`}
                 >
                   Box
-                </button>
+                </Button>
               </div>
 
               <div className="rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-5">

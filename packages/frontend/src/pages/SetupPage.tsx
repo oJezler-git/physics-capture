@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useSessionStore } from '../stores/sessionStore';
 import { wsClient } from '../lib/wsClient';
+import { Button } from '../components/ui/Button';
 import type { RecordingMode } from '../types';
 
 type ConnectionMode = 'local' | 'public';
@@ -219,16 +220,17 @@ export const SetupPage = () => {
         </div>
         <div className="flex items-center gap-4">
           <div className="ui-pill hidden sm:flex">Session active</div>
-          <button
+          <Button
+            variant="main"
             disabled={!canProceed}
             onClick={() => {
               advancePhase();
               navigate('/calibration');
             }}
-            className="btn-main px-6 py-2"
+            className="px-6 py-2"
           >
             Continue to Calibration
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -251,9 +253,9 @@ export const SetupPage = () => {
                 <p className="eyebrow">Quick Code</p>
                 <div className="mt-1 flex items-center justify-center gap-2">
                   <p className="font-mono text-xl font-bold tracking-widest text-[var(--accent)]">{inviteCode}</p>
-                  <button onClick={() => copyText(inviteCode, 'code')} className="btn-alt px-2.5 py-1 text-[10px]">
+                  <Button variant="alt" onClick={() => copyText(inviteCode, 'code')} className="px-2.5 py-1 text-[10px]">
                     {copied === 'code' ? '✓' : 'Copy'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -264,7 +266,7 @@ export const SetupPage = () => {
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Session Key</span>
-                  <button onClick={() => copyText(sessionId, 'session')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</button>
+                  <Button onClick={() => copyText(sessionId, 'session')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</Button>
                 </div>
                 <p className="font-mono text-[10px] text-slate-300 truncate" title={sessionId}>{sessionId}</p>
               </div>
@@ -272,7 +274,7 @@ export const SetupPage = () => {
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Invite URL</span>
-                  <button onClick={() => copyText(phoneUrl, 'url')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</button>
+                  <Button onClick={() => copyText(phoneUrl, 'url')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</Button>
                 </div>
                 <p className="font-mono text-[10px] text-slate-400 truncate" title={phoneUrl}>{phoneUrl}</p>
               </div>
@@ -293,7 +295,7 @@ export const SetupPage = () => {
               <p className="eyebrow">Recording Profile</p>
               <div className="grid gap-3 sm:grid-cols-3">
                 {recordingProfiles.map((profile) => (
-                  <button
+                  <Button
                     key={profile.mode}
                     type="button"
                     disabled={profile.disabled}
@@ -310,7 +312,7 @@ export const SetupPage = () => {
                     <div className="text-[11px] leading-relaxed opacity-80 hidden md:block">
                       {profile.description}
                     </div>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </section>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from './ui/Button';
 
 interface FrameScrubberProps {
   currentFrame: number;
@@ -40,12 +41,12 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
       <div className="space-y-6 rounded-[2rem] border border-[var(--line)] bg-[var(--bg-surface)] p-6 shadow-sm">
         <div className="flex items-center gap-4">
           {onPlayToggle && (
-            <button
+            <Button
               onClick={onPlayToggle}
               className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--bg-panel)] border border-[var(--line)] text-xl shadow-sm transition-transform hover:scale-95"
             >
               {isPlaying ? '⏸' : '▶'}
-            </button>
+            </Button>
           )}
 
           {onSpeedChange && (
@@ -98,18 +99,18 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
             </div>
           </div>
           <div className="flex justify-between gap-2">
-            <button
+            <Button
               onClick={decrementFrame}
               className="flex-1 rounded-xl bg-[var(--bg-panel)] py-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-200"
             >
               Prev
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={incrementFrame}
               className="flex-1 rounded-xl bg-[var(--bg-panel)] py-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-200"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -120,30 +121,31 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
     <div className="surface-panel rise-in flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center gap-3">
         {onPlayToggle && (
-          <button
+          <Button
+            variant="main"
             onClick={onPlayToggle}
-            className="btn-main min-w-[7rem]"
+            className="min-w-[7rem]"
           >
             {isPlaying ? 'PAUSE' : 'PLAY'}
-          </button>
+          </Button>
         )}
 
         <div className="surface-soft flex items-center gap-1 p-1">
-          <button
+          <Button
             onClick={decrementFrame}
             className="rounded-xl px-4 py-2 text-xs font-medium uppercase tracking-wider text-slate-400 transition hover:bg-[var(--bg-panel)] hover:text-slate-100"
           >
             Prev
-          </button>
+          </Button>
           <div className="min-w-[7.5rem] px-3 text-center font-mono text-sm text-slate-200">
             {currentFrame + 1} / {frameCount}
           </div>
-          <button
+          <Button
             onClick={incrementFrame}
             className="rounded-xl px-4 py-2 text-xs font-medium uppercase tracking-wider text-slate-400 transition hover:bg-[var(--bg-panel)] hover:text-slate-100"
           >
             Next
-          </button>
+          </Button>
         </div>
 
         <div className="relative min-w-[220px] flex-1 py-4">
