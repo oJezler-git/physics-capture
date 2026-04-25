@@ -365,7 +365,7 @@ export const PhonePage = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black text-slate-100 overflow-hidden font-mono">
+    <div className="fixed inset-0 bg-[var(--bg-base)] text-slate-100 overflow-hidden">
       <video
         ref={videoRef}
         autoPlay
@@ -376,38 +376,38 @@ export const PhonePage = () => {
 
       <div className="absolute top-3 right-3 z-20">
         <span
-          className={`text-xs px-3 py-1 rounded-full border backdrop-blur-md ${
+          className={`text-xs px-3 py-1.5 rounded-full border font-medium tracking-wider uppercase backdrop-blur-md shadow-sm ${
             status === 'connected'
-              ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
               : status === 'connecting'
-                ? 'bg-amber-500/20 border-amber-400/60 text-amber-100'
-                : 'bg-rose-500/20 border-rose-400/60 text-rose-100'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                : 'bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]'
           }`}
         >
           {status}
         </span>
       </div>
 
-      {visibilityWarning ? (
-        <div className="absolute top-12 right-3 z-20 text-xs px-2 py-1 rounded border border-amber-500/60 bg-amber-500/20 text-amber-100">
+      {visibilityWarning && (
+        <div className="absolute top-12 right-3 z-20 text-xs px-3 py-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)] font-medium tracking-wider uppercase backdrop-blur-md shadow-sm">
           visibility_warning=true
         </div>
-      ) : null}
+      )}
 
-      <div className="absolute z-20 left-3 right-3 bottom-3 sm:left-auto sm:w-[min(420px,calc(100vw-1.5rem))] lg:w-[min(340px,34vw)] max-h-[42vh] overflow-y-auto rounded-lg border border-slate-500/50 bg-slate-950/20 backdrop-blur-md p-2">
-        <p className="text-[10px] uppercase tracking-wide text-slate-300 mb-1">console</p>
+      <div className="absolute z-20 left-3 right-3 bottom-3 sm:left-auto sm:w-[min(420px,calc(100vw-1.5rem))] lg:w-[min(340px,34vw)] max-h-[42vh] overflow-y-auto rounded-3xl border border-[var(--line)] bg-[#09090b]/80 p-5 shadow-lg backdrop-blur-xl custom-scrollbar">
+        <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-2">console</p>
         {debugLog.length === 0 ? (
           <p className="text-xs text-slate-500">No logs yet...</p>
         ) : (
           debugLog.map((line, i) => (
-            <p key={i} className="text-[11px] leading-4 text-slate-200 break-all">
+            <p key={i} className="text-[11px] leading-relaxed text-slate-300 break-all font-mono">
               {line}
             </p>
           ))
         )}
-        {errorMessage ? (
-          <p className="text-[11px] leading-4 text-rose-300 break-all mt-1">error={errorMessage}</p>
-        ) : null}
+        {errorMessage && (
+          <p className="text-[11px] leading-4 text-[var(--accent)] break-all mt-1">error={errorMessage}</p>
+        )}
       </div>
     </div>
   );

@@ -317,24 +317,24 @@ export const TrackingPage = () => {
   };
 
   return (
-    <div className="flex min-h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-slate-100 rise-in">
-      <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
+    <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[var(--bg-base)] text-slate-100">
+      <div className="grid flex-1 w-full gap-0 lg:grid-cols-[1fr_320px]">
         {/* Left Side: Massive Preview */}
         <div className="flex min-h-0 flex-col bg-black relative group">
           {/* Subtle overlay header */}
-          <div className="absolute top-6 left-8 z-30 pointer-events-none transition-opacity group-hover:opacity-100 opacity-40">
-            <div className="space-y-0.5">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-500/80">
-                Phase 04 // Tracking
+          <div className="absolute top-8 left-8 z-30 pointer-events-none transition-opacity group-hover:opacity-100 opacity-40 slide-up stagger-1">
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium uppercase tracking-widest text-[var(--accent)]">
+                Step 4/4
               </p>
-              <h1 className="text-xl font-bold tracking-tight text-slate-400">
+              <h1 className="text-xl font-bold tracking-tight text-[var(--text-main)]">
                 Trajectory Analysis
               </h1>
             </div>
           </div>
 
           <div className="relative flex-1 overflow-hidden bg-black">
-            {frameSrc ? (
+            {frameSrc && (
               <img
                 src={frameSrc}
                 alt={`Frame ${currentFrame + 1}`}
@@ -347,27 +347,27 @@ export const TrackingPage = () => {
                 className="absolute inset-0 h-full w-full object-contain"
                 draggable={false}
               />
-            ) : null}
+            )}
 
-            {frameImageState !== 'ready' && !isFrameMissing ? (
+            {frameImageState !== 'ready' && !isFrameMissing && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-                <div className="bg-slate-950/40 p-12 backdrop-blur-3xl rounded-[4rem]">
-                  <p className="font-black uppercase tracking-[0.4em] text-slate-800 text-6xl">
+                <div className="bg-[var(--bg-panel)] border border-[var(--line)] p-12 rounded-[2rem] shadow-sm">
+                  <p className="font-medium uppercase tracking-widest text-[var(--text-faint)] text-6xl">
                     {currentFrame + 1}
                   </p>
-                  <p className="mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  <p className="mt-5 text-[10px] font-medium uppercase tracking-widest text-[var(--text-dim)]">
                     {frameImageState === 'error' ? 'Frame Link Dead' : 'Loading Sequence...'}
                   </p>
                 </div>
               </div>
-            ) : null}
+            )}
 
             {isFrameMissing && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
-                <div className="text-center">
-                  <p className="text-6xl mb-4">⚠️</p>
-                  <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
-                  <p className="text-[10px] opacity-40 mt-2 font-mono">
+              <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-panel)]/90 backdrop-blur-md">
+                <div className="text-center rounded-3xl border border-[var(--accent)] p-10 bg-[var(--bg-surface)] text-[var(--accent)] shadow-sm">
+                  <p className="text-5xl mb-5">⚠️</p>
+                  <p className="font-medium uppercase tracking-widest text-lg">Omitted Frame</p>
+                  <p className="text-[11px] opacity-60 mt-3 font-mono">
                     PHYSICAL_IDX: {physicalFrame}
                   </p>
                 </div>
@@ -395,28 +395,28 @@ export const TrackingPage = () => {
               onAddSeed={(seed) => addSeed(seed, maxBalls)}
               interactive={seedInteractive}
               mode={seedMode}
-              className="relative z-20 h-full w-full cursor-crosshair"
+              className="absolute inset-0 z-20"
             />
           </div>
 
           {hasFrameMismatch && (
-            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-500/60 backdrop-blur-md transition-opacity group-hover:opacity-100 opacity-40">
+            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-[var(--accent)] bg-[var(--bg-panel)]/90 backdrop-blur-md px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-[var(--accent)] transition-opacity group-hover:opacity-100 opacity-40 shadow-sm">
               Sparse Stream: {frameCount - actualFileCount} DROPPED
             </div>
           )}
 
-          {trackingError ? (
-            <div className="absolute top-20 left-8 z-40 rounded-xl border border-rose-500/40 bg-rose-950/90 px-4 py-3 text-xs text-rose-200 shadow-2xl backdrop-blur-xl max-w-md animate-in slide-in-from-left-4">
-              <span className="font-black mr-2 opacity-50">ERROR:</span> {trackingError}
+          {trackingError && (
+            <div className="absolute top-20 left-8 z-40 rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-5 py-3.5 text-xs font-medium text-[var(--accent)] shadow-sm max-w-md slide-up">
+              <span className="font-bold mr-2 opacity-70">ERROR:</span> {trackingError}
             </div>
-          ) : null}
+          )}
         </div>
 
         {/* Right Side: High-Density Controls */}
-        <aside className="custom-scrollbar overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-8 space-y-10">
-          <section className="space-y-4">
+        <aside className="custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] p-4 sm:p-5 space-y-5 slide-up stagger-2">
+          <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+              <h3 className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
                 Session
               </h3>
               <button
@@ -425,22 +425,22 @@ export const TrackingPage = () => {
                   advancePhase();
                   navigate('/results');
                 }}
-                className="rounded bg-sky-600 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-lg shadow-sky-900/40 transition hover:bg-sky-500 disabled:opacity-30 disabled:grayscale"
+                className="btn-main px-4 py-1.5 text-[9px]"
               >
                 Finish Tracking
               </button>
             </div>
 
-            <div className="surface-soft p-4 rounded-2xl border border-slate-800 bg-slate-950 space-y-4">
+            <div className="surface-soft p-3 space-y-3 rounded-xl">
               <div className="flex flex-wrap gap-2">
                 {cameras.map((camera) => (
                   <button
                     key={camera.id}
                     onClick={() => setActiveCameraId(camera.id)}
-                    className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition ${
+                    className={`px-3 py-1.5 rounded-lg border text-[9px] font-medium uppercase tracking-wider transition-all ${
                       resolvedActiveCameraId === camera.id
-                        ? 'border-sky-500 bg-sky-500/10 text-sky-400'
-                        : 'border-slate-800 bg-slate-900 text-slate-500 hover:border-slate-700'
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm'
+                        : 'border-[var(--line)] bg-[var(--bg-panel)] text-slate-500 hover:border-slate-400'
                     }`}
                   >
                     {camera.label}
@@ -449,16 +449,16 @@ export const TrackingPage = () => {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="ui-pill border-slate-800 text-slate-400">{statusLabel}</span>
+                <span className="ui-pill text-[var(--accent)] px-2 py-0.5 text-[9px]">{statusLabel}</span>
                 {status === 'tracking' && (
-                  <div className="flex items-center gap-3">
-                    <div className="w-20 h-1.5 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-1.5 rounded-full bg-[var(--bg-base)] overflow-hidden border border-[var(--line)]">
                       <div
-                        className="h-full bg-sky-500 transition-all duration-300"
+                        className="h-full bg-[var(--accent)] transition-all duration-300"
                         style={{ width: `${progressPct}%` }}
                       />
                     </div>
-                    <span className="text-[10px] font-mono text-sky-400 font-bold">
+                    <span className="text-[9px] font-mono text-[var(--accent)] font-medium">
                       {progressPct}%
                     </span>
                   </div>
@@ -467,8 +467,8 @@ export const TrackingPage = () => {
             </div>
           </section>
 
-          <section className="space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <section className="space-y-3">
+            <h3 className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
               Playback
             </h3>
             <FrameScrubber
@@ -484,19 +484,19 @@ export const TrackingPage = () => {
             />
           </section>
 
-          <section className="space-y-4">
+          <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+              <h3 className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
                 Seeding
               </h3>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={() => setSeedMode('click')}
-                  className={`rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition ${
+                  className={`rounded-lg border px-3 py-1.5 text-[9px] font-medium uppercase tracking-wider transition-all ${
                     seedMode === 'click'
-                      ? 'bg-sky-600 text-white shadow-lg shadow-sky-900/40'
-                      : 'bg-slate-950 border border-slate-800 text-slate-500 hover:text-slate-300'
+                      ? 'border-[var(--accent)] bg-[var(--accent)] text-zinc-950 shadow-sm'
+                      : 'border-[var(--line)] bg-[var(--bg-panel)] text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   Tap
@@ -504,10 +504,10 @@ export const TrackingPage = () => {
                 <button
                   type="button"
                   onClick={() => setSeedMode('bbox')}
-                  className={`rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition ${
+                  className={`rounded-lg border px-3 py-1.5 text-[9px] font-medium uppercase tracking-wider transition-all ${
                     seedMode === 'bbox'
-                      ? 'bg-sky-600 text-white shadow-lg shadow-sky-900/40'
-                      : 'bg-slate-950 border border-slate-800 text-slate-500 hover:text-slate-300'
+                      ? 'border-[var(--accent)] bg-[var(--accent)] text-zinc-950 shadow-sm'
+                      : 'border-[var(--line)] bg-[var(--bg-panel)] text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   Box
@@ -515,12 +515,12 @@ export const TrackingPage = () => {
               </div>
             </div>
 
-            <div className="surface-soft space-y-3 p-4 rounded-2xl border border-slate-800 bg-slate-950">
+            <div className="surface-soft space-y-2 p-3 rounded-xl">
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                <span className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
                   Active Frame Seeds
                 </span>
-                <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] text-sky-400 border border-sky-500/20">
+                <span className="rounded-md bg-[var(--accent)]/10 px-2 py-0.5 font-mono text-[9px] text-[var(--accent)] border border-[var(--accent)]/50">
                   {
                     seeds.filter(
                       (s) => s.cameraId === resolvedActiveCameraId && s.frameIdx === currentFrame,
@@ -531,26 +531,26 @@ export const TrackingPage = () => {
               </div>
 
               {!hasRequiredSeedCoverage ? (
-                <p className="text-[9px] text-amber-500/80 font-bold uppercase tracking-widest leading-relaxed">
+                <p className="text-[9px] text-amber-500/80 font-medium uppercase tracking-wider leading-relaxed">
                   Missing: {camerasMissingSeeds.map((camera) => camera.label).join(', ')}
                 </p>
               ) : (
-                <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-[0.2em] text-center pt-1 animate-pulse">
+                <p className="text-[9px] text-emerald-500 font-medium uppercase tracking-wider text-center pt-1 animate-pulse">
                   System Ready
                 </p>
               )}
             </div>
           </section>
 
-          <section className="space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <section className="space-y-3">
+            <h3 className="text-[9px] font-medium uppercase tracking-wider text-slate-400">
               SAM2 Engine
             </h3>
 
-            <div className="surface-soft space-y-5 p-4 rounded-2xl border border-slate-800 bg-slate-950">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+            <div className="surface-soft space-y-4 p-3 rounded-xl">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1">
+                  <p className="text-[8px] font-medium uppercase tracking-wider text-slate-500">
                     Seed
                   </p>
                   <input
@@ -566,11 +566,11 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-sky-400 focus:border-sky-500 outline-none"
+                    className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-2 py-1.5 text-[10px] font-mono text-emerald-400 focus:border-[var(--accent)] outline-none transition-colors"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                <div className="space-y-1">
+                  <p className="text-[8px] font-medium uppercase tracking-wider text-slate-500">
                     Start
                   </p>
                   <input
@@ -586,11 +586,11 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-orange-400 focus:border-orange-500 outline-none"
+                    className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-2 py-1.5 text-[10px] font-mono text-amber-400 focus:border-[var(--accent)] outline-none transition-colors"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                <div className="space-y-1">
+                  <p className="text-[8px] font-medium uppercase tracking-wider text-slate-500">
                     End
                   </p>
                   <input
@@ -606,19 +606,19 @@ export const TrackingPage = () => {
                         ),
                       )
                     }
-                    className="w-full bg-black border border-slate-800 rounded px-2 py-1 text-[10px] font-mono text-orange-400 focus:border-orange-500 outline-none"
+                    className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-2 py-1.5 text-[10px] font-mono text-rose-400 focus:border-[var(--accent)] outline-none transition-colors"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+              <div className="space-y-1">
+                <p className="text-[8px] font-medium uppercase tracking-wider text-slate-500">
                   Model
                 </p>
                 <select
                   value={selectedModel}
                   onChange={(event) => setSelectedModel(event.target.value)}
-                  className="w-full rounded border border-slate-800 bg-black px-2 py-2 text-[10px] font-mono text-emerald-300 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md border border-[var(--line)] bg-[var(--bg-base)] px-2 py-1.5 text-[10px] font-mono text-emerald-300 outline-none focus:border-[var(--accent)] transition-colors"
                 >
                   {SAM2_MODEL_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -628,11 +628,11 @@ export const TrackingPage = () => {
                 </select>
               </div>
 
-              <div className="space-y-2 pt-2">
+              <div className="space-y-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setSeedFrameIdx(currentFrame)}
-                  className="w-full border border-slate-800 py-2 text-[9px] font-black uppercase tracking-[0.2em] text-slate-500 hover:bg-slate-900 transition rounded-xl"
+                  className="w-full border border-[var(--line)] py-1.5 text-[9px] font-medium uppercase tracking-wider text-slate-400 hover:bg-[var(--bg-panel)] transition-colors rounded-lg"
                 >
                   Anchor Seed @ {currentFrame + 1}
                 </button>
@@ -640,7 +640,7 @@ export const TrackingPage = () => {
                 <button
                   disabled={!hasRequiredSeedCoverage || status === 'tracking'}
                   onClick={handleRunAutoTracker}
-                  className="w-full bg-orange-600 hover:bg-orange-500 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-white shadow-xl shadow-orange-900/20 transition rounded-xl disabled:opacity-20 disabled:grayscale"
+                  className="btn-main w-full py-2 text-[10px]"
                 >
                   Execute SAM2 Track
                 </button>
@@ -649,21 +649,21 @@ export const TrackingPage = () => {
           </section>
 
           {tracks.length > 0 && flaggedFrames.length > 0 && (
-            <section className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5 space-y-3 backdrop-blur-sm">
+            <section className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3 shadow-sm">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-400">
+                <p className="text-[9px] font-medium uppercase tracking-wider text-rose-400">
                   Anomaly Alerts
                 </p>
-                <span className="rounded-full bg-rose-500 px-2.5 py-0.5 font-mono text-[10px] text-white font-bold">
+                <span className="rounded-md bg-rose-500 px-2 py-0.5 font-mono text-[9px] text-white font-medium">
                   {flaggedFrames.length}
                 </span>
               </div>
-              <p className="text-[10px] text-rose-200/60 leading-relaxed italic">
+              <p className="text-[9px] text-rose-200/60 leading-relaxed">
                 System detected low-confidence artifacts. Manual correction required.
               </p>
               <button
                 onClick={goToNextFlagged}
-                className="w-full border border-rose-500/40 bg-rose-500/10 py-2 text-[9px] font-black uppercase tracking-[0.2em] text-rose-300 hover:bg-rose-500/20 transition rounded-xl"
+                className="w-full border border-rose-500/40 bg-rose-500/10 py-1.5 text-[9px] font-medium uppercase tracking-wider text-rose-300 hover:bg-rose-500/20 transition-colors rounded-lg"
               >
                 Jump to Anomaly
               </button>

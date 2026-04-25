@@ -37,12 +37,12 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
 
   if (variant === 'compact') {
     return (
-      <div className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950 p-5">
+      <div className="space-y-6 rounded-[2rem] border border-[var(--line)] bg-[var(--bg-surface)] p-6 shadow-sm">
         <div className="flex items-center gap-4">
           {onPlayToggle && (
             <button
               onClick={onPlayToggle}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-800 border border-slate-700 text-xl shadow-lg hover:bg-slate-700"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--bg-panel)] border border-[var(--line)] text-xl shadow-sm transition-transform hover:scale-95"
             >
               {isPlaying ? '⏸' : '▶'}
             </button>
@@ -50,9 +50,9 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
 
           {onSpeedChange && (
             <div className="flex-1 space-y-2">
-              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              <div className="flex justify-between text-[10px] font-medium tracking-wider uppercase text-slate-500">
                 <span>Speed</span>
-                <span className="text-orange-500">{playbackSpeed.toFixed(2)}x</span>
+                <span className="text-[var(--accent)]">{playbackSpeed.toFixed(2)}x</span>
               </div>
               <input
                 type="range"
@@ -61,7 +61,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
                 step="0.05"
                 value={playbackSpeed}
                 onChange={(e) => onSpeedChange(parseFloat(e.target.value))}
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-800 accent-orange-500"
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-[var(--bg-panel)] accent-[var(--accent)]"
               />
             </div>
           )}
@@ -81,7 +81,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
               max={Math.max(0, frameCount - 1)}
               value={currentFrame}
               onChange={handleSliderChange}
-              className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-orange-500"
+              className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--bg-panel)] accent-[var(--accent)]"
             />
             {/* Issue markers */}
             <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center px-[4px]">
@@ -97,16 +97,16 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
               })}
             </div>
           </div>
-          <div className="flex justify-between gap-1">
+          <div className="flex justify-between gap-2">
             <button
               onClick={decrementFrame}
-              className="flex-1 rounded bg-slate-900 py-1 text-[9px] font-bold uppercase text-slate-500 hover:bg-slate-800"
+              className="flex-1 rounded-xl bg-[var(--bg-panel)] py-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-200"
             >
               Prev
             </button>
             <button
               onClick={incrementFrame}
-              className="flex-1 rounded bg-slate-900 py-1 text-[9px] font-bold uppercase text-slate-500 hover:bg-slate-800"
+              className="flex-1 rounded-xl bg-[var(--bg-panel)] py-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-200"
             >
               Next
             </button>
@@ -119,19 +119,19 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
   return (
     <div className="surface-panel rise-in flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center gap-3">
-        {onPlayToggle ? (
+        {onPlayToggle && (
           <button
             onClick={onPlayToggle}
-            className="btn-main min-w-[7rem] px-4 py-2 text-[11px] tracking-[0.18em]"
+            className="btn-main min-w-[7rem]"
           >
             {isPlaying ? 'PAUSE' : 'PLAY'}
           </button>
-        ) : null}
+        )}
 
         <div className="surface-soft flex items-center gap-1 p-1">
           <button
             onClick={decrementFrame}
-            className="rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-slate-800 hover:text-white"
+            className="rounded-xl px-4 py-2 text-xs font-medium uppercase tracking-wider text-slate-400 transition hover:bg-[var(--bg-panel)] hover:text-slate-100"
           >
             Prev
           </button>
@@ -140,7 +140,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
           </div>
           <button
             onClick={incrementFrame}
-            className="rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300 transition hover:bg-slate-800 hover:text-white"
+            className="rounded-xl px-4 py-2 text-xs font-medium uppercase tracking-wider text-slate-400 transition hover:bg-[var(--bg-panel)] hover:text-slate-100"
           >
             Next
           </button>
@@ -153,7 +153,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
             max={Math.max(0, frameCount - 1)}
             value={currentFrame}
             onChange={handleSliderChange}
-            className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-orange-500"
+            className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--bg-panel)] accent-[var(--accent)]"
           />
           {/* Issue markers */}
           <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center px-[4px]">

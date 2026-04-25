@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Outfit:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,21 +7,20 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --ink-950: #03050a;
-    --ink-900: #060b14;
-    --ink-850: #0a1220;
-    --ink-800: #101c2e;
-    --ink-750: #17263a;
-    --line: #2a3a51;
-    --line-soft: #203046;
-    --text-main: #e8eef9;
-    --text-dim: #97a8c4;
-    --text-faint: #6f819f;
-    --accent: #ff7244;
+    --bg-base: #09090b; /* Zinc 950 */
+    --bg-surface: #18181b; /* Zinc 900 */
+    --bg-panel: #27272a; /* Zinc 800 */
+    --line: rgba(255, 255, 255, 0.1);
+    --line-soft: rgba(255, 255, 255, 0.05);
+    --text-main: #f4f4f5; /* Zinc 50 */
+    --text-dim: #a1a1aa; /* Zinc 400 */
+    --text-faint: #52525b; /* Zinc 600 */
+    --accent: #10b981; /* Emerald 500 */
+    --accent-hover: #059669; /* Emerald 600 */
   }
 
   * {
-    border-color: var(--line-soft);
+    border-color: var(--line);
   }
 
   html,
@@ -33,30 +32,13 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    font-family: 'Outfit', 'Segoe UI', sans-serif;
-    background:
-      radial-gradient(circle at 12% 8%, rgba(76, 195, 255, 0.16), transparent 34%),
-      radial-gradient(circle at 88% 2%, rgba(255, 114, 68, 0.14), transparent 30%),
-      radial-gradient(circle at 44% 92%, rgba(154, 212, 111, 0.08), transparent 32%),
-      linear-gradient(155deg, var(--ink-950) 0%, var(--ink-900) 38%, #060c16 100%);
+    font-family: 'Outfit', sans-serif;
+    background-color: var(--bg-base);
     color: var(--text-main);
-    letter-spacing: 0.01em;
-    line-height: 1.5;
+    letter-spacing: -0.01em;
+    line-height: 1.6;
     text-rendering: optimizeLegibility;
-  }
-
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.2;
-    background-image:
-      linear-gradient(rgba(146, 167, 197, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(146, 167, 197, 0.06) 1px, transparent 1px);
-    background-size: 80px 80px;
-    mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
+    -webkit-font-smoothing: antialiased;
   }
 
   h1,
@@ -64,9 +46,10 @@
   h3,
   h4 {
     margin: 0;
-    font-family: 'Archivo Black', 'Arial Black', sans-serif;
-    line-height: 1.06;
-    letter-spacing: 0.015em;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 500;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
     text-wrap: balance;
   }
 
@@ -75,123 +58,173 @@
     max-width: 65ch;
     text-wrap: pretty;
   }
-
-  table,
+  
   .font-mono {
-    font-variant-numeric: tabular-nums;
-  }
-
-  html {
-    scroll-behavior: smooth;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   :focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 72%, white 28%);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
-  }
-
-  button:active:not(:disabled) {
-    transform: translateY(1px) scale(0.985);
   }
 }
 
 @layer components {
   .surface-panel {
-    @apply rounded-3xl border bg-slate-950/70 backdrop-blur-xl;
-    border-color: color-mix(in srgb, var(--line) 78%, transparent);
-    box-shadow:
-      0 18px 42px rgba(2, 7, 18, 0.55),
-      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    @apply border bg-[#18181b] rounded-[2.5rem] shadow-sm;
+    border-color: var(--line);
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.05);
   }
 
   .surface-soft {
-    @apply rounded-2xl border bg-slate-950/45 backdrop-blur-md;
-    border-color: color-mix(in srgb, var(--line-soft) 86%, transparent);
+    @apply border bg-[#09090b] rounded-3xl;
+    border-color: var(--line-soft);
   }
 
   .eyebrow {
-    color: var(--text-faint);
-    @apply text-[11px] font-semibold tracking-[0.08em];
+    color: var(--text-dim);
+    @apply text-xs font-medium tracking-wider uppercase;
   }
 
   .subtle-copy {
     color: var(--text-dim);
-    @apply text-sm;
+    @apply text-base;
   }
 
   .ui-pill {
-    @apply inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.08em];
-    border-color: color-mix(in srgb, var(--line) 78%, transparent);
-    color: var(--text-dim);
-    background: rgba(9, 18, 30, 0.8);
+    @apply inline-flex items-center border px-3 py-1 text-xs font-medium rounded-full;
+    border-color: var(--line);
+    color: var(--text-main);
+    background: var(--bg-surface);
   }
 
   .btn-main {
-    @apply rounded-2xl px-5 py-3 text-sm font-semibold transition duration-300;
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    color: #fff4ef;
-    background: linear-gradient(130deg, #ff7244 0%, #e85b2b 100%);
-    box-shadow:
-      0 8px 22px rgba(232, 91, 43, 0.35),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    @apply inline-flex items-center justify-center px-6 py-2.5 text-[11px] font-black uppercase tracking-widest transition-all rounded-xl;
+    background: #ffffff;
+    color: #09090b;
+    border: 1px solid #ffffff;
+    /* The "Hard 3D" Face */
+    box-shadow: 
+      0 4px 0 #d4d4d8, /* Zinc 300 - The side profile */
+      0 8px 15px rgba(0,0,0,0.4), /* The drop shadow */
+      inset 0 1px 0 rgba(255,255,255,1); /* Top edge highlight */
+    transform: translateY(-4px); /* Lift it up so it has room to sink */
   }
 
   .btn-main:hover:enabled {
-    transform: translateY(-1px);
-    filter: brightness(1.08);
+    background: #ffffff;
+    transform: translateY(-5px); /* Lift slightly more on hover */
+    box-shadow: 
+      0 5px 0 #d4d4d8,
+      0 12px 20px rgba(0,0,0,0.5),
+      inset 0 1px 0 rgba(255,255,255,1);
+  }
+
+  .btn-main:active:enabled {
+    transform: translateY(0px); /* Sink to the floor */
+    box-shadow: 
+      0 0px 0 #d4d4d8, /* Face disappears */
+      0 2px 4px rgba(0,0,0,0.2),
+      inset 0 2px 4px rgba(0,0,0,0.1);
   }
 
   .btn-main:disabled {
-    @apply cursor-not-allowed opacity-45;
+    @apply cursor-not-allowed opacity-50;
+    background: #27272a;
+    color: #52525b;
+    border-color: transparent;
     box-shadow: none;
+    transform: translateY(0);
   }
 
   .btn-alt {
-    @apply rounded-2xl border px-5 py-3 text-sm font-semibold text-slate-100 transition;
-    border-color: color-mix(in srgb, var(--line) 75%, transparent);
-    background: color-mix(in srgb, var(--ink-800) 80%, transparent);
+    @apply inline-flex items-center justify-center border px-6 py-2.5 text-[11px] font-black uppercase tracking-widest transition-all rounded-xl;
+    border-color: var(--line);
+    background: #18181b;
+    color: var(--text-main);
+    box-shadow: 
+      0 4px 0 #09090b, /* Deep black side profile */
+      0 8px 15px rgba(0,0,0,0.3),
+      inset 0 1px 0 rgba(255,255,255,0.05);
+    transform: translateY(-4px);
   }
 
   .btn-alt:hover:enabled {
-    border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
-    background: color-mix(in srgb, var(--ink-750) 80%, transparent);
+    border-color: var(--text-dim);
+    background: #27272a;
+    transform: translateY(-5px);
+    box-shadow: 
+      0 5px 0 #09090b,
+      0 12px 20px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  .btn-alt:active:enabled {
+    transform: translateY(0px);
+    background: #09090b;
+    box-shadow: 
+      0 0px 0 #000,
+      inset 0 2px 4px rgba(0,0,0,0.5);
   }
 
   .btn-alt:disabled {
-    @apply cursor-not-allowed opacity-45;
+    @apply cursor-not-allowed opacity-30;
+    box-shadow: none;
+    transform: translateY(0);
   }
 
   .field-shell {
-    @apply w-full rounded-xl border bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none transition;
-    border-color: color-mix(in srgb, var(--line) 78%, transparent);
+    @apply w-full border bg-[#09090b] px-4 py-3.5 text-sm text-slate-100 outline-none transition-all rounded-2xl;
+    border-color: var(--line);
   }
 
   .field-shell:focus {
-    border-color: color-mix(in srgb, var(--accent) 58%, transparent);
-    box-shadow: 0 0 0 2px rgba(255, 114, 68, 0.16);
+    border-color: var(--text-dim);
+    box-shadow: 0 0 0 1px var(--text-dim);
   }
 
   .metric-card {
-    @apply rounded-2xl border p-4;
-    border-color: color-mix(in srgb, var(--line) 72%, transparent);
-    background: linear-gradient(160deg, rgba(13, 24, 40, 0.88) 0%, rgba(6, 11, 21, 0.8) 100%);
+    @apply border p-6 rounded-3xl;
+    border-color: var(--line);
+    background: var(--bg-surface);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
   }
 }
 
-@keyframes rise-in {
+.fade-in {
+  animation: fade-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.slide-up {
+  animation: slide-up 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Map the old glitch-in to slide-up smoothly so we don't have to rewrite every single TSX immediately */
+.glitch-in {
+  animation: slide-up 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
   from {
+    transform: translateY(20px);
     opacity: 0;
-    transform: translateY(18px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
+    opacity: 1;
   }
 }
 
-.rise-in {
-  animation: rise-in 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
+.stagger-1 { animation-delay: 50ms; }
+.stagger-2 { animation-delay: 100ms; }
+.stagger-3 { animation-delay: 150ms; }
+.stagger-4 { animation-delay: 200ms; }
+.stagger-5 { animation-delay: 250ms; }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -200,24 +233,24 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
   }
 }
 
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #3f5878 #0a1322;
+  scrollbar-color: var(--text-faint) transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(9, 18, 30, 0.8);
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(83, 115, 153, 0.8);
+  background: var(--text-faint);
+  border-radius: 10px;
 }

@@ -60,9 +60,10 @@ export const TrajectoryCanvas: React.FC<TrajectoryCanvasProps> = ({
 
   return (
     <svg
-      className={`absolute inset-0 pointer-events-none`}
-      viewBox={`0 0 ${width} ${height}`}
+      className={`absolute inset-0 pointer-events-none z-10`}
+      viewBox={`0 0 ${width || 1280} ${height || 720}`}
       preserveAspectRatio="xMidYMid meet"
+      style={{ width: '100%', height: '100%' }}
     >
       <defs>
         <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">

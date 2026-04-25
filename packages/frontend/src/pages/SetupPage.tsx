@@ -208,179 +208,166 @@ export const SetupPage = () => {
   const canProceed = Boolean(experimentId);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 rise-in">
-      <header className="surface-panel flex flex-wrap items-end justify-between gap-5 p-7">
-        <div className="space-y-2">
-          <p className="eyebrow">Phase 01 - Session Setup</p>
-          <h1 className="text-3xl sm:text-4xl">Build Capture Session</h1>
-          <p className="subtle-copy max-w-2xl">
-            Pair recording phones with a canonical room ID, portable invite URL, and readable quick
-            code.
+    <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6">
+      <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 glitch-in stagger-1">
+        <div className="space-y-1">
+          <p className="eyebrow">Step 1/3</p>
+          <h1 className="text-2xl sm:text-3xl">Setup</h1>
+          <p className="subtle-copy max-w-2xl text-xs">
+            Pair recording phone(s) or continue with local files.
           </p>
         </div>
-        <div className="ui-pill">Session active</div>
+        <div className="flex items-center gap-4">
+          <div className="ui-pill hidden sm:flex">Session active</div>
+          <button
+            disabled={!canProceed}
+            onClick={() => {
+              advancePhase();
+              navigate('/calibration');
+            }}
+            className="btn-main px-6 py-2"
+          >
+            Continue to Calibration
+          </button>
+        </div>
       </header>
 
-      {experimentId ? (
-        <div className="grid grid-cols-1 gap-6">
-          <section className="surface-panel space-y-5 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="eyebrow">Phone Handshake</p>
-                <h2 className="mt-1 text-2xl">Device Entry Portal</h2>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="ui-pill border-sky-400/35 text-sky-100">Code {inviteCode}</span>
-                <span
-                  className={`ui-pill ${connection.mode === 'local' ? 'border-lime-400/35 text-lime-100' : 'border-orange-400/35 text-orange-100'}`}
-                >
-                  {connection.mode === 'local' ? 'Local Network' : 'Public Tunnel'}
-                </span>
+      {experimentId && (
+        <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
+          {/* Left Column: QR Code & Technical Details */}
+          <section className="surface-panel flex flex-col gap-5 p-5 glitch-in stagger-2">
+            <div className="surface-soft flex flex-col items-center justify-center gap-3 p-5 text-center">
+              {qrCodeUrl ? (
+                <div className="rounded-[1rem] border bg-white p-1.5 shadow-sm" style={{ borderColor: 'var(--line)' }}>
+                  <img src={qrCodeUrl} alt="Join QR code" className="h-40 w-40" />
+                </div>
+              ) : (
+                <div
+                  className="h-40 w-40 animate-pulse bg-[var(--bg-panel)] border rounded-[1rem]"
+                  style={{ borderColor: 'var(--line)' }}
+                />
+              )}
+              <div className="w-full">
+                <p className="eyebrow">Quick Code</p>
+                <div className="mt-1 flex items-center justify-center gap-2">
+                  <p className="font-mono text-xl font-bold tracking-widest text-[var(--accent)]">{inviteCode}</p>
+                  <button onClick={() => copyText(inviteCode, 'code')} className="btn-alt px-2.5 py-1 text-[10px]">
+                    {copied === 'code' ? '✓' : 'Copy'}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
-              <div className="surface-soft flex flex-col items-center justify-center gap-3 border-slate-700/70 bg-slate-50 p-4">
-                {qrCodeUrl ? (
-                  <img src={qrCodeUrl} alt="Join QR code" className="h-56 w-56 rounded-lg" />
-                ) : (
-                  <div className="h-56 w-56 animate-pulse rounded-lg bg-slate-200" />
-                )}
+            <div className="surface-soft p-5 space-y-3">
+              <p className="eyebrow">Technical Details</p>
+              
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Session Key</span>
+                  <button onClick={() => copyText(sessionId, 'session')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</button>
+                </div>
+                <p className="font-mono text-[10px] text-slate-300 truncate" title={sessionId}>{sessionId}</p>
               </div>
 
-              <div className="space-y-4">
-                <div className="surface-soft space-y-3 p-4">
-                  <p className="eyebrow">Invite Details</p>
-                  <p className="pt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Recording profile
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {recordingProfiles.map((profile) => (
-                      <button
-                        key={profile.mode}
-                        type="button"
-                        disabled={profile.disabled}
-                        onClick={() => setRecordingMode(profile.mode)}
-                        className={`rounded-xl border px-3 py-3 text-left transition ${
-                          recordingMode === profile.mode
-                            ? 'border-sky-400/60 bg-sky-500/10 text-sky-100'
-                            : 'border-slate-700 bg-slate-950/80 text-slate-300 hover:border-slate-500'
-                        } ${profile.disabled ? 'cursor-not-allowed opacity-40' : ''}`}
-                      >
-                        <div className="text-[10px] font-black uppercase tracking-[0.18em]">
-                          {profile.label}
-                        </div>
-                        <div className="mt-1 text-[10px] leading-4 text-slate-400">
-                          {profile.description}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Quick code</p>
-                  <div className="flex items-center gap-2">
-                    <p className="break-all font-mono text-sm text-slate-200">{inviteCode}</p>
-                    <button
-                      onClick={() => copyText(inviteCode, 'code')}
-                      className="btn-alt px-2 py-1 text-[10px]"
-                    >
-                      {copied === 'code' ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-
-                  <p className="pt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Session key
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <p className="break-all font-mono text-xs text-slate-300">{sessionId}</p>
-                    <button
-                      onClick={() => copyText(sessionId, 'session')}
-                      className="btn-alt px-2 py-1 text-[10px]"
-                    >
-                      {copied === 'session' ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-
-                  <p className="pt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
-                    Invite URL
-                  </p>
-                  <div className="flex items-start gap-2">
-                    <p className="break-all text-xs text-slate-400">{phoneUrl}</p>
-                    <button
-                      onClick={() => copyText(phoneUrl, 'url')}
-                      className="btn-alt mt-0.5 px-2 py-1 text-[10px]"
-                    >
-                      {copied === 'url' ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-
-                  <p className="text-sm text-slate-200 break-all">
-                    WebSocket <span className="text-slate-400">{wsUrl}</span>
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Host source{' '}
-                    {connection.source === 'auto'
-                      ? 'auto-detected LAN IP'
-                      : connection.source === 'env'
-                        ? 'VITE_APP_HOST override'
-                        : 'browser URL'}
-                  </p>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Invite URL</span>
+                  <button onClick={() => copyText(phoneUrl, 'url')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</button>
                 </div>
+                <p className="font-mono text-[10px] text-slate-400 truncate" title={phoneUrl}>{phoneUrl}</p>
+              </div>
 
-                <div className="surface-soft p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="eyebrow">Connected Devices</p>
-                    <span className="ui-pill">{cameras.length} linked</span>
-                  </div>
-                  {cameras.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-400">
-                      Waiting for phones to join...
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {cameras.map((camera, index) => (
-                        <div
-                          key={camera.id}
-                          className="rounded-xl border border-slate-700/80 bg-slate-950/70 px-3 py-2"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ background: ballTone[index % ballTone.length] }}
-                              />
-                              <span className="text-sm font-semibold text-slate-100">
-                                {camera.label}
-                              </span>
-                            </div>
-                            <span
-                              className={`ui-pill px-2 py-0.5 text-[10px] ${camera.status === 'live' ? 'border-lime-400/35 text-lime-100' : 'border-amber-300/35 text-amber-100'}`}
-                            >
-                              {camera.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              <div className="space-y-1 pt-1 border-t border-[var(--line)]">
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium block">WebSocket</span>
+                <p className="font-mono text-[10px] text-slate-400 truncate" title={wsUrl}>{wsUrl}</p>
+                <p className="text-[9px] text-slate-600 mt-1">
+                  Source: {connection.source === 'auto' ? 'LAN Auto' : connection.source === 'env' ? 'Env Override' : 'Browser'}
+                </p>
               </div>
             </div>
           </section>
-        </div>
-      ) : null}
 
-      <section className="surface-panel p-6">
-        <button
-          disabled={!canProceed}
-          onClick={() => {
-            advancePhase();
-            navigate('/calibration');
-          }}
-          className="btn-main w-full"
-        >
-          Continue to Calibration
-        </button>
-      </section>
+          {/* Right Column: Recording Profile & Connected Devices */}
+          <div className="flex flex-col gap-6 glitch-in stagger-2" style={{ animationDelay: '100ms' }}>
+            <section className="surface-panel p-5 space-y-3">
+              <p className="eyebrow">Recording Profile</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {recordingProfiles.map((profile) => (
+                  <button
+                    key={profile.mode}
+                    type="button"
+                    disabled={profile.disabled}
+                    onClick={() => setRecordingMode(profile.mode)}
+                    className={`border p-4 text-left transition-all rounded-xl flex flex-col gap-1.5 ${
+                      recordingMode === profile.mode
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)] shadow-sm'
+                        : 'border-[var(--line)] bg-[var(--bg-panel)] text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                    } ${profile.disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+                  >
+                    <div className={`text-xs font-semibold tracking-wide ${recordingMode === profile.mode ? 'text-[var(--accent)]' : 'text-slate-200'}`}>
+                      {profile.label}
+                    </div>
+                    <div className="text-[11px] leading-relaxed opacity-80 hidden md:block">
+                      {profile.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="surface-panel p-5 flex flex-col">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="eyebrow">Connected Devices</p>
+                <span className="ui-pill">{cameras.length} linked</span>
+              </div>
+              
+              <div className="surface-soft p-5 rounded-xl">
+                {cameras.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center text-center space-y-4 py-8">
+                    <div className="h-10 w-10 rounded-full border border-dashed border-slate-600 flex items-center justify-center animate-spin-slow">
+                      <span className="h-2 w-2 rounded-full bg-slate-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-300">Waiting for phones to join...</p>
+                      <p className="text-[11px] text-slate-500 mt-1 max-w-[220px] mx-auto">Scan the QR code or open the Invite URL on a mobile device.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {cameras.map((camera, index) => (
+                      <div
+                        key={camera.id}
+                        className="rounded-xl border border-[var(--line)] bg-[var(--bg-base)] p-3.5 flex flex-col gap-3 shadow-sm"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className="h-2 w-2 rounded-full shadow-sm"
+                              style={{ background: ballTone[index % ballTone.length], boxShadow: `0 0 8px ${ballTone[index % ballTone.length]}` }}
+                            />
+                            <span className="text-sm font-semibold tracking-wide text-slate-200 truncate max-w-[120px]">
+                              {camera.label}
+                            </span>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider shrink-0 ${
+                              camera.status === 'live' 
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' 
+                                : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                            }`}
+                          >
+                            {camera.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

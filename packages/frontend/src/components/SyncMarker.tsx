@@ -53,30 +53,29 @@ export function SyncMarkerComponent({ config }: { config?: Partial<SyncMarkerRen
   }, [mergedConfig]);
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={wrapperRef} className="h-full w-full overflow-hidden bg-black">
+    <div className="relative h-full w-full bg-black overflow-hidden rounded-2xl">
+      <div ref={wrapperRef} className="h-full w-full">
         <canvas ref={canvasRef} className="h-full w-full" />
       </div>
 
-      {isInterrupted ? (
-        <div className="absolute inset-0 grid place-items-center rounded-2xl bg-black/80 p-6 text-center">
+      {isInterrupted && (
+        <div className="absolute inset-0 grid place-items-center bg-black/90 p-6 text-center backdrop-blur-sm">
           <div className="max-w-md space-y-2">
-            <p className="text-xs font-black uppercase tracking-[0.22em] text-rose-200/90">
+            <p className="text-[10px] font-bold tracking-widest uppercase text-[var(--accent)]">
               Sync marker paused
             </p>
-            <p className="text-sm text-slate-200">
-              This tab was backgrounded. Keep the marker visible during recording and restart the
-              capture to maintain a continuous timeline.
+            <p className="text-xs text-slate-300">
+              Tab backgrounded. Keep this visible during recording to maintain timing accuracy.
             </p>
           </div>
         </div>
-      ) : null}
+      )}
 
-      {import.meta.env.DEV && metrics ? (
-        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-2 py-1 font-mono text-[10px] text-slate-200">
+      {import.meta.env.DEV && metrics && (
+        <div className="pointer-events-none absolute bottom-2 right-2 rounded border border-white/10 bg-black/80 px-2 py-1 font-mono text-[9px] text-white/50 shadow-xl">
           rAF {metrics.intervalMs.toFixed(2)}ms | jitter {metrics.jitterMs.toFixed(2)}ms
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

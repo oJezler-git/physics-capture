@@ -216,34 +216,34 @@ export const DebugPage = () => {
   };
 
   return (
-    <div className="flex min-h-[100dvh] w-full overflow-hidden bg-slate-950 text-slate-100">
+    <div className="flex min-h-[100dvh] w-full overflow-hidden bg-[var(--bg-base)] text-slate-100">
       <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
         {/* Left Side: Massive Preview */}
         <div className="flex min-h-0 flex-col bg-black relative items-center justify-center">
           {/* Subtle overlay header */}
           <div className="absolute top-6 left-8 z-30 pointer-events-none opacity-40">
-            <h1 className="text-xl font-black uppercase tracking-[0.2em] text-slate-500">
-              Debug Lab <span className="text-orange-600/50">//</span> {mode.toUpperCase()}
+            <h1 className="text-xl font-medium uppercase tracking-wider text-slate-400">
+              Debug Lab <span className="text-[var(--accent)]/50">//</span> {mode.toUpperCase()}
             </h1>
           </div>
 
           <div className="absolute top-6 right-8 z-30 flex gap-2">
             <button
               onClick={() => setMode('sam2')}
-              className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
                 mode === 'sam2'
-                  ? 'bg-orange-600 text-white shadow-lg'
-                  : 'bg-slate-900 text-slate-500 border border-slate-800'
+                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
               }`}
             >
               SAM2
             </button>
             <button
               onClick={() => setMode('sync')}
-              className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
                 mode === 'sync'
-                  ? 'bg-sky-600 text-white shadow-lg'
-                  : 'bg-slate-900 text-slate-500 border border-slate-800'
+                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
               }`}
             >
               Sync
@@ -285,11 +285,11 @@ export const DebugPage = () => {
               )}
 
               {isFrameMissing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-amber-500 backdrop-blur-sm">
-                  <div className="text-center">
-                    <p className="text-6xl mb-4">⚠️</p>
-                    <p className="font-black uppercase tracking-[0.3em] text-lg">Omitted Frame</p>
-                    <p className="text-[10px] opacity-40 mt-2 font-mono">
+                <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-panel)]/80 text-[var(--accent)] backdrop-blur-md">
+                  <div className="text-center rounded-3xl border border-[var(--accent)] p-10 bg-[var(--bg-surface)] shadow-sm">
+                    <p className="text-5xl mb-5">⚠️</p>
+                    <p className="font-medium uppercase tracking-widest text-lg">Omitted Frame</p>
+                    <p className="text-[11px] opacity-60 mt-3 font-mono">
                       PHYSICAL_IDX: {safeFrame}
                     </p>
                   </div>
@@ -321,27 +321,27 @@ export const DebugPage = () => {
           )}
 
           {hasFrameMismatch && (
-            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-500/60 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity">
+            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-amber-400 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-sm">
               Sparse Dataset: {frameCount - actualFileCount} missing
             </div>
           )}
         </div>
 
         {/* Right Side: All Controls */}
-        <aside className="custom-scrollbar overflow-y-auto border-l border-slate-800 bg-slate-900/50 p-8 space-y-10">
+        <aside className="custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] p-8 space-y-10">
           <section className="space-y-6">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
               Experiment
             </h3>
 
             <div className="space-y-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
                   Experiment
                 </label>
                 <div className="flex gap-2">
                   <select
-                    className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
+                    className="flex-1 rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2.5 text-[11px] font-mono outline-none focus:border-[var(--accent)] transition-colors"
                     value={selectedExp}
                     onChange={(e) => {
                       setSelectedExp(e.target.value);
@@ -358,19 +358,19 @@ export const DebugPage = () => {
                   </select>
                   <button
                     onClick={fetchExperiments}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 hover:bg-slate-700"
+                    className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 hover:text-[var(--accent)] transition-colors"
                   >
                     🔄
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
                   SAM2 Model
                 </label>
                 <select
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
+                  className="w-full rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2.5 text-[11px] font-mono outline-none focus:border-[var(--accent)] transition-colors"
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                 >
@@ -388,21 +388,21 @@ export const DebugPage = () => {
                     resetPhysics();
                     setPhysicsError(null);
                   }}
-                  className="rounded-lg border border-slate-700 bg-slate-800 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
+                  className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] py-2.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
                 >
                   Clear
                 </button>
                 <button
                   onClick={handleRunTrack}
                   disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
-                  className={`rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${status === 'tracking' ? 'bg-slate-800 text-slate-500' : 'bg-orange-600 text-white hover:bg-orange-500 shadow-lg shadow-orange-900/20'}`}
+                  className="btn-main py-2.5 text-[10px]"
                 >
                   {status === 'tracking' ? 'Processing...' : 'Run SAM2 + Physics'}
                 </button>
                 <button
                   onClick={handleRunPhysics}
                   disabled={physicsStatus === 'computing' || !selectedExp}
-                  className={`rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${physicsStatus === 'computing' ? 'bg-slate-800 text-slate-500' : 'bg-sky-600 text-white hover:bg-sky-500 shadow-lg shadow-sky-900/20'}`}
+                  className="btn-alt py-2.5 text-[10px]"
                 >
                   {physicsStatus === 'computing' ? 'Testing Physics...' : 'Run Physics'}
                 </button>
@@ -411,7 +411,7 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
               Playback
             </h3>
 
@@ -428,18 +428,18 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
               Seed Controls
             </h3>
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 p-2">
+              <div className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
                 <button
                   type="button"
                   onClick={() => setSeedMode('click')}
-                  className={`flex-1 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                  className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
                     seedMode === 'click'
-                      ? 'bg-orange-600 text-white shadow-lg'
-                      : 'text-slate-500 hover:text-slate-300'
+                      ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   Tap
@@ -447,22 +447,22 @@ export const DebugPage = () => {
                 <button
                   type="button"
                   onClick={() => setSeedMode('bbox')}
-                  className={`flex-1 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                  className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
                     seedMode === 'bbox'
-                      ? 'bg-orange-600 text-white shadow-lg'
-                      : 'text-slate-500 hover:text-slate-300'
+                      ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   Box
                 </button>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <div className="rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
                     Seeds Placed
                   </span>
-                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-xs text-slate-200">
+                  <span className="rounded-md bg-[var(--accent)]/10 border border-[var(--accent)]/50 px-2.5 py-1 font-mono text-[11px] text-[var(--accent)] font-medium">
                     {seeds.filter((s) => s.frameIdx === safeFrame).length} / {maxBalls}
                   </span>
                 </div>
@@ -471,30 +471,30 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Monitor</h3>
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Monitor</h3>
             <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800">
-                <span className="block text-[10px] text-slate-500 uppercase">Res</span>
-                <span className="text-lg font-bold">
+              <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
+                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">Res</span>
+                <span className="text-lg font-medium text-slate-200 mt-1">
                   {dims.width}x{dims.height}
                 </span>
               </div>
-              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800">
-                <span className="block text-[10px] text-slate-500 uppercase">Status</span>
-                <span className="text-[10px] font-bold uppercase text-orange-500 truncate">
+              <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
+                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">Status</span>
+                <span className="text-[10px] font-medium tracking-wider uppercase text-[var(--accent)] truncate mt-1.5 block">
                   {status}
                 </span>
               </div>
             </div>
             {status === 'tracking' && (
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-sky-400">
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
                   <span>Analyzing Video</span>
                   <span className="font-mono">{Math.round(progress * 100)}%</span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full border border-slate-800 bg-slate-950">
+                <div className="h-2 w-full overflow-hidden rounded-full border border-[var(--line)] bg-[var(--bg-base)]">
                   <div
-                    className="h-full bg-gradient-to-r from-sky-500 to-orange-500 transition-all duration-300"
+                    className="h-full bg-[var(--accent)] transition-all duration-300"
                     style={{ width: `${progress * 100}%` }}
                   />
                 </div>
@@ -503,28 +503,28 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Physics</h3>
-            {physicsError ? (
-              <div className="rounded-xl border border-rose-500/40 bg-rose-950/80 px-4 py-3 text-xs text-rose-200">
-                <span className="font-black opacity-60 mr-2">ERROR:</span>
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Physics</h3>
+            {physicsError && (
+              <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-xs font-medium text-[var(--accent)] shadow-sm">
+                <span className="font-bold opacity-70 mr-2">ERROR:</span>
                 {physicsError}
               </div>
-            ) : null}
-            {ballConfigs.length === 0 ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
+            )}
+            {ballConfigs.length === 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-medium text-amber-200 shadow-sm">
                 No session mass profile found. Physics will use a 50 g / 1 g fallback for the
                 tracked balls.
               </div>
-            ) : null}
+            )}
             {physicsStatus === 'computing' ? (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-950/40 px-4 py-5 text-xs text-sky-100">
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-5 text-xs font-medium text-sky-200 shadow-sm">
                 Recomputing physics from the latest SAM2 tracks...
               </div>
             ) : physicsResult ? (
-              <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
-                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+              <div className="space-y-4 rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-6 shadow-sm">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                    <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                       Momentum
                     </span>
                     <span className="mt-1 block text-sm font-semibold text-slate-100">
@@ -536,8 +536,8 @@ export const DebugPage = () => {
                       %
                     </span>
                   </div>
-                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
-                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                    <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                       Restitution
                     </span>
                     <span className="mt-1 block text-sm font-semibold text-slate-100">
@@ -549,9 +549,9 @@ export const DebugPage = () => {
                     </span>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
-                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                    <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                       KE Before
                     </span>
                     <span className="mt-1 block text-sm font-semibold text-slate-100">
@@ -562,8 +562,8 @@ export const DebugPage = () => {
                       )}
                     </span>
                   </div>
-                  <div className="rounded-lg border border-slate-800 bg-black/40 p-3">
-                    <span className="block text-[10px] uppercase tracking-widest text-slate-500">
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                    <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                       KE After
                     </span>
                     <span className="mt-1 block text-sm font-semibold text-slate-100">
@@ -575,17 +575,17 @@ export const DebugPage = () => {
                     </span>
                   </div>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {physicsResult.balls.map((ball) => (
                     <div
                       key={`debug-physics-ball-${ball.ballId}`}
-                      className="rounded-lg border border-slate-800 bg-black/30 px-3 py-2 text-[11px] text-slate-300"
+                      className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] px-4 py-3 text-[11px] text-slate-300"
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <span className="font-bold uppercase tracking-widest text-slate-500">
+                        <span className="font-medium uppercase tracking-wider text-slate-400">
                           Ball {ball.ballId + 1}
                         </span>
-                        <span className="font-mono text-slate-400">
+                        <span className="font-mono text-slate-300">
                           v{' '}
                           {formatWithUncertainty(ball.v_before.value, ball.v_before.uncertainty, 3)}{' '}
                           {'->'}{' '}
@@ -597,7 +597,7 @@ export const DebugPage = () => {
                 </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-5 text-xs text-slate-500">
+              <div className="rounded-3xl border border-dashed border-[var(--line)] bg-[var(--bg-panel)] px-6 py-8 text-center text-[11px] font-medium tracking-wide text-slate-400">
                 Run SAM2 tracking first, then physics will be computed from the saved tracks.
               </div>
             )}

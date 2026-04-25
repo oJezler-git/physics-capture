@@ -181,25 +181,32 @@ export const RecordingPage = () => {
       : 0;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 rise-in">
+    <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6">
       {!isRecording && (
-        <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-6 transition-all duration-300">
-          <div>
-            <p className="eyebrow">Phase 03 - Capture</p>
-            <h1 className="mt-1 text-3xl">Record Experiment Run</h1>
-            <p className="subtle-copy mt-2">Session {experimentId?.slice(0, 8).toUpperCase()}</p>
+        <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 transition-all duration-300 glitch-in stagger-1">
+          <div className="space-y-1">
+            <p className="eyebrow">Step 3/4</p>
+            <h1 className="text-2xl sm:text-3xl">Capture</h1>
+            <p className="subtle-copy max-w-2xl text-xs">
+              Session {experimentId?.slice(0, 8).toUpperCase()} • Mode:{' '}
+              {recordingMode === 'legacy'
+                ? 'Legacy'
+                : recordingMode === 'browser-high'
+                  ? 'Browser high'
+                  : 'Extreme'}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex rounded-xl border border-slate-700 bg-slate-950/80 p-1">
+            <div className="flex border border-[var(--line)] bg-[var(--bg-panel)] p-1 rounded-2xl">
               <button
                 type="button"
                 onClick={() => setCaptureSource('live')}
                 disabled={liveRecordableCameras.length === 0}
-                className={`rounded-lg px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition ${
+                className={`rounded-xl px-4 py-1.5 text-[10px] font-semibold tracking-wide transition-all ${
                   captureSource === 'live'
-                    ? 'bg-sky-500/20 text-sky-100'
-                    : 'text-slate-300 hover:text-slate-100'
+                    ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
                 } ${liveRecordableCameras.length === 0 ? 'cursor-not-allowed opacity-50' : ''}`}
               >
                 Live Capture
@@ -207,27 +214,30 @@ export const RecordingPage = () => {
               <button
                 type="button"
                 onClick={() => setCaptureSource('manual')}
-                className={`rounded-lg px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition ${
+                className={`rounded-xl px-4 py-1.5 text-[10px] font-semibold tracking-wide transition-all ${
                   captureSource === 'manual'
-                    ? 'bg-sky-500/20 text-sky-100'
-                    : 'text-slate-300 hover:text-slate-100'
+                    ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Manual Upload
               </button>
             </div>
-            <span className="ui-pill">
-              Capture mode:{' '}
-              {recordingMode === 'legacy'
-                ? 'Legacy'
-                : recordingMode === 'browser-high'
-                  ? 'Browser high'
-                  : 'Extreme preview'}
-            </span>
-            {captureSource === 'live' ? (
+
+            {frameCount !== null ? (
+              <button
+                onClick={() => {
+                  advancePhase();
+                  navigate('/tracking');
+                }}
+                className="btn-main px-6 py-2"
+              >
+                Continue to Tracking
+              </button>
+            ) : captureSource === 'live' ? (
               <button
                 onClick={handleStart}
-                className="btn-main"
+                className="btn-main px-6 py-2"
                 disabled={uploadPhase !== 'idle' || liveRecordableCameras.length === 0}
               >
                 Start Recording
@@ -235,10 +245,10 @@ export const RecordingPage = () => {
             ) : (
               <button
                 onClick={handleManualUpload}
-                className="btn-main"
+                className="btn-main px-6 py-2"
                 disabled={uploadPhase !== 'idle'}
               >
-                Upload Selected Videos
+                Upload & Proceed
               </button>
             )}
           </div>
@@ -246,74 +256,146 @@ export const RecordingPage = () => {
       )}
 
       {isRecording && (
-        <div className="flex items-center justify-between rounded-2xl border border-rose-400/25 bg-rose-500/10 px-6 py-4 animate-pulse">
-          <div className="flex items-center gap-3">
-            <div className="h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]" />
-            <span className="font-mono text-xl font-bold tracking-tight text-rose-100 uppercase">
+        <div className="flex items-center justify-between rounded-3xl border border-[var(--accent)] bg-[var(--accent)]/10 px-6 py-4 animate-pulse slide-up">
+          <div className="flex items-center gap-4">
+            <div className="h-4 w-4 rounded-full bg-[var(--accent)] shadow-[0_0_15px_var(--accent)]" />
+            <span className="font-mono text-xl font-bold tracking-tight text-[var(--accent)]">
               Live Capture: {formatTime(elapsed)}
             </span>
           </div>
           <button
             onClick={handleStop}
-            className="rounded-xl border border-rose-300/40 bg-black/40 px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-rose-100 transition-all hover:bg-rose-500/20"
+            className="rounded-xl border border-[var(--accent)] bg-[var(--accent)] px-6 py-2 text-sm font-semibold tracking-wide text-zinc-950 transition-all hover:bg-[var(--accent-hover)]"
           >
             End Recording & Extract
           </button>
         </div>
       )}
 
-      <div className={`grid gap-6 ${isRecording ? 'grid-cols-1' : 'lg:grid-cols-[1.8fr_1fr]'}`}>
-        <section
-          className={`surface-panel p-5 ${isRecording ? 'h-[75vh]' : 'h-[400px] lg:h-[500px]'}`}
-        >
-          {!isRecording && (
-            <div className="mb-3 flex items-center justify-between">
-              <p className="eyebrow">Visual Sync Lane</p>
-              <span className="ui-pill">
-                {captureSource === 'manual' ? 'Manual Upload' : 'Idle'}
-              </span>
+      <div
+        className={`grid gap-6 ${isRecording ? 'grid-cols-1' : 'lg:grid-cols-[5fr_3fr]'} items-start`}
+      >
+        <div className="flex flex-col gap-6">
+          <section
+            className={`surface-panel overflow-hidden glitch-in stagger-2 ${isRecording ? 'h-[75vh]' : 'h-[300px] lg:h-[400px]'}`}
+          >
+            {!isRecording && (
+              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+                <p className="eyebrow">Visual Sync</p>
+                <span className="ui-pill text-[9px]">
+                  {captureSource === 'manual' ? 'Manual Upload' : 'Idle'}
+                </span>
+              </div>
+            )}
+            <div className={`h-full ${!isRecording ? 'pb-4 px-4' : ''}`}>
+              <SyncMarkerComponent config={SYNC_CONFIG} />
             </div>
+          </section>
+
+          {!isRecording && captureSource === 'live' && (
+            <section className="surface-panel p-5 glitch-in stagger-3">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="eyebrow">Live Monitors</p>
+                <span className="ui-pill text-[9px]">{cameras.length} sources</span>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {cameras.map((camera, index) => (
+                  <div
+                    key={camera.id}
+                    className="surface-soft overflow-hidden rounded-xl border border-[var(--line)]"
+                  >
+                    <div className="relative aspect-video bg-[var(--bg-base)]">
+                      {camera.stream ? (
+                        <video
+                          autoPlay
+                          playsInline
+                          muted
+                          className="h-full w-full object-cover"
+                          ref={(element) => {
+                            if (element) element.srcObject = camera.stream;
+                          }}
+                        />
+                      ) : (
+                        <div className="grid h-full w-full place-items-center text-[9px] font-medium tracking-wider uppercase text-slate-500">
+                          Negotiating stream...
+                        </div>
+                      )}
+                      <div className="absolute left-2 top-2 rounded-md border border-[var(--line)] bg-black/40 px-2 py-1 text-[9px] font-semibold tracking-widest uppercase text-slate-100 backdrop-blur-md">
+                        Cam {index + 1}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-1.5 text-[9px] text-slate-400">
+                      <span>{camera.label}</span>
+                      <span className="capitalize">{camera.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
-          <div className="h-full">
-            <SyncMarkerComponent config={SYNC_CONFIG} />
-          </div>
-        </section>
+        </div>
 
         {!isRecording && (
-          <section className="surface-panel flex min-h-[420px] flex-col p-5">
-            {captureSource === 'manual' ? (
-              <>
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="eyebrow">Manual Video Ingest</p>
-                  <span className="ui-pill">
-                    {manualSlots} slot{manualSlots > 1 ? 's' : ''}
-                  </span>
+          <div className="flex flex-col gap-6" style={{ animationDelay: '100ms' }}>
+            {captureSource === 'manual' && (
+              <section className="surface-panel flex flex-col p-5 glitch-in stagger-3">
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="eyebrow">Manual Video Uploads</p>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setManualSlots((count) => Math.min(3, count + 1))}
+                      className="btn-alt p-1.5 text-[9px]"
+                      disabled={manualSlots >= 3}
+                    >
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualSlots((count) => Math.max(1, count - 1))}
+                      className="btn-alt p-1.5 text-[9px]"
+                      disabled={manualSlots <= 1}
+                    >
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M20 12H4"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <div className="mb-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setManualSlots((count) => Math.min(3, count + 1))}
-                    className="btn-alt px-3 py-1.5 text-[10px]"
-                    disabled={manualSlots >= 3}
-                  >
-                    Add Slot
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setManualSlots((count) => Math.max(1, count - 1))}
-                    className="btn-alt px-3 py-1.5 text-[10px]"
-                    disabled={manualSlots <= 1}
-                  >
-                    Remove Slot
-                  </button>
-                </div>
-                <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto pr-1">
+
+                <div className="space-y-3">
                   {Array.from({ length: manualSlots }, (_, index) => {
                     const camera = cameras[index];
                     const file = manualFiles[index];
                     return (
-                      <div key={`manual-slot-${index}`} className="surface-soft space-y-2 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
+                      <div
+                        key={`manual-slot-${index}`}
+                        className="surface-soft space-y-2 p-3 rounded-xl border border-[var(--line)]"
+                      >
+                        <p className="text-[9px] font-semibold tracking-wider uppercase text-slate-400">
                           {camera?.label ?? `Cam ${index + 1}`}
                         </p>
                         <input
@@ -323,126 +405,65 @@ export const RecordingPage = () => {
                             const selectedFile = event.currentTarget.files?.[0] ?? null;
                             handleManualFileChange(index, selectedFile);
                           }}
-                          className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-slate-100 hover:file:bg-slate-600"
+                          className="block w-full text-[10px] text-slate-300 file:mr-2 file:rounded-lg file:border-0 file:bg-[var(--bg-panel)] file:px-2 file:py-1 file:text-[9px] file:font-semibold file:text-slate-100 hover:file:bg-slate-700"
                         />
-                        <p className="text-[11px] text-slate-400 truncate">
+                        <p className="text-[9px] text-slate-400 truncate">
                           {file ? file.name : 'No file selected'}
                         </p>
                       </div>
                     );
                   })}
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="eyebrow">Live Monitors</p>
-                  <span className="ui-pill">{cameras.length} sources</span>
-                </div>
-
-                <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto pr-1">
-                  {cameras.map((camera, index) => (
-                    <div key={camera.id} className="surface-soft overflow-hidden">
-                      <div className="relative aspect-video bg-black">
-                        {camera.stream ? (
-                          <video
-                            autoPlay
-                            playsInline
-                            muted
-                            className="h-full w-full object-cover"
-                            ref={(element) => {
-                              if (element) element.srcObject = camera.stream;
-                            }}
-                          />
-                        ) : (
-                          <div className="grid h-full w-full place-items-center text-xs uppercase tracking-[0.18em] text-slate-500">
-                            Negotiating stream...
-                          </div>
-                        )}
-                        <div className="absolute left-2 top-2 rounded border border-black/30 bg-black/55 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-100">
-                          Cam {index + 1}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-400">
-                        <span>{camera.label}</span>
-                        <span>{camera.status}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
+              </section>
             )}
 
-            <div className="mt-4 border-t border-slate-800 pt-4">
-              {uploadError ? (
-                <div className="mb-3 rounded-xl border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-                  {uploadError}
-                </div>
-              ) : null}
-              {frameCount !== null ? (
-                <button
-                  onClick={() => {
-                    advancePhase();
-                    navigate('/tracking');
-                  }}
-                  className="btn-main w-full"
-                >
-                  Continue to Tracking
-                </button>
-              ) : uploadPhase === 'uploading' ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span className="uppercase tracking-[0.14em]">Uploading footage</span>
-                    <span className="font-mono">{overallUploadPct}%</span>
+            <section className="surface-panel p-5 glitch-in stagger-4">
+              <p className="eyebrow mb-4">Status & Pipeline</p>
+
+              <div className="space-y-4">
+                {uploadError && (
+                  <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-xs font-medium text-[var(--accent)]">
+                    {uploadError}
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-300"
-                      style={{ width: `${overallUploadPct}%` }}
-                    />
-                  </div>
-                </div>
-              ) : uploadPhase === 'extracting' ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <svg
-                      className="h-3.5 w-3.5 animate-spin text-sky-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
+                )}
+
+                {uploadPhase === 'uploading' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span className="font-medium tracking-wider uppercase">
+                        Uploading footage
+                      </span>
+                      <span className="font-mono text-[var(--accent)]">{overallUploadPct}%</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full border border-[var(--line)] bg-[var(--bg-panel)]">
+                      <div
+                        className="h-full bg-[var(--accent)] transition-all duration-300"
+                        style={{ width: `${overallUploadPct}%` }}
                       />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    <span className="uppercase tracking-[0.14em]">
-                      Extracting frames (ffmpeg)...
-                    </span>
+                    </div>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
-                    <div className="h-full w-full animate-pulse rounded-full bg-gradient-to-r from-sky-500/50 to-indigo-500/50" />
+                ) : uploadPhase === 'extracting' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                      <div className="w-3 h-3 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                      <span className="font-medium tracking-wider uppercase">
+                        FFmpeg Extraction...
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full border border-[var(--line)] bg-[var(--bg-panel)]">
+                      <div className="h-full w-full animate-pulse bg-[var(--accent)]" />
+                    </div>
                   </div>
-                </div>
-              ) : isRecording ? (
-                <p className="text-center text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Capturing in progress
-                </p>
-              ) : (
-                <p className="text-center text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Awaiting frame extraction
-                </p>
-              )}
-            </div>
-          </section>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-4 border-2 border-dashed border-[var(--line)] rounded-2xl">
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                      {frameCount !== null ? 'Extraction Ready' : 'Awaiting footage'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         )}
       </div>
     </div>

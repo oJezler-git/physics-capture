@@ -15,7 +15,7 @@ import { downloadBlob, exportCSV, exportJSON, exportPDF } from '../lib/export';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import type { PhysicsResult } from '../types';
 
-const BALL_COLORS = ['#4cc3ff', '#9ad46f', '#ff7244'];
+const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
 
 const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
   `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
@@ -119,215 +119,213 @@ export const ResultsPage = () => {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 rise-in">
-      <header className="surface-panel space-y-4 p-7">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="eyebrow">Phase 05 - Results</p>
-            <h1 className="mt-1 text-3xl sm:text-4xl">Collision Output Report</h1>
-            <p className="subtle-copy mt-2">
-              Momentum, energy and velocity bands with uncertainty propagation.
-            </p>
-          </div>
+    <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6">
+      <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 transition-all duration-300 glitch-in stagger-1">
+        <div className="space-y-1">
+          <p className="eyebrow">Collision Analysis</p>
+          <h1 className="text-2xl sm:text-3xl">Final Report</h1>
+          <p className="subtle-copy max-w-2xl text-xs">
+            Momentum, energy and velocity bands with uncertainty propagation.
+          </p>
+        </div>
+        <div className="flex gap-3">
           <button
             onClick={handleComputePhysics}
             disabled={status === 'computing'}
-            className="btn-main"
+            className="btn-alt px-5 py-2 text-xs"
           >
-            {status === 'computing' ? 'Computing...' : 'Compute Physics'}
+            {status === 'computing' ? 'Recomputing...' : 'Recompute'}
           </button>
+          {physicsResult && (
+            <div className="flex gap-2">
+              <button onClick={handleExportCsv} className="btn-alt px-4 py-2 text-[10px]">
+                CSV
+              </button>
+              <button onClick={handleExportJson} className="btn-alt px-4 py-2 text-[10px]">
+                JSON
+              </button>
+              <button onClick={handleExportPdf} disabled={isExportingPdf} className="btn-main px-6 py-2 text-xs">
+                {isExportingPdf ? 'Saving...' : 'Export PDF'}
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
-      {error ? (
-        <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-100">
+      {error && (
+        <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-xs font-medium text-[var(--accent)]">
           {error}
         </div>
-      ) : null}
+      )}
 
       {!physicsResult ? (
-        <div className="surface-panel p-10 text-center text-slate-400">
+        <div className="surface-panel p-12 text-center text-slate-500 glitch-in stagger-2">
           {status === 'computing' ? (
-            <LoadingSkeleton lines={5} className="mx-auto max-w-xl text-left" />
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-8 h-8 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+              <p className="eyebrow">Generating Physics Model...</p>
+            </div>
           ) : (
-            'Run physics to generate collision metrics and exportable reports.'
+            <p className="eyebrow">Run physics to generate collision metrics.</p>
           )}
         </div>
       ) : (
-        <>
-          <div className="flex flex-wrap gap-3">
-            <button onClick={handleExportCsv} className="btn-alt py-2">
-              Export CSV
-            </button>
-            <button onClick={handleExportJson} className="btn-alt py-2">
-              Export JSON
-            </button>
-            <button onClick={handleExportPdf} disabled={isExportingPdf} className="btn-alt py-2">
-              {isExportingPdf ? 'Rendering PDF...' : 'Export PDF'}
-            </button>
+        <div className="space-y-6">
+          <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 glitch-in stagger-2">
+            <article className="surface-panel p-4 border-l-4 border-l-[var(--accent)]">
+              <p className="eyebrow text-[9px]">Momentum Conserved</p>
+              <p className="mt-2 text-xl font-bold text-slate-100">
+                {formatWithUncertainty(
+                  physicsResult.system.momentum_conserved_pct.value,
+                  physicsResult.system.momentum_conserved_pct.uncertainty,
+                  2,
+                )}
+                %
+              </p>
+            </article>
+            <article className="surface-panel p-4 border-l-4 border-l-sky-500">
+              <p className="eyebrow text-[9px]">Restitution Coeff (e)</p>
+              <p className="mt-2 text-xl font-bold text-slate-100">
+                {formatWithUncertainty(
+                  physicsResult.system.coeff_of_restitution.value,
+                  physicsResult.system.coeff_of_restitution.uncertainty,
+                  3,
+                )}
+              </p>
+            </article>
+            <article className="surface-panel p-4 border-l-4 border-l-emerald-500">
+              <p className="eyebrow text-[9px]">Collision Point</p>
+              <p className="mt-2 text-xl font-bold text-slate-100">
+                Frame {physicsResult.system.collision_frame_idx}
+              </p>
+            </article>
+            <article className="surface-panel p-4 border-l-4 border-l-amber-500">
+              <p className="eyebrow text-[9px]">System KE (Pre-Collision)</p>
+              <p className="mt-2 text-xl font-bold text-slate-100">
+                {physicsResult.system.ke_before_total.value.toFixed(4)} J
+              </p>
+            </article>
+          </section>
+
+          <div ref={exportRef} className="grid gap-6 lg:grid-cols-[1fr_350px] items-start">
+            <div className="space-y-6">
+              <section className="surface-panel p-5 glitch-in stagger-3">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg">Velocity Dynamics</h2>
+                  <span className="ui-pill text-[9px]">Time-Series Uncertainty</span>
+                </div>
+                <div className="space-y-8">
+                  {chartSeries.map((series) => (
+                    <div key={`chart-${series.ballId}`} className="h-[200px] w-full">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: series.color }} />
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Ball {series.ballId + 1} Velocity (m/s)
+                        </p>
+                      </div>
+                      <ResponsiveContainer>
+                        <LineChart
+                          data={series.rows}
+                          margin={{ top: 5, right: 5, left: -20, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#25364e" vertical={false} />
+                          <XAxis
+                            dataKey="timeMs"
+                            stroke="#475569"
+                            fontSize={9}
+                            tickFormatter={(value) => `${(value / 1000).toFixed(2)}s`}
+                          />
+                          <YAxis stroke="#475569" fontSize={9} unit="m/s" />
+                          <Tooltip
+                            contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: '10px' }}
+                            labelFormatter={(value) => `t = ${(Number(value) / 1000).toFixed(3)}s`}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="velocity"
+                            stroke={series.color}
+                            dot={false}
+                            strokeWidth={2}
+                            isAnimationActive={false}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="vLow"
+                            stroke={series.color}
+                            strokeDasharray="4 4"
+                            dot={false}
+                            strokeWidth={1}
+                            opacity={0.3}
+                            isAnimationActive={false}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="vHigh"
+                            stroke={series.color}
+                            strokeDasharray="4 4"
+                            dot={false}
+                            strokeWidth={1}
+                            opacity={0.3}
+                            isAnimationActive={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <aside className="space-y-6" style={{ animationDelay: '150ms' }}>
+              <section className="surface-panel p-5 glitch-in stagger-3">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Momentum Flow</h3>
+                <div className="space-y-3">
+                  {physicsResult.balls.map((ball) => (
+                    <article key={`p-${ball.ballId}`} className="surface-soft p-3 rounded-xl border border-[var(--line)]">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-[9px] font-bold uppercase text-slate-500">Ball {ball.ballId + 1}</span>
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BALL_COLORS[ball.ballId % BALL_COLORS.length] }} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[8px] uppercase text-slate-500 mb-1">Before</p>
+                          <p className="text-xs font-mono text-slate-200">{ball.p_before.value.toFixed(3)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[8px] uppercase text-slate-500 mb-1">After</p>
+                          <p className="text-xs font-mono text-slate-200">{ball.p_after.value.toFixed(3)}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="surface-panel p-5 glitch-in stagger-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Energy (J)</h3>
+                <div className="space-y-3">
+                  {physicsResult.balls.map((ball) => (
+                    <article key={`ke-${ball.ballId}`} className="surface-soft p-3 rounded-xl border border-[var(--line)]">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-[9px] font-bold uppercase text-slate-500">Ball {ball.ballId + 1}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[8px] uppercase text-slate-500 mb-1">Pre</p>
+                          <p className="text-xs font-mono text-emerald-400">{ball.ke_before.value.toFixed(4)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[8px] uppercase text-slate-500 mb-1">Post</p>
+                          <p className="text-xs font-mono text-rose-400">{ball.ke_after.value.toFixed(4)}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </aside>
           </div>
-
-          <div ref={exportRef} className="surface-panel space-y-6 p-6">
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <article className="metric-card">
-                <p className="eyebrow">Momentum Conserved</p>
-                <p className="mt-2 text-lg font-semibold text-slate-100">
-                  {formatWithUncertainty(
-                    physicsResult.system.momentum_conserved_pct.value,
-                    physicsResult.system.momentum_conserved_pct.uncertainty,
-                    2,
-                  )}
-                  %
-                </p>
-              </article>
-              <article className="metric-card">
-                <p className="eyebrow">Coefficient of Restitution</p>
-                <p className="mt-2 text-lg font-semibold text-slate-100">
-                  {formatWithUncertainty(
-                    physicsResult.system.coeff_of_restitution.value,
-                    physicsResult.system.coeff_of_restitution.uncertainty,
-                    3,
-                  )}
-                </p>
-              </article>
-              <article className="metric-card">
-                <p className="eyebrow">Collision Frame</p>
-                <p className="mt-2 text-lg font-semibold text-slate-100">
-                  {physicsResult.system.collision_frame_idx}
-                </p>
-              </article>
-              <article className="metric-card">
-                <p className="eyebrow">Total KE Before (J)</p>
-                <p className="mt-2 text-lg font-semibold text-slate-100">
-                  {formatWithUncertainty(
-                    physicsResult.system.ke_before_total.value,
-                    physicsResult.system.ke_before_total.uncertainty,
-                    4,
-                  )}
-                </p>
-              </article>
-            </section>
-
-            <section className="surface-soft p-4">
-              <h2 className="text-xl">Velocity vs Time</h2>
-              <div className="mt-4 space-y-6">
-                {chartSeries.map((series) => (
-                  <div key={`chart-${series.ballId}`} className="h-[230px] w-full">
-                    <p className="mb-2 text-sm font-semibold text-slate-200">
-                      Ball {series.ballId + 1}
-                    </p>
-                    <ResponsiveContainer>
-                      <LineChart
-                        data={series.rows}
-                        margin={{ top: 10, right: 12, left: 0, bottom: 4 }}
-                      >
-                        <CartesianGrid strokeDasharray="4 4" stroke="#25364e" />
-                        <XAxis
-                          dataKey="timeMs"
-                          stroke="#8aa0c2"
-                          tickFormatter={(value) => `${(value / 1000).toFixed(2)}s`}
-                        />
-                        <YAxis stroke="#8aa0c2" unit=" m/s" />
-                        <Tooltip
-                          contentStyle={{ background: '#07101c', border: '1px solid #2a3a51' }}
-                          labelFormatter={(value) => `t=${(Number(value) / 1000).toFixed(3)} s`}
-                        />
-                        <Legend />
-                        <Line
-                          type="monotone"
-                          dataKey="velocity"
-                          stroke={series.color}
-                          dot={false}
-                          strokeWidth={2.2}
-                          name="velocity"
-                          isAnimationActive={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="vLow"
-                          stroke={series.color}
-                          strokeDasharray="4 4"
-                          dot={false}
-                          strokeWidth={1}
-                          name="-sigma"
-                          isAnimationActive={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="vHigh"
-                          stroke={series.color}
-                          strokeDasharray="4 4"
-                          dot={false}
-                          strokeWidth={1}
-                          name="+sigma"
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="grid gap-6 lg:grid-cols-2">
-              <article className="surface-soft p-4">
-                <h3 className="text-lg">Momentum Table</h3>
-                <table className="mt-3 w-full text-sm text-slate-200">
-                  <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                    <tr>
-                      <th className="py-2 text-left">Ball</th>
-                      <th className="py-2 text-left">Before (kg*m/s)</th>
-                      <th className="py-2 text-left">After (kg*m/s)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {physicsResult.balls.map((ball) => (
-                      <tr key={`momentum-${ball.ballId}`} className="border-t border-slate-800">
-                        <td className="py-2">Ball {ball.ballId + 1}</td>
-                        <td className="py-2">
-                          {formatWithUncertainty(ball.p_before.value, ball.p_before.uncertainty)}
-                        </td>
-                        <td className="py-2">
-                          {formatWithUncertainty(ball.p_after.value, ball.p_after.uncertainty)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </article>
-
-              <article className="surface-soft p-4">
-                <h3 className="text-lg">Energy Table</h3>
-                <table className="mt-3 w-full text-sm text-slate-200">
-                  <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                    <tr>
-                      <th className="py-2 text-left">Ball</th>
-                      <th className="py-2 text-left">Before (J)</th>
-                      <th className="py-2 text-left">After (J)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {physicsResult.balls.map((ball) => (
-                      <tr key={`energy-${ball.ballId}`} className="border-t border-slate-800">
-                        <td className="py-2">Ball {ball.ballId + 1}</td>
-                        <td className="py-2">
-                          {formatWithUncertainty(
-                            ball.ke_before.value,
-                            ball.ke_before.uncertainty,
-                            4,
-                          )}
-                        </td>
-                        <td className="py-2">
-                          {formatWithUncertainty(ball.ke_after.value, ball.ke_after.uncertainty, 4)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </article>
-            </section>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

@@ -41,21 +41,21 @@ function ConnectionStatus() {
 
   const tones = {
     connected: {
-      dot: 'bg-emerald-400',
-      ring: 'border-emerald-400/40',
-      text: 'text-emerald-200',
+      dot: 'bg-[#D4FF00]',
+      ring: 'border-[#D4FF00]',
+      text: 'text-[#D4FF00]',
       label: 'online',
     },
     reconnecting: {
-      dot: 'bg-amber-300',
-      ring: 'border-amber-300/40',
-      text: 'text-amber-100',
+      dot: 'bg-amber-400',
+      ring: 'border-amber-400',
+      text: 'text-amber-400',
       label: 'recovering',
     },
     disconnected: {
-      dot: 'bg-rose-400',
-      ring: 'border-rose-400/40',
-      text: 'text-rose-100',
+      dot: 'bg-[#FF2A00]',
+      ring: 'border-[#FF2A00]',
+      text: 'text-[#FF2A00]',
       label: 'offline',
     },
   };
@@ -69,9 +69,9 @@ function ConnectionStatus() {
         </div>
       )}
       <div
-        className={`fixed right-4 top-4 z-50 flex items-center gap-2 rounded-full border bg-slate-950/75 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-xl backdrop-blur-xl ${tone.ring} ${tone.text}`}
+        className={`fixed right-4 top-4 z-50 flex items-center gap-3 border-2 bg-black px-4 py-2 text-[12px] font-bold uppercase tracking-[0.1em] shadow-[4px_4px_0px_rgba(0,0,0,1)] ${tone.ring} ${tone.text}`}
       >
-        <div className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
+        <div className={`h-3 w-3 ${tone.dot}`} />
         <span>{tone.label}</span>
       </div>
     </>
@@ -120,10 +120,8 @@ function App() {
     const isFullBleed = location.pathname === '/debug' || location.pathname === '/tracking';
 
     return (
-      <div className="relative min-h-[100dvh] overflow-hidden selection:bg-orange-300/25">
-        <div className="pointer-events-none absolute -left-28 top-[-8rem] h-[24rem] w-[24rem] rounded-full bg-sky-400/10 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-[-12rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-orange-500/10 blur-3xl" />
-        {!isPhoneRoute ? <ConnectionStatus /> : null}
+      <div className="relative min-h-[100dvh] overflow-hidden selection:bg-[#FF2A00]/25 selection:text-white">
+        {!isPhoneRoute && <ConnectionStatus />}
         <ToastViewport />
 
         <main

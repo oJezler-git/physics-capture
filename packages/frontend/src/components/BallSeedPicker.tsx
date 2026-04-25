@@ -39,6 +39,44 @@ function normalizeBbox(draft: BboxDraft): BboxDraft {
   };
 }
 
+/**
+ * Computes the rendered image rect inside a container that uses object-contain.
+ * Returns { left, top, width, height } in pixels relative to the container.
+ */
+function getObjectContainRect(
+  containerWidth: number,
+  containerHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+): { left: number; top: number; width: number; height: number } {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return { left: 0, top: 0, width: containerWidth, height: containerHeight };
+  }
+
+  const containerAspect = containerWidth / containerHeight;
+  const imageAspect = imageWidth / imageHeight;
+
+  let renderWidth: number;
+  let renderHeight: number;
+
+  if (imageAspect > containerAspect) {
+    // Image is wider → letterboxed top/bottom
+    renderWidth = containerWidth;
+    renderHeight = containerWidth / imageAspect;
+  } else {
+    // Image is taller → pillarboxed left/right
+    renderHeight = containerHeight;
+    renderWidth = containerHeight * imageAspect;
+  }
+
+  return {
+    left: (containerWidth - renderWidth) / 2,
+    top: (containerHeight - renderHeight) / 2,
+    width: renderWidth,
+    height: renderHeight,
+  };
+}
+
 export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   cameraId,
   currentFrame,
@@ -57,7 +95,7 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   const [bboxDraft, setBboxDraft] = useState<BboxDraft | null>(null);
   const [isDraggingBbox, setIsDraggingBbox] = useState(false);
 
-  // Filter seeds by camera AND current frame so we only see markers on the "correct" frame
+  // Only show seeds for current camera + current frame
   const visibleSeeds = useMemo(
     () =>
       cameraId
@@ -74,23 +112,29 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
   const nextBallId = useMemo(() => {
     const used = new Set(cameraSeeds.map((seed) => seed.ballId));
     for (let index = 0; index < maxBalls; index += 1) {
-      if (!used.has(index)) {
-        return index;
-      }
+      if (!used.has(index)) return index;
     }
     return null;
   }, [cameraSeeds, maxBalls]);
 
-  function toNormalizedCoordinates(event: React.MouseEvent<HTMLDivElement>) {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return null;
+  /**
+   * Convert a mouse event to normalized [0,1] coordinates in IMAGE space,
+   * correctly accounting for object-contain letterbox/pillarbox bars.
+   */
+  function toImageNormalized(event: React.MouseEvent<HTMLDivElement>) {
+    const el = containerRef.current;
+    if (!el) return null;
 
-    const xRatio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-    const yRatio = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    const rect = el.getBoundingClientRect();
+    const imgRect = getObjectContainRect(rect.width, rect.height, frameWidth, frameHeight);
 
+    const xInImage = event.clientX - rect.left - imgRect.left;
+    const yInImage = event.clientY - rect.top - imgRect.top;
+
+    // Clamp to [0,1] — clicks outside the image area snap to the nearest edge
     return {
-      x: xRatio,
-      y: yRatio,
+      x: clamp(xInImage / imgRect.width, 0, 1),
+      y: clamp(yInImage / imgRect.height, 0, 1),
     };
   }
 
@@ -99,23 +143,14 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       setWarning('Select a camera before placing seeds.');
       return;
     }
-
     if (currentFrame !== seedFrameIdx) {
       setWarning(`Seeds must be placed on frame ${seedFrameIdx + 1}. Current: ${currentFrame + 1}`);
       return;
     }
-
     if (nextBallId === null) {
       setWarning(`Maximum ${maxBalls} balls reached for this camera.`);
       return;
     }
-
-    console.log('[Seed] Placing seed:', {
-      ballId: nextBallId,
-      x: point.x,
-      y: point.y,
-      frameIdx: currentFrame,
-    });
 
     const accepted = onAddSeed({
       ballId: nextBallId,
@@ -130,42 +165,38 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       setWarning(`Maximum ${maxBalls} balls reached for this camera.`);
       return;
     }
-
     setWarning(null);
   }
 
-  const handleClickSeed = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'click') return;
-    const point = toNormalizedCoordinates(event);
+    const point = toImageNormalized(event);
     if (point) placeSeed(point);
   };
 
   const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'bbox') return;
-    const point = toNormalizedCoordinates(event);
+    const point = toImageNormalized(event);
     if (!point) return;
-
     setIsDraggingBbox(true);
     setBboxDraft({ x0: point.x, y0: point.y, x1: point.x, y1: point.y });
   };
 
   const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || !isDraggingBbox || !bboxDraft) return;
-    const point = toNormalizedCoordinates(event);
+    const point = toImageNormalized(event);
     if (!point) return;
-
     setBboxDraft((prev) => (prev ? { ...prev, x1: point.x, y1: point.y } : prev));
   };
 
   const handleMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!interactive || mode !== 'bbox' || !bboxDraft) return;
-
-    const point = toNormalizedCoordinates(event);
+    const point = toImageNormalized(event);
     const finalDraft = point ? { ...bboxDraft, x1: point.x, y1: point.y } : bboxDraft;
     const normalized = normalizeBbox(finalDraft);
 
-    const minWidth = 6 / frameWidth;
-    const minHeight = 6 / frameHeight;
+    const minWidth = 6 / (frameWidth || 1280);
+    const minHeight = 6 / (frameHeight || 720);
     if (normalized.x1 - normalized.x0 < minWidth || normalized.y1 - normalized.y0 < minHeight) {
       setWarning('Draw a larger box to seed in bbox mode.');
       setBboxDraft(null);
@@ -174,67 +205,97 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
     }
 
     placeSeed(
-      {
-        x: (normalized.x0 + normalized.x1) / 2,
-        y: (normalized.y0 + normalized.y1) / 2,
-      },
+      { x: (normalized.x0 + normalized.x1) / 2, y: (normalized.y0 + normalized.y1) / 2 },
       [normalized.x0, normalized.y0, normalized.x1, normalized.y1],
     );
-
     setBboxDraft(null);
     setIsDraggingBbox(false);
   };
 
-  const draftRect = useMemo(() => {
-    if (!bboxDraft) return null;
-    return normalizeBbox(bboxDraft);
-  }, [bboxDraft]);
+  const draftRect = useMemo(() => (bboxDraft ? normalizeBbox(bboxDraft) : null), [bboxDraft]);
+
+  // SVG coordinate space — matches TrajectoryCanvas exactly
+  const svgW = frameWidth || 1280;
+  const svgH = frameHeight || 720;
+  // Seed dot radius: ~1.5% of image width so it scales with the image, min 10px equivalent
+  const dotR = Math.max(svgW * 0.015, 10);
 
   return (
     <div className="absolute inset-0">
-      {warning ? (
-        <div className="absolute bottom-4 left-4 z-20 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+      {warning && (
+        <div className="absolute bottom-4 left-4 z-40 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
           {warning}
         </div>
-      ) : null}
+      )}
 
+      {/* Invisible click/drag capture layer spanning the full container */}
       <div
         ref={containerRef}
-        className={`${className ?? ''} absolute inset-0 ${interactive ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'}`}
-        onClick={handleClickSeed}
+        className={`${className ?? ''} absolute inset-0 ${
+          interactive ? 'pointer-events-auto cursor-crosshair' : 'pointer-events-none'
+        }`}
+        onClick={handleClick}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         style={{ zIndex: 30 }}
+      />
+
+      {/*
+        SVG overlay that uses the SAME viewBox + preserveAspectRatio="xMidYMid meet"
+        as TrajectoryCanvas. This means seed markers are rendered in image-pixel space
+        and will NEVER drift regardless of container size, zoom level, or fullscreen.
+      */}
+      <svg
+        className="absolute inset-0 pointer-events-none"
+        viewBox={`0 0 ${svgW} ${svgH}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ zIndex: 31, width: '100%', height: '100%' }}
+        aria-hidden="true"
       >
         {visibleSeeds.map((seed) => {
-          const left = seed.x * 100;
-          const top = seed.y * 100;
+          const cx = seed.x * svgW;
+          const cy = seed.y * svgH;
           const color = BALL_COLORS[seed.ballId % BALL_COLORS.length];
 
           return (
-            <div
-              key={`${seed.cameraId}-${seed.ballId}-${seed.frameIdx}`}
-              className="absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/90 text-xs font-black text-white shadow-lg shadow-black/80"
-              style={{ left: `${left}%`, top: `${top}%`, backgroundColor: color }}
-            >
-              <div className="grid h-full w-full place-items-center">{seed.ballId + 1}</div>
-            </div>
+            <g key={`${seed.cameraId}-${seed.ballId}-${seed.frameIdx}`}>
+              {/* Soft glow halo */}
+              <circle cx={cx} cy={cy} r={dotR * 1.6} fill={color} opacity={0.15} />
+              {/* Outer white ring */}
+              <circle cx={cx} cy={cy} r={dotR + 2} fill="white" opacity={0.9} />
+              {/* Coloured fill */}
+              <circle cx={cx} cy={cy} r={dotR} fill={color} />
+              {/* Ball number label */}
+              <text
+                x={cx}
+                y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={dotR * 0.95}
+                fontWeight="900"
+                fill="white"
+                style={{ userSelect: 'none' }}
+              >
+                {seed.ballId + 1}
+              </text>
+            </g>
           );
         })}
 
-        {draftRect ? (
-          <div
-            className="absolute border-2 border-orange-400 bg-orange-500/10"
-            style={{
-              left: `${draftRect.x0 * 100}%`,
-              top: `${draftRect.y0 * 100}%`,
-              width: `${(draftRect.x1 - draftRect.x0) * 100}%`,
-              height: `${(draftRect.y1 - draftRect.y0) * 100}%`,
-            }}
+        {draftRect && (
+          <rect
+            x={draftRect.x0 * svgW}
+            y={draftRect.y0 * svgH}
+            width={(draftRect.x1 - draftRect.x0) * svgW}
+            height={(draftRect.y1 - draftRect.y0) * svgH}
+            fill="rgba(249,115,22,0.08)"
+            stroke="#fb923c"
+            strokeWidth="2"
+            strokeDasharray="6 3"
           />
-        ) : null}
-      </div>
+        )}
+      </svg>
     </div>
   );
 };
