@@ -32,9 +32,12 @@ class SAM2Tracker:
         # Resolve model selection: param > Env > hardcoded default
         config_file = os.getenv("SAM2_CONFIG_FILE", "").strip()
         checkpoint_path = os.getenv("SAM2_CHECKPOINT_PATH", "").strip()
+        enable_postprocessing = os.getenv("SAM2_ENABLE_POSTPROCESSING", "0").strip().lower() in {"1", "true", "yes", "on"}
         
         if not model_id:
             model_id = os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
+
+        enable_compile = os.getenv("SAM2_ENABLE_COMPILE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
         try:
             if config_file:
@@ -43,10 +46,11 @@ class SAM2Tracker:
                     config_file=config_file,
                     ckpt_path=ckpt,
                     device=str(self.device),
+                    apply_postprocessing=enable_postprocessing,
                 )
                 
                 # Optimized for modern GPUs (RTX 40 series)
-                if hasattr(torch, "compile") and "cuda" in str(self.device):
+                if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
                     try:
                         logger.info("[SAM2] Found modern torch; compiling model for 40-series speedup...")
                         self.predictor = torch.compile(self.predictor)
@@ -60,18 +64,23 @@ class SAM2Tracker:
             else:
                 self.predictor = build_sam2_video_predictor_hf(
                     model_id=model_id, 
-                    device=str(self.device)
+                    device=str(self.device),
+                    apply_postprocessing=enable_postprocessing,
                 )
                 
                 # Boost for modern hardware
-                if hasattr(torch, "compile") and "cuda" in str(self.device):
+                if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
                     try:
                         logger.info("[SAM2] Compiling HF model for maximum hardware utility...")
                         self.predictor = torch.compile(self.predictor)
                     except Exception as e:
                         logger.warn(f"[SAM2] torch.compile fallback: {e}")
                 
-                logger.info("Initialized SAM2 from Hugging Face model_id=%s", model_id)
+                logger.info(
+                    "Initialized SAM2 from Hugging Face model_id=%s postprocessing=%s",
+                    model_id,
+                    enable_postprocessing,
+                )
         except ModuleNotFoundError as exc:
             # Common setup miss: optional HF dependency for checkpoint download.
             if exc.name == "huggingface_hub":
@@ -87,7 +96,7 @@ class SAM2Tracker:
             logger.exception("SAM2 initialization failed; using fallback tracker: %s", exc)
             self.predictor = None
 
-    def track(self, frames_dir: Path, seeds: List[dict]):
+    def track(self, frames_dir: Path, seeds: List[dict], start_frame_idx: int = None, end_frame_idx: int = None):
         """
         frames_dir: Path to extracted PNG frames
         seeds: List of dicts with {ball_id, frame_idx, x, y}
@@ -98,12 +107,36 @@ class SAM2Tracker:
                 f"No image frames found in {frames_dir}. Expected .jpg, .jpeg, or .png files."
             )
 
+        frame_pairs = list(enumerate(frame_files))
+        if start_frame_idx is not None:
+            frame_pairs = [(idx, path) for idx, path in frame_pairs if idx >= int(start_frame_idx)]
+        if end_frame_idx is not None:
+            frame_pairs = [(idx, path) for idx, path in frame_pairs if idx <= int(end_frame_idx)]
+        if not frame_pairs:
+            raise ValueError(
+                f"No frames in requested range start={start_frame_idx} end={end_frame_idx} for {frames_dir}"
+            )
+
+        physical_indices = [idx for idx, _ in frame_pairs]
+        selected_frame_files = [path for _, path in frame_pairs]
+        index_to_local = {physical_idx: local_idx for local_idx, physical_idx in enumerate(physical_indices)}
+
         # Get image dimensions for coordinate normalization
-        with Image.open(frame_files[0]) as img:
+        with Image.open(selected_frame_files[0]) as img:
             width, height = img.size
 
+        logger.info(
+            "[SAM2] track_start camera_dir=%s range=%s-%s selected_frames=%d resolution=%dx%d",
+            frames_dir,
+            start_frame_idx if start_frame_idx is not None else 0,
+            end_frame_idx if end_frame_idx is not None else "end",
+            len(selected_frame_files),
+            width,
+            height,
+        )
+
         if self.predictor is None:
-            return self._fallback_track(frame_files, seeds)
+            return self._fallback_track(selected_frame_files, seeds, physical_indices)
 
         # Apply inference mode and autocast for massive hardware acceleration.
         autocast_ctx = (
@@ -112,7 +145,7 @@ class SAM2Tracker:
             else nullcontext()
         )
         with torch.inference_mode(), autocast_ctx:
-            with self._prepare_sam2_frames(frame_files) as sam2_frames_dir:
+            with self._prepare_sam2_frames(selected_frame_files) as sam2_frames_dir:
                 inference_state = self.predictor.init_state(video_path=str(sam2_frames_dir))
 
                 # Add initial seed points.
@@ -121,7 +154,10 @@ class SAM2Tracker:
                     x_px = float(seed["x"]) * width
                     y_px = float(seed["y"]) * height
 
-                    frame_idx = seed.get("frame_idx", 0)
+                    physical_seed_idx = int(seed.get("frame_idx", 0))
+                    frame_idx = index_to_local.get(physical_seed_idx)
+                    if frame_idx is None:
+                        continue
                     obj_id = seed["ball_id"] + 1 # 1-indexed for SAM2
 
                     points = np.array([[x_px, y_px]], dtype=np.float32)
@@ -135,12 +171,12 @@ class SAM2Tracker:
                     )
 
                 # Propagate through video.
-                total_frames = len(frame_files)
+                total_frames = len(selected_frame_files)
 
                 # Keep track of last valid positions to "hold" during occlusions/jumps
                 last_valid = {} # obj_id -> {x, y}
 
-                for frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
+                for local_frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
                     frame_results = []
                     for i, obj_id in enumerate(obj_ids):
                         # Keep mask on GPU for centroid calculation
@@ -174,17 +210,18 @@ class SAM2Tracker:
                             }
                         )
                     # Yield streaming item: (frame_int, points, progress_pct)
-                    idx = int(frame_idx)
-                    yield (idx, frame_results, idx / max(1, total_frames - 1))
+                    local_idx = int(local_frame_idx)
+                    physical_idx = physical_indices[local_idx]
+                    yield (physical_idx, frame_results, local_idx / max(1, total_frames - 1))
 
-    def _fallback_track(self, frame_files: List[Path], seeds: List[dict]):
+    def _fallback_track(self, frame_files: List[Path], seeds: List[dict], physical_indices: List[int]):
         """
         Deterministic fallback when SAM2 cannot initialize:
         repeats seed positions across all frames with low confidence.
         """
         logger.warning("Running fallback tracker for %d frames", len(frame_files))
         total_frames = len(frame_files)
-        for frame_idx, _ in enumerate(frame_files):
+        for local_idx, _ in enumerate(frame_files):
             frame_results = []
             for seed in seeds:
                 frame_results.append(
@@ -195,7 +232,11 @@ class SAM2Tracker:
                         "confidence": 0.25,
                     }
                 )
-            yield (frame_idx, frame_results, frame_idx / max(1, total_frames - 1))
+            yield (
+                physical_indices[local_idx],
+                frame_results,
+                local_idx / max(1, total_frames - 1),
+            )
 
     def _discover_frame_files(self, frames_dir: Path) -> List[Path]:
         frame_files = [
@@ -227,7 +268,8 @@ class SAM2Tracker:
         for src in frame_files:
             dst = sam2_dir / f"{src.stem}.jpg"
             with Image.open(src) as img:
-                img.convert("RGB").save(dst, format="JPEG", quality=95, optimize=True)
+                # Keep conversion memory pressure lower than optimize=True.
+                img.convert("RGB").save(dst, format="JPEG", quality=92, optimize=False)
 
         return _TemporaryFrameDir(sam2_dir, temp_dir)
 
