@@ -83,7 +83,7 @@ export class SyncMarkerRenderer {
     this.ctx = ctx;
 
     this.config = {
-      grayBits: 10,
+      grayBits: 8,
       gratingCycles: 4,
       phaseStepRad: TAU / 32,
       borderPx: 10,
@@ -142,24 +142,42 @@ export class SyncMarkerRenderer {
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, width, height);
 
+    // Quiet zone around the marker helps isolate it from scene clutter.
+    const quietMargin = Math.max(8, Math.floor(Math.min(width, height) * 0.06));
+    const availW = Math.max(1, width - 2 * quietMargin);
+    const availH = Math.max(1, height - 2 * quietMargin);
+    const targetAR = 2.0;
+    let markerW = availW;
+    let markerH = Math.floor(markerW / targetAR);
+    if (markerH > availH) {
+      markerH = availH;
+      markerW = Math.floor(markerH * targetAR);
+    }
+    const markerX = Math.floor((width - markerW) / 2);
+    const markerY = Math.floor((height - markerH) / 2);
+
     // High-contrast border system for robust detection + warp rectification.
-    // We use a white-black-white "sandwich" to ensure there are always strong gradients.
     const border = Math.max(2, Math.floor(this.config.borderPx));
 
     // 1. Outer White Border
     this.ctx.strokeStyle = '#ffffff';
     this.ctx.lineWidth = border;
-    this.ctx.strokeRect(border / 2, border / 2, width - border, height - border);
+    this.ctx.strokeRect(
+      markerX + border / 2,
+      markerY + border / 2,
+      markerW - border,
+      markerH - border,
+    );
 
     // 2. Inner Black "Dead Zone" (helps isolate content from border artifacts)
     const deadZone = Math.max(1, Math.floor(border * 0.4));
     this.ctx.strokeStyle = '#000000';
     this.ctx.lineWidth = deadZone;
     this.ctx.strokeRect(
-      border + deadZone / 2,
-      border + deadZone / 2,
-      width - 2 * border - deadZone,
-      height - 2 * border - deadZone,
+      markerX + border + deadZone / 2,
+      markerY + border + deadZone / 2,
+      markerW - 2 * border - deadZone,
+      markerH - 2 * border - deadZone,
     );
 
     // 3. Content Frame (Thin White)
@@ -167,33 +185,70 @@ export class SyncMarkerRenderer {
     this.ctx.strokeStyle = '#ffffff';
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(
-      contentFrame + 0.5,
-      contentFrame + 0.5,
-      width - 2 * contentFrame - 1,
-      height - 2 * contentFrame - 1,
+      markerX + contentFrame + 0.5,
+      markerY + contentFrame + 0.5,
+      markerW - 2 * contentFrame - 1,
+      markerH - 2 * contentFrame - 1,
     );
+
+    // Fiducial L-corners make orientation and localization less ambiguous.
+    const cornerArm = Math.max(18, Math.floor(Math.min(markerW, markerH) * 0.28));
+    const cornerThickness = Math.max(5, Math.floor(border * 1.0));
+    this.ctx.fillStyle = '#ffffff';
+    const drawLCorner = (x: number, y: number, sx: 1 | -1, sy: 1 | -1) => {
+      this.ctx.fillRect(x, y, sx * cornerArm, sy * cornerThickness);
+      this.ctx.fillRect(x, y, sx * cornerThickness, sy * cornerArm);
+    };
+    drawLCorner(markerX + border, markerY + border, 1, 1);
+    drawLCorner(markerX + markerW - border, markerY + border, -1, 1);
+    drawLCorner(markerX + markerW - border, markerY + markerH - border, -1, -1);
+    drawLCorner(markerX + border, markerY + markerH - border, 1, -1);
+
+    // Static checker signature to distinguish marker from generic rectangles.
+    const sigCells = 4;
+    const sigSize = Math.max(10, Math.floor(Math.min(markerW, markerH) * 0.09));
+    const sigCell = Math.max(2, Math.floor(sigSize / sigCells));
+    const sigW = sigCell * sigCells;
+    const sigH = sigCell * sigCells;
+    const sigX = markerX + markerW - border - sigW - 2;
+    const sigY = markerY + border + 2;
+    this.ctx.fillStyle = '#000000';
+    this.ctx.fillRect(sigX - 1, sigY - 1, sigW + 2, sigH + 2);
+    for (let yy = 0; yy < sigCells; yy++) {
+      for (let xx = 0; xx < sigCells; xx++) {
+        const bit = (xx + yy) % 2;
+        this.ctx.fillStyle = bit ? '#ffffff' : '#000000';
+        this.ctx.fillRect(sigX + xx * sigCell, sigY + yy * sigCell, sigCell, sigCell);
+      }
+    }
 
     // Inner content region.
     const pad = Math.max(0, Math.floor(this.config.paddingPx));
-    const innerX = contentFrame + pad;
-    const innerY = contentFrame + pad;
-    const innerW = Math.max(1, width - 2 * (contentFrame + pad));
-    const innerH = Math.max(1, height - 2 * (contentFrame + pad));
+    const innerX = markerX + contentFrame + pad;
+    const innerY = markerY + contentFrame + pad;
+    const innerW = Math.max(1, markerW - 2 * (contentFrame + pad));
+    const innerH = Math.max(1, markerH - 2 * (contentFrame + pad));
 
     const grayBits = Math.max(1, Math.min(16, Math.floor(this.config.grayBits)));
-    const grayRowH = Math.max(16, Math.floor(innerH * 0.28));
-    const gap = Math.max(4, Math.floor(innerH * 0.03));
-    const gratingY = innerY + grayRowH + gap;
-    const gratingH = Math.max(1, innerH - grayRowH - gap);
+    const grayRowH = Math.max(12, Math.floor(innerH * 0.18));
+    const gap = Math.max(4, Math.floor(innerH * 0.04));
+    const grayRow2Y = innerY + grayRowH + gap;
+    const gratingStartY = grayRow2Y + grayRowH + gap;
+    const gratingTotalH = Math.max(1, innerY + innerH - gratingStartY);
+    const gratingBandGap = Math.max(2, Math.floor(gratingTotalH * 0.08));
+    const gratingH = Math.max(1, Math.floor((gratingTotalH - gratingBandGap) / 2));
+    const gratingY1 = gratingStartY;
+    const gratingY2 = gratingY1 + gratingH + gratingBandGap;
 
     // Gray code: macro-time counter.
     const grayValue = grayEncode(this.displayFrame, grayBits);
     const cellW = innerW / grayBits;
     const cellPad = Math.max(0, Math.min(3, Math.floor(cellW * 0.08)));
 
-    // Background for gray strip.
+    // Background for gray strips.
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(innerX, innerY, innerW, grayRowH);
+    this.ctx.fillRect(innerX, grayRow2Y, innerW, grayRowH);
 
     for (let i = 0; i < grayBits; i++) {
       const bitIndex = grayBits - 1 - i;
@@ -202,19 +257,23 @@ export class SyncMarkerRenderer {
 
       const x0 = Math.floor(x + cellPad);
       const x1 = Math.floor(x + cellW - cellPad);
-      const y0 = Math.floor(innerY + cellPad);
-      const y1 = Math.floor(innerY + grayRowH - cellPad);
+      const y0a = Math.floor(innerY + cellPad);
+      const y1a = Math.floor(innerY + grayRowH - cellPad);
+      const y0b = Math.floor(grayRow2Y + cellPad);
+      const y1b = Math.floor(grayRow2Y + grayRowH - cellPad);
 
       this.ctx.fillStyle = bit ? '#ffffff' : '#000000';
-      this.ctx.fillRect(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+      this.ctx.fillRect(x0, y0a, Math.max(1, x1 - x0), Math.max(1, y1a - y0a));
+      this.ctx.fillRect(x0, y0b, Math.max(1, x1 - x0), Math.max(1, y1b - y0b));
 
       // Thin per-cell outline to help thresholding after compression.
       this.ctx.strokeStyle = 'rgba(255,255,255,0.18)';
       this.ctx.lineWidth = 1;
-      this.ctx.strokeRect(x0 + 0.5, y0 + 0.5, Math.max(1, x1 - x0) - 1, Math.max(1, y1 - y0) - 1);
+      this.ctx.strokeRect(x0 + 0.5, y0a + 0.5, Math.max(1, x1 - x0) - 1, Math.max(1, y1a - y0a) - 1);
+      this.ctx.strokeRect(x0 + 0.5, y0b + 0.5, Math.max(1, x1 - x0) - 1, Math.max(1, y1b - y0b) - 1);
     }
 
-    // Phased sine grating: micro-time within display frame.
+    // Phased sine gratings: micro-time within display frame with quadrature redundancy.
     const phase = phaseForFrame(this.displayFrame, this.config.phaseStepRad);
     const cycles = Math.max(1, Math.min(12, Math.floor(this.config.gratingCycles)));
 
@@ -223,7 +282,7 @@ export class SyncMarkerRenderer {
 
     const row = this.gratingCtx.createImageData(gratingW, 1);
     const data = row.data;
-    const amplitude = 0.45 * 255;
+    const amplitude = 0.48 * 255;
     const dc = 0.5 * 255;
     const omegaX = (TAU * cycles) / gratingW;
 
@@ -241,7 +300,24 @@ export class SyncMarkerRenderer {
 
     this.gratingCtx.putImageData(row, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
-    this.ctx.drawImage(this.gratingCanvas, innerX, gratingY, innerW, gratingH);
+    this.ctx.drawImage(this.gratingCanvas, innerX, gratingY1, innerW, gratingH);
+
+    // Same frequency, +90° phase for robust quadrature decode.
+    const rowQ = this.gratingCtx.createImageData(gratingW, 1);
+    const dataQ = rowQ.data;
+    for (let x = 0; x < gratingW; x++) {
+      const intensity = Math.max(
+        0,
+        Math.min(255, Math.round(dc + amplitude * Math.sin(omegaX * x + phase + Math.PI / 2))),
+      );
+      const idx = x * 4;
+      dataQ[idx] = intensity;
+      dataQ[idx + 1] = intensity;
+      dataQ[idx + 2] = intensity;
+      dataQ[idx + 3] = 255;
+    }
+    this.gratingCtx.putImageData(rowQ, 0, 0);
+    this.ctx.drawImage(this.gratingCanvas, innerX, gratingY2, innerW, gratingH);
 
     // Subtle inner frame to make the ROI boundary clear after rectification.
     this.ctx.strokeStyle = 'rgba(255,255,255,0.25)';

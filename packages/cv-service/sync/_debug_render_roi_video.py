@@ -48,48 +48,60 @@ def main() -> int:
 
     spec = sm.SyncMarkerSpec()
     
-    # Discover the "best" warp from probe frames
+    # Discover the "best" warp from probe frames using the same robust strategy
+    # as production decode (probe broadly, evaluate stability across the clip).
     print(f"Discovering warp for cam{cam_id}...")
-    
-    # Probe indices across the whole clip
-    max_probes = min(60, len(files))
+
+    max_probes = min(80, len(files))
     step = max(1, len(files) // max_probes)
-    probe_indices = list(range(0, len(files), step))[:max_probes]
+    probe_indices = list(
+        dict.fromkeys(
+            list(range(0, min(12, len(files))))
+            + list(range(0, len(files), step))
+            + list(range(max(0, len(files) - 12), len(files)))
+        )
+    )
+    eval_n = min(24, len(files))
+    eval_indices = sorted({int(round(v)) for v in np.linspace(0, len(files) - 1, num=eval_n)})
     
     best_H: Optional[np.ndarray] = None
     best_roi_size = (0, 0)
-    best_score = -1.0
+    best_ok = -1
+    best_score_sum = float("-inf")
     
-    for idx in probe_indices:
+    for idx in probe_indices[:max_probes]:
         img = cv2.imread(str(files[idx]))
-        if img is None: continue
+        if img is None:
+            continue
         built = sm._build_warp(img, spec)
-        if not built: continue
-        
+        if not built:
+            continue
+
         Hcand, (rw, rh) = built
-        
-        # Quick quality check on 3 more frames
+
+        # Evaluate candidate on clip-spanning checkpoints.
         ok_count = 0
         score_sum = 0.0
-        check_indices = [idx, (idx + 10) % len(files), (idx + 20) % len(files)]
-        for cidx in check_indices:
+        for cidx in eval_indices:
             cimg = cv2.imread(str(files[cidx]))
-            if cimg is None: continue
+            if cimg is None:
+                continue
             croi = cv2.warpPerspective(cimg, Hcand, (rw, rh))
             cg = cv2.cvtColor(croi, cv2.COLOR_BGR2GRAY)
             scored = sm._score_rectified_roi(cg, spec)
             if scored:
                 ok_count += 1
                 score_sum += scored[0]
-        
-        if ok_count > 0:
-            final_score = score_sum / ok_count * (ok_count / 3.0)
-            if final_score > best_score:
-                best_score = final_score
-                best_H = Hcand
-                best_roi_size = (rw, rh)
-        
-        if ok_count == 3: break # Good enough
+
+        if ok_count > best_ok or (ok_count == best_ok and score_sum > best_score_sum):
+            best_ok = int(ok_count)
+            best_score_sum = float(score_sum)
+            best_H = Hcand
+            best_roi_size = (rw, rh)
+
+        # Early exit when decode looks stable on most checkpoints.
+        if ok_count >= max(10, int(0.8 * len(eval_indices))):
+            break
 
     if best_H is None:
         raise SystemExit(f"Could not discover a stable sync marker warp in {frames_dir}")
@@ -130,7 +142,7 @@ def main() -> int:
             
         if gr is not None:
             phi, k, mag = gr
-            txt += f"P:{phi:.2f} M:{int(mag)} "
+            txt += f"P:{phi:.2f} M:{int(mag)} Mn:{(float(mag)/max(1, rw)):.2f} "
         else:
             txt += "P:ERR "
             

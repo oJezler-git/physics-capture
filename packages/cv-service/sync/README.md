@@ -57,12 +57,11 @@ Prints the mathematical results of the linear regression used for sub-millisecon
 ## Metric Definitions (F/G/P/M)
 
 - **F (Frame):** The camera's raw frame index.
-- **G (Gray Code):** The **Macro-time** counter (0-1023). Identifies which display frame was captured.
+- **G (Gray Code):** The **Macro-time** counter (default `0-255` with 8 Gray bits). Identifies which display frame was captured.
 - **P (Phase):** The **Micro-time** phase (0-6.28 rad). Provides sub-millisecond precision within a display frame.
-- **M (Magnitude):** The **Signal Strength** of the grating.
-  - `> 150`: Excellent.
-  - `80-120`: Good/Stable.
-  - `< 50`: Poor (Too blurry/dark, leads to `P:ERR`).
+- **M (Magnitude):** Raw grating projection strength. This value is **not normalized** and can be much larger than older builds (especially with the dual-band marker), so values in the hundreds or thousands are possible.
+- **Mn (Magnitude Normalized):** `M / ROI width`, shown in `_debug_roi_camN.mp4` overlays for easier comparison across runs.
+- Decoder gate currently rejects only when raw magnitude is below the internal minimum (`MIN_GRATING_MAGNITUDE = 80`), so use `P:ERR` and final fit RMS as the primary reliability indicators.
 
 ## Production CLI
 

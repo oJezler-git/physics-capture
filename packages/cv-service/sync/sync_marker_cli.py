@@ -31,7 +31,7 @@ def main() -> int:
     parser.add_argument("--sample-stride", type=int, default=5)
     parser.add_argument("--roi-width", type=int, default=400)
     parser.add_argument("--roi-height", type=int, default=200)
-    parser.add_argument("--gray-bits", type=int, default=10)
+    parser.add_argument("--gray-bits", type=int, default=8)
     parser.add_argument("--grating-cycles", type=int, default=4)
     parser.add_argument("--phase-step-rad", type=float, default=None)
     parser.add_argument("--debug", action="store_true")
