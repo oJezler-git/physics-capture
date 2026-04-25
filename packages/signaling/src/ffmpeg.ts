@@ -53,6 +53,11 @@ export async function extractFrames(
     ...(threads ? ["-threads", threads] : []),
     "-i",
     videoPath,
+    // Use variable-frame-rate sync mode for image extraction.
+    // This avoids CFR frame duplication and also avoids deprecated numeric `-vsync`.
+    // `vfr` drops frames with duplicate timestamps so encoders don't fail on non-monotonic PTS.
+    "-fps_mode",
+    "vfr",
     "-vf",
     filter,
     "-c:v",
