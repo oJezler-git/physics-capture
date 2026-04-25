@@ -98,69 +98,211 @@ def _border_contrast_score(roi_gray: np.ndarray) -> float:
     return float(max(0.0, min(1.0, contrast / 0.35)))
 
 
+def _corner_fiducial_score(roi_gray: np.ndarray) -> float:
+    """
+    Heuristic score in [0,1] for bright corner fiducials. This complements border contrast
+    and helps reject generic rectangular distractors.
+    """
+    h, w = roi_gray.shape[:2]
+    if h < 16 or w < 16:
+        return 0.0
+
+    pad = max(2, int(0.04 * float(min(h, w))))
+    arm = max(4, int(0.14 * float(min(h, w))))
+    arm = min(arm, max(4, min(h, w) // 3))
+    t = max(2, int(0.035 * float(min(h, w))))
+
+    def _corner_l_metrics(x0: int, y0: int, sx: int, sy: int) -> tuple[float, float]:
+        x1 = x0 + sx * arm
+        y1 = y0 + sy * arm
+        xh0, xh1 = sorted((x0, x1))
+        yh0, yh1 = sorted((y0, y0 + sy * t))
+        xv0, xv1 = sorted((x0, x0 + sx * t))
+        yv0, yv1 = sorted((y0, y1))
+        h_patch = roi_gray[max(0, yh0) : min(h, yh1), max(0, xh0) : min(w, xh1)]
+        v_patch = roi_gray[max(0, yv0) : min(h, yv1), max(0, xv0) : min(w, xv1)]
+        if h_patch.size == 0 or v_patch.size == 0:
+            return 0.0, 0.0
+        l_mean = 0.5 * (float(h_patch.mean()) + float(v_patch.mean()))
+
+        # Nearby ring region used as local context.
+        rb = max(2, t)
+        xb0, xb1 = sorted((x0 - sx * rb, x1 + sx * rb))
+        yb0, yb1 = sorted((y0 - sy * rb, y1 + sy * rb))
+        box = roi_gray[max(0, yb0) : min(h, yb1), max(0, xb0) : min(w, xb1)]
+        box_mean = float(box.mean()) if box.size else l_mean
+        return l_mean, max(0.0, l_mean - box_mean)
+
+    corners = [
+        (pad, pad, 1, 1),
+        (w - pad, pad, -1, 1),
+        (w - pad, h - pad, -1, -1),
+        (pad, h - pad, 1, -1),
+    ]
+
+    scores = []
+    for x0, y0, sx, sy in corners:
+        l_mean, local_boost = _corner_l_metrics(int(x0), int(y0), int(sx), int(sy))
+        whiteness = float(max(0.0, min(1.0, (l_mean - 120.0) / 110.0)))
+        contrast = float(max(0.0, min(1.0, local_boost / 45.0)))
+        scores.append(0.65 * whiteness + 0.35 * contrast)
+
+    return float(np.mean(scores)) if scores else 0.0
+
+
+def _signature_checker_score(roi_gray: np.ndarray) -> float:
+    """
+    Score for a tiny static checker signature near the top-right border.
+    """
+    h, w = roi_gray.shape[:2]
+    if h < 24 or w < 24:
+        return 0.0
+
+    sig_cells = 4
+    sig_w = max(8, int(0.08 * float(min(h, w))))
+    sig_h = sig_w
+    x1 = int(0.98 * w)
+    y0 = int(0.05 * h)
+    x0 = x1 - sig_w
+    y1 = y0 + sig_h
+    patch = roi_gray[max(0, y0) : min(h, y1), max(0, x0) : min(w, x1)]
+    if patch.size == 0 or patch.shape[0] < 4 or patch.shape[1] < 4:
+        return 0.0
+
+    small = cv2.resize(patch, (sig_cells, sig_cells), interpolation=cv2.INTER_AREA).astype(np.float64)
+    lo = float(np.min(small))
+    hi = float(np.max(small))
+    if not np.isfinite(lo) or not np.isfinite(hi) or (hi - lo) < 15.0:
+        return 0.0
+    norm = (small - lo) / (hi - lo)
+    expected = np.fromfunction(lambda yy, xx: ((xx + yy) % 2), (sig_cells, sig_cells), dtype=int).astype(np.float64)
+    err = float(np.mean(np.abs(norm - expected)))
+    return float(max(0.0, min(1.0, 1.0 - err)))
+
+
+def _extract_grating_signal(
+    roi_gray: np.ndarray,
+    *,
+    y0_frac: float,
+    y1_frac: float,
+    x0_frac: float = 0.10,
+    x1_frac: float = 0.90,
+) -> Optional[np.ndarray]:
+    h, w = roi_gray.shape[:2]
+    y0 = int(max(0.0, min(1.0, y0_frac)) * h)
+    y1 = int(max(0.0, min(1.0, y1_frac)) * h)
+    x0 = int(max(0.0, min(1.0, x0_frac)) * w)
+    x1 = int(max(0.0, min(1.0, x1_frac)) * w)
+    crop = roi_gray[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None
+
+    signal = crop.mean(axis=0).astype(np.float64)
+    signal -= float(signal.mean())
+    n = int(signal.shape[0])
+    if n < 16:
+        return None
+
+    # Detrend (remove lighting gradients) and window to reduce leakage.
+    x = np.linspace(-1.0, 1.0, num=n, dtype=np.float64)
+    a, b = np.polyfit(x, signal, 1)
+    signal = signal - (a * x + b)
+    signal = signal * np.hanning(n).astype(np.float64)
+    return signal
+
+
+def _project_grating_signal(signal: np.ndarray, *, cycles: int) -> Optional[tuple[float, float, float, int]]:
+    n = int(signal.shape[0])
+    if n < 16:
+        return None
+    xs = np.arange(n, dtype=np.float64)
+    cycle_candidates = sorted({k for k in (cycles - 1, cycles, cycles + 1) if 1 <= k <= 12})
+
+    best_mag = float("-inf")
+    best_a = 0.0
+    best_b = 0.0
+    best_k = int(cycles)
+    for k in cycle_candidates:
+        omega = (TAU * float(k)) / float(n)
+        ref_sin = np.sin(omega * xs)
+        ref_cos = np.cos(omega * xs)
+        a = float(np.dot(signal, ref_sin))
+        b = float(np.dot(signal, ref_cos))
+        mag = float(math.hypot(a, b))
+        if mag > best_mag:
+            best_mag = mag
+            best_a = a
+            best_b = b
+            best_k = int(k)
+    if not np.isfinite(best_mag):
+        return None
+    return float(best_a), float(best_b), float(best_mag), int(best_k)
+
+
 def _decode_grating_phase_mag(roi_gray: np.ndarray, grating_cycles: int) -> Optional[GratingResult]:
     h, w = roi_gray.shape[:2]
     if w < 8 or h < 8:
         logger.debug(f"Grating ROI too small: {w}x{h}")
         return None
-    cycles = int(grating_cycles)
-    if cycles <= 0:
-        cycles = 1
+    cycles = max(1, int(grating_cycles))
 
-    # Crop lower region where the grating is rendered.
-    y0 = int(0.45 * h)
-    y1 = int(0.92 * h)
-    x0 = int(0.10 * w)
-    x1 = int(0.90 * w)
-    crop = roi_gray[y0:y1, x0:x1]
-    if crop.size == 0:
-        logger.debug("Grating crop is empty")
+    # Two-band quadrature marker (bottom half), plus fallback to legacy single-band decode.
+    band_defs = [
+        (0.50, 0.67, 0.0),           # I band
+        (0.73, 0.92, TAU / 4.0),     # Q band (+90 degrees in renderer)
+        (0.45, 0.92, 0.0),           # legacy fallback
+    ]
+    aligned: list[tuple[float, float, float, int]] = []
+    for y0f, y1f, known_shift in band_defs:
+        signal = _extract_grating_signal(roi_gray, y0_frac=y0f, y1_frac=y1f)
+        if signal is None:
+            continue
+        projected = _project_grating_signal(signal, cycles=cycles)
+        if projected is None:
+            continue
+        a, b, mag, k_best = projected
+
+        # Align each band back to base phase phi by subtracting its known shift.
+        if known_shift != 0.0:
+            cs = math.cos(known_shift)
+            sn = math.sin(known_shift)
+            a_aligned = a * cs + b * sn
+            b_aligned = b * cs - a * sn
+        else:
+            a_aligned, b_aligned = a, b
+        aligned.append((float(a_aligned), float(b_aligned), float(mag), int(k_best)))
+
+    if not aligned:
+        logger.debug("Grating decode failed: no usable bands")
         return None
 
-    signal = crop.mean(axis=0).astype(np.float64)
-    signal -= float(signal.mean())
+    # Group by best cycle bin and choose the strongest aggregate.
+    grouped: dict[int, list[tuple[float, float, float]]] = {}
+    for a, b, mag, k in aligned:
+        grouped.setdefault(int(k), []).append((float(a), float(b), float(mag)))
 
-    # Detrend (remove lighting gradients) and window to reduce leakage.
-    x = np.linspace(-1.0, 1.0, num=signal.shape[0], dtype=np.float64)
-    a, b = np.polyfit(x, signal, 1)
-    signal = signal - (a * x + b)
-    signal = signal * np.hanning(signal.shape[0]).astype(np.float64)
+    best_k = cycles
+    best_vec_mag = float("-inf")
+    best_a = 0.0
+    best_b = 0.0
+    for k, vals in grouped.items():
+        sum_a = float(sum(v[0] for v in vals))
+        sum_b = float(sum(v[1] for v in vals))
+        vec_mag = float(math.hypot(sum_a, sum_b))
+        if vec_mag > best_vec_mag:
+            best_vec_mag = vec_mag
+            best_a = sum_a
+            best_b = sum_b
+            best_k = int(k)
 
-    n = int(signal.shape[0])
-    if n < 16:
-        logger.debug(f"Grating signal too short: {n}")
+    if not np.isfinite(best_vec_mag) or best_vec_mag < MIN_GRATING_MAGNITUDE:
+        logger.debug(f"Grating magnitude too low: {best_vec_mag:.2f} (min {MIN_GRATING_MAGNITUDE})")
         return None
 
-    xs = np.arange(n, dtype=np.float64)
-
-    # Compression / lens blur can slightly shift the effective spatial frequency. Search a small
-    # neighborhood around the configured cycles and pick the strongest response.
-    cycle_candidates = sorted({k for k in (cycles - 1, cycles, cycles + 1) if 1 <= k <= 12})
-    best_mag = float("-inf")
-    a_sin = 0.0
-    b_cos = 0.0
-    k_best = int(cycles)
-    for k in cycle_candidates:
-        omega = (TAU * float(k)) / float(n)
-        ref_sin = np.sin(omega * xs)
-        ref_cos = np.cos(omega * xs)
-        aa = float(np.dot(signal, ref_sin))
-        bb = float(np.dot(signal, ref_cos))
-        mag = float(math.hypot(aa, bb))
-        if mag > best_mag:
-            best_mag = mag
-            a_sin = aa
-            b_cos = bb
-            k_best = int(k)
-
-    if not np.isfinite(best_mag) or best_mag < MIN_GRATING_MAGNITUDE:
-        logger.debug(f"Grating magnitude too low: {best_mag:.2f} (min {MIN_GRATING_MAGNITUDE})")
-        return None
-
-    phi = float(math.atan2(b_cos, a_sin))
+    phi = float(math.atan2(best_b, best_a))
     if phi < 0:
         phi += TAU
-    return float(phi), int(k_best), float(best_mag)
+    return float(phi), int(best_k), float(best_vec_mag)
 
 
 def _score_rectified_roi(roi_gray: np.ndarray, spec: SyncMarkerSpec) -> Optional[ScoredROI]:
@@ -177,15 +319,23 @@ def _score_rectified_roi(roi_gray: np.ndarray, spec: SyncMarkerSpec) -> Optional
     _phi, k_best, mag = gr
 
     border = _border_contrast_score(roi_gray)
+    corner = _corner_fiducial_score(roi_gray)
+    signature = _signature_checker_score(roi_gray)
     gray_conf = float(np.mean(np.array(conf, dtype=np.float64))) / 255.0 if conf else 0.0
     mag_per = float(mag) / float(max(1, roi_gray.shape[1]))
-    score = 3.0 * border + 1.0 * gray_conf + 0.8 * math.log1p(max(0.0, mag_per))
+    score = (
+        2.0 * border
+        + 1.6 * corner
+        + 0.8 * signature
+        + 1.0 * gray_conf
+        + 0.8 * math.log1p(max(0.0, mag_per))
+    )
     return float(score), int(n_mod), float(mag), int(k_best)
 
 
 @dataclasses.dataclass(frozen=True)
 class SyncMarkerSpec:
-    gray_bits: int = 10
+    gray_bits: int = 8
     grating_cycles: int = 4
     phase_step_rad: float = TAU / 32
     roi_width_px: int = 400
@@ -250,6 +400,16 @@ def _find_candidate_quads(frame_bgr: np.ndarray) -> list[np.ndarray]:
         area = float(cv2.contourArea(contour))
         # Prefer larger markers to avoid locking onto tiny previews.
         if area < MIN_MARKER_AREA_FRAC * frame_area:
+            continue
+
+        # Ignore "camera frame border" contours that hug image edges and dominate the frame.
+        # These frequently appear as false quads under compression/sharpening and can cause
+        # a warp that is effectively the entire scene.
+        x, y, bw, bh = cv2.boundingRect(contour)
+        touches_edge = x <= 2 or y <= 2 or (x + bw) >= (w - 2) or (y + bh) >= (h - 2)
+        if area >= 0.90 * frame_area:
+            continue
+        if touches_edge and area >= 0.50 * frame_area:
             continue
 
         peri = cv2.arcLength(contour, True)
@@ -368,51 +528,50 @@ def _build_warp(frame_bgr: np.ndarray, spec: SyncMarkerSpec) -> Optional[WarpRes
         return None
     return best_H, (dst_w, dst_h)
 
-    return None
-
 
 def _decode_gray_bits(roi_gray: np.ndarray, gray_bits: int) -> Optional[int]:
+    obs = _read_gray_observation(roi_gray, gray_bits)
+    return None if obs is None else int(obs[2])
+
+
+def _read_gray_band(
+    roi_gray: np.ndarray,
+    *,
+    gray_bits: int,
+    y0_frac: float,
+    y1_frac: float,
+    x0_frac: float = 0.08,
+    x1_frac: float = 0.92,
+) -> Optional[tuple[list[int], list[float]]]:
     h, w = roi_gray.shape[:2]
-    if gray_bits <= 0 or w < gray_bits:
-        return None
-
-    # Use stable proportions matching the renderer.
-    # We want to be inside the white-black-white border system.
-    y0 = int(0.08 * h)
-    y1 = int(0.38 * h)
-    if y1 <= y0 + 8:
-        return None
-
-    x0 = int(0.10 * w)
-    x1 = int(0.90 * w)
-    if x1 <= x0 + gray_bits:
+    y0 = int(max(0.0, min(1.0, y0_frac)) * h)
+    y1 = int(max(0.0, min(1.0, y1_frac)) * h)
+    x0 = int(max(0.0, min(1.0, x0_frac)) * w)
+    x1 = int(max(0.0, min(1.0, x1_frac)) * w)
+    if y1 <= y0 + 8 or x1 <= x0 + int(gray_bits):
         return None
 
     strip = roi_gray[y0:y1, x0:x1]
-    cell_w = strip.shape[1] / gray_bits
+    if strip.size == 0:
+        return None
 
-    # Adaptive threshold per-frame for robustness to exposure/white balance.
-    _, strip_bin = cv2.threshold(strip, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    bits = []
-    for i in range(gray_bits):
+    thr, _ = cv2.threshold(strip, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    cell_w = strip.shape[1] / max(1, int(gray_bits))
+    bits: list[int] = []
+    conf: list[float] = []
+    for i in range(int(gray_bits)):
         cx0 = int(i * cell_w + 0.20 * cell_w)
         cx1 = int((i + 1) * cell_w - 0.20 * cell_w)
         if cx1 <= cx0:
             cx0 = int(i * cell_w)
             cx1 = int((i + 1) * cell_w)
-        cell = strip_bin[:, cx0:cx1]
+        cell = strip[:, cx0:cx1]
         if cell.size == 0:
             return None
-        # Majority vote for the cell.
-        white_frac = float((cell > 0).mean())
-        bits.append(1 if white_frac >= 0.5 else 0)
-
-    gray = 0
-    # Leftmost bit is MSB (matches frontend renderer).
-    for bit in bits:
-        gray = (gray << 1) | bit
-    return _gray_decode(gray)
+        mean = float(cell.mean())
+        bits.append(1 if mean > thr else 0)
+        conf.append(abs(mean - float(thr)))
+    return bits, conf
 
 
 def _read_gray_observation(
@@ -428,42 +587,33 @@ def _read_gray_observation(
         logger.debug(f"Gray Obs: ROI too small ({w}x{h}) or invalid bits ({gray_bits})")
         return None
 
-    y0 = int(0.05 * h)
-    y1 = int(0.35 * h)
-    if y1 <= y0 + 8:
-        logger.debug("Gray Obs: Vertical crop too small")
+    # Two redundant rows in V2 marker + one legacy fallback band.
+    # We fuse bit votes by confidence, which improves blur/compression tolerance.
+    rows: list[tuple[list[int], list[float]]] = []
+    for y0f, y1f in ((0.08, 0.24), (0.26, 0.42), (0.05, 0.35)):
+        row = _read_gray_band(roi_gray, gray_bits=int(gray_bits), y0_frac=y0f, y1_frac=y1f)
+        if row is not None:
+            rows.append(row)
+    if not rows:
+        logger.debug("Gray Obs: no usable row bands")
         return None
 
-    x0 = int(0.08 * w)
-    x1 = int(0.92 * w)
-    if x1 <= x0 + gray_bits:
-        logger.debug("Gray Obs: Horizontal crop too small")
-        return None
-
-    strip = roi_gray[y0:y1, x0:x1]
-    if strip.size == 0:
-        logger.debug("Gray Obs: Strip is empty")
-        return None
-
-    # Threshold for bit decisions.
-    thr, _ = cv2.threshold(strip, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    cell_w = strip.shape[1] / gray_bits
-
-    bits: list[int] = []
-    conf: list[float] = []
-    for i in range(gray_bits):
-        cx0 = int(i * cell_w + 0.20 * cell_w)
-        cx1 = int((i + 1) * cell_w - 0.20 * cell_w)
-        if cx1 <= cx0:
-            cx0 = int(i * cell_w)
-            cx1 = int((i + 1) * cell_w)
-        cell = strip[:, cx0:cx1]
-        if cell.size == 0:
-            logger.debug(f"Gray Obs: Cell {i} is empty")
-            return None
-        mean = float(cell.mean())
-        bits.append(1 if mean > thr else 0)
-        conf.append(abs(mean - float(thr)))
+    bits = []
+    conf = []
+    for i in range(int(gray_bits)):
+        w0 = 0.0
+        w1 = 0.0
+        for row_bits, row_conf in rows:
+            if i >= len(row_bits) or i >= len(row_conf):
+                continue
+            c = max(1e-6, float(row_conf[i]))
+            if int(row_bits[i]) == 1:
+                w1 += c
+            else:
+                w0 += c
+        chosen = 1 if w1 >= w0 else 0
+        bits.append(int(chosen))
+        conf.append(float(max(w0, w1) / max(1, len(rows))))
 
     gray = 0
     for bit in bits:
@@ -484,70 +634,11 @@ def _gray_encode_bits(value: int, bits: int) -> list[int]:
 
 
 def _decode_grating_phase(roi_gray: np.ndarray, grating_cycles: int) -> Optional[GratingPhase]:
-    h, w = roi_gray.shape[:2]
-    if w < 8 or h < 8:
-        logger.debug(f"Grating ROI too small: {w}x{h}")
+    out = _decode_grating_phase_mag(roi_gray, grating_cycles)
+    if out is None:
         return None
-    cycles = int(grating_cycles)
-    if cycles <= 0:
-        cycles = 1
-
-    # Crop lower region where the grating is rendered.
-    y0 = int(0.45 * h)
-    y1 = int(0.92 * h)
-    x0 = int(0.10 * w)
-    x1 = int(0.90 * w)
-    crop = roi_gray[y0:y1, x0:x1]
-    if crop.size == 0:
-        logger.debug("Grating crop is empty")
-        return None
-
-    signal = crop.mean(axis=0).astype(np.float64)
-    signal -= float(signal.mean())
-
-    # Detrend (remove lighting gradients) and window to reduce leakage.
-    x = np.linspace(-1.0, 1.0, num=signal.shape[0], dtype=np.float64)
-    a, b = np.polyfit(x, signal, 1)
-    signal = signal - (a * x + b)
-    signal = signal * np.hanning(signal.shape[0]).astype(np.float64)
-
-    n = int(signal.shape[0])
-    if n < 16:
-        logger.debug(f"Grating signal too short: {n}")
-        return None
-
-    xs = np.arange(n, dtype=np.float64)
-
-    # Compression / lens blur can slightly shift the effective spatial frequency. Search a small
-    # neighborhood around the configured cycles and pick the strongest response.
-    cycle_candidates = sorted({k for k in (cycles - 1, cycles, cycles + 1) if 1 <= k <= 12})
-    best_mag = float("-inf")
-    a_sin = 0.0
-    b_cos = 0.0
-    k_best = int(cycles)
-    for k in cycle_candidates:
-        omega = (TAU * float(k)) / float(n)
-        ref_sin = np.sin(omega * xs)
-        ref_cos = np.cos(omega * xs)
-        a = float(np.dot(signal, ref_sin))
-        b = float(np.dot(signal, ref_cos))
-        mag = float(math.hypot(a, b))
-        if mag > best_mag:
-            best_mag = mag
-            a_sin = a
-            b_cos = b
-            k_best = int(k)
-
-    if not np.isfinite(best_mag) or best_mag < MIN_GRATING_MAGNITUDE:
-        logger.debug(f"Grating magnitude too low: {best_mag:.2f} (min {MIN_GRATING_MAGNITUDE})")
-        return None
-
-    # Phase for signal ~ sin(ωx + φ): a_sin ∝ cosφ, b_cos ∝ sinφ.
-    phi = float(math.atan2(b_cos, a_sin))
-    if phi < 0:
-        phi += TAU
-    return phi, int(k_best)
-
+    phi, k_best, _mag = out
+    return float(phi), int(k_best)
 
 def _fit_line(xs: np.ndarray, ys: np.ndarray) -> LineFitResult:
     """
@@ -1064,3 +1155,4 @@ def generate_sync_for_experiment(
 
     results.sort(key=lambda r: r.camera_id)
     return results
+
