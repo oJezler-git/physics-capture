@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import shutil
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
@@ -145,7 +146,8 @@ class SAM2Tracker:
             else nullcontext()
         )
         with torch.inference_mode(), autocast_ctx:
-            with self._prepare_sam2_frames(selected_frame_files) as sam2_frames_dir:
+            use_isolated_dir = len(selected_frame_files) != len(frame_files)
+            with self._prepare_sam2_frames(selected_frame_files, isolate=use_isolated_dir) as sam2_frames_dir:
                 inference_state = self.predictor.init_state(video_path=str(sam2_frames_dir))
 
                 # Add initial seed points.
@@ -251,7 +253,7 @@ class SAM2Tracker:
         match = re.search(r"\d+", path.stem)
         return (int(match.group(0)) if match else 0, path.name.lower())
 
-    def _prepare_sam2_frames(self, frame_files: List[Path]):
+    def _prepare_sam2_frames(self, frame_files: List[Path], isolate: bool = False):
         """
         SAM2's video loader is happiest with a simple JPEG sequence. If the capture
         pipeline produced PNG frames, normalize them into a temporary JPEG folder
@@ -259,17 +261,25 @@ class SAM2Tracker:
         """
 
         needs_conversion = any(path.suffix.lower() == ".png" for path in frame_files)
-        if not needs_conversion:
+        if not needs_conversion and not isolate:
             return _PassthroughFrameDir(frame_files[0].parent)
 
         temp_dir = tempfile.TemporaryDirectory(prefix="sam2_frames_")
         sam2_dir = Path(temp_dir.name)
 
         for src in frame_files:
-            dst = sam2_dir / f"{src.stem}.jpg"
-            with Image.open(src) as img:
-                # Keep conversion memory pressure lower than optimize=True.
-                img.convert("RGB").save(dst, format="JPEG", quality=92, optimize=False)
+            if needs_conversion:
+                dst = sam2_dir / f"{src.stem}.jpg"
+                with Image.open(src) as img:
+                    # Keep conversion memory pressure lower than optimize=True.
+                    img.convert("RGB").save(dst, format="JPEG", quality=92, optimize=False)
+            else:
+                # Isolate a selected JPEG subset for SAM2 range-limited runs.
+                dst = sam2_dir / src.name
+                try:
+                    os.link(src, dst)
+                except Exception:
+                    shutil.copy2(src, dst)
 
         return _TemporaryFrameDir(sam2_dir, temp_dir)
 
