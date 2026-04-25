@@ -181,15 +181,16 @@ class SAM2Tracker:
                 for local_frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
                     frame_results = []
                     for i, obj_id in enumerate(obj_ids):
-                        # Keep mask on GPU for centroid calculation
+                        # Get dimensions of the actual mask returned by SAM2
+                        m_h, m_w = masks[i].shape[-2:]
                         centroid, area = self._get_centroid_and_area_gpu(masks[i])
 
                         obj_key = int(obj_id)
 
                         # If mask is present, update last valid and use high confidence
                         if area > 10: # Minimum pixel threshold
-                            x_norm = centroid[0] / width
-                            y_norm = centroid[1] / height
+                            x_norm = centroid[0] / m_w
+                            y_norm = centroid[1] / m_h
                             last_valid[obj_key] = {"x": x_norm, "y": y_norm}
                             confidence = 1.0
                         else:
