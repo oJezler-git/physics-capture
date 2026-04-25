@@ -19,6 +19,9 @@ export async function extractFrames(
 
   const isPng = outputFormat === "png";
   const outputCountFilter = (f: string) => f.endsWith(`.${outputFormat}`);
+  const maxDimRaw = process.env.FFMPEG_MAX_DIM?.trim();
+  const maxDim = maxDimRaw ? Number.parseInt(maxDimRaw, 10) : NaN;
+  const useResize = Number.isFinite(maxDim) && maxDim > 0;
 
   // ─── Relative output pattern ─────────────────────────────────────────────────
   // FFmpeg's image2 muxer interprets the colon in a Windows absolute path
@@ -28,16 +31,26 @@ export async function extractFrames(
   // the issue entirely: FFmpeg never sees a drive letter in the output path.
   const relativeOutputPattern = `%06d.${outputFormat}`;
 
+  const resizeFilter = useResize
+    ? `scale=${maxDim}:${maxDim}:force_original_aspect_ratio=decrease,`
+    : "";
+
   const filter = isPng
-    ? "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=rgb24"
-    : "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuvj420p";
+    ? `${resizeFilter}scale=trunc(iw/2)*2:trunc(ih/2)*2,format=rgb24`
+    : `${resizeFilter}scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuvj420p`;
 
   const codec = isPng ? "png" : "mjpeg";
+  const hwaccel = process.env.FFMPEG_HWACCEL?.trim();
+  const decoder = process.env.FFMPEG_VIDEO_DECODER?.trim();
+  const threads = process.env.FFMPEG_THREADS?.trim();
 
   const ffmpegArgs = [
     "-y",
     "-fflags",
     "+genpts",
+    ...(hwaccel ? ["-hwaccel", hwaccel] : []),
+    ...(decoder ? ["-c:v", decoder] : []),
+    ...(threads ? ["-threads", threads] : []),
     "-i",
     videoPath,
     "-vf",
@@ -60,7 +73,9 @@ export async function extractFrames(
       let stderrData = "";
 
       ffmpeg.stderr.on("data", (data) => {
-        stderrData += data.toString();
+        const chunk = data.toString();
+        console.error("[FFmpeg stderr]:", chunk);
+        stderrData += chunk;
       });
 
       ffmpeg.on("close", (code) => {
@@ -87,22 +102,28 @@ export async function extractFrames(
     const extractedFiles = await fs.promises.readdir(tempDir);
     const imageFiles = extractedFiles.filter(outputCountFilter);
 
-    await Promise.all(
-      imageFiles.map(async (file) => {
-        const src = path.join(tempDir, file);
-        const dest = path.join(framesDir, file);
-        // rename is O(1) when src and dest share the same volume (guaranteed
-        // above by co-locating tempDir next to framesDir).  The catch branch
-        // is a defensive fallback for any edge-case environment where the
-        // assumption doesn't hold.
-        try {
-          await fs.promises.rename(src, dest);
-        } catch {
-          await fs.promises.copyFile(src, dest);
-          await fs.promises.unlink(src);
-        }
-      }),
-    );
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < imageFiles.length; i += BATCH_SIZE) {
+      const batch = imageFiles.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (file) => {
+          const src = path.join(tempDir, file);
+          const dest = path.join(framesDir, file);
+          try {
+            await fs.promises.rename(src, dest);
+          } catch {
+            await fs.promises.copyFile(src, dest);
+            await fs.promises.unlink(src);
+          }
+        }),
+      );
+      console.log(
+        `[FFmpeg] Transferred ${Math.min(
+          i + BATCH_SIZE,
+          imageFiles.length,
+        )}/${imageFiles.length} frames`,
+      );
+    }
 
     return imageFiles.length;
   } finally {

@@ -332,7 +332,9 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     const experimentDir = path.join(EXPERIMENTS_DIR, experiment_id);
     const rawDir = path.join(experimentDir, "raw");
     const framesDir = path.join(experimentDir, "frames", `cam${camera_id}`);
-    const outputFormat = recording_mode === "legacy" ? "jpg" : "png";
+    // Use JPEG by default so CV tracking can consume extracted frames directly
+    // without expensive PNG->JPEG conversion.
+    const outputFormat = process.env.FRAME_EXTRACT_FORMAT === "png" ? "png" : "jpg";
     
     await fs.promises.mkdir(rawDir, { recursive: true });
     
@@ -342,12 +344,11 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     // Extraction
     const frameCount = await extractFrames(destPath, framesDir, outputFormat);
 
-    // Best-effort: generate sync.json once frames exist (safe to re-run; it overwrites atomically).
-    try {
-      await runSyncMarkerDecode(experiment_id);
-    } catch (err) {
+    // Best-effort: generate sync.json once frames exist. Run in the background
+    // so upload responses are not blocked by sync decode latency.
+    runSyncMarkerDecode(experiment_id).catch((err) => {
       console.warn("[sync] Sync Marker decode failed:", err);
-    }
+    });
 
     res.json({ experiment_id, camera_id, stored_path: destPath, frame_count: frameCount });
   } catch (err: any) {
@@ -581,19 +582,6 @@ app.post("/api/track", async (req, res) => {
       `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}, range=${start_frame_idx ?? 0}-${end_frame_idx ?? "end"}`,
     );
 
-    // Fetch frame map to translate tracker indices to physical indices
-  const experimentPath = path.resolve(EXPERIMENTS_DIR, experiment_id);
-  const cam0Dir = path.join(experimentPath, "frames", "cam0");
-  const frames = fs
-    .readdirSync(cam0Dir)
-    .filter((f: string) => /\.(jpg|jpeg|png)$/i.test(f))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-
-    const sequenceToPhysical = frames.map((filename) => {
-      const match = filename.match(/(\d+)/);
-      return match ? parseInt(match[0], 10) - 1 : 0;
-    });
-
     const trackMap = new Map<
       string,
       {
@@ -612,8 +600,8 @@ app.post("/api/track", async (req, res) => {
     let latestProgress = 0;
     let statusCount = 0;
 
-    for await (const status of trackBalls({ experiment_id, seeds, model_id })) {
-      const physicalFrame = sequenceToPhysical[status.frame] ?? status.frame;
+    for await (const status of trackBalls({ experiment_id, seeds, model_id, start_frame_idx, end_frame_idx })) {
+      const physicalFrame = status.frame;
 
       if (end_frame_idx !== undefined && physicalFrame > end_frame_idx) {
         break;
