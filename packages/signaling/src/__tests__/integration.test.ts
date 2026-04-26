@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, spawnSync, ChildProcess } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -26,7 +26,28 @@ function getFreePort(): Promise<number> {
   });
 }
 
-describe("Signaling <-> CV gRPC Integration", () => {
+const resolvePythonBin = (): string => {
+  const venvPython = path.resolve(
+    __dirname,
+    "../../../../.venv/Scripts/python.exe",
+  );
+  return (
+    process.env.PHYSICSCAPTURE_PYTHON_BIN ??
+    (fs.existsSync(venvPython) ? venvPython : "python")
+  );
+};
+
+const pythonBin = resolvePythonBin();
+const hasPythonGrpc = (() => {
+  const probe = spawnSync(pythonBin, ["-c", "import grpc; print('ok')"], {
+    encoding: "utf-8",
+  });
+  return probe.status === 0;
+})();
+
+const describeIntegration = hasPythonGrpc ? describe : describe.skip;
+
+describeIntegration("Signaling <-> CV gRPC Integration", () => {
   let pythonProcess: ChildProcess;
   let port: number;
   const tempExperimentsDir = path.join(__dirname, "temp_experiments");
@@ -38,14 +59,6 @@ describe("Signaling <-> CV gRPC Integration", () => {
       __dirname,
       "../../../cv-service/grpc_server.py",
     );
-    const venvPython = path.resolve(
-      __dirname,
-      "../../../../.venv/Scripts/python.exe",
-    );
-    const pythonBin =
-      process.env.PHYSICSCAPTURE_PYTHON_BIN ??
-      (fs.existsSync(venvPython) ? venvPython : "python");
-
     if (!fs.existsSync(tempExperimentsDir)) {
       fs.mkdirSync(tempExperimentsDir, { recursive: true });
     }
