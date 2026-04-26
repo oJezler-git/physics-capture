@@ -1,15 +1,14 @@
 import pytest
 import numpy as np
 import cv2
-import os
 import shutil
-from pathlib import Path
 from calibration.intrinsic import (
-    BOARD_SIZE,
-    SQUARE_SIZE_MM,
     detect_corners_in_dir,
     calibrate_camera_from_corners,
-    IntrinsicResult
+    IntrinsicResult,
+    choose_frame_stride,
+    TARGET_CALIBRATION_SECONDS,
+    ESTIMATED_MS_PER_FRAME,
 )
 from calibration.stereo import stereo_calibrate, StereoResult
 
@@ -140,3 +139,24 @@ def test_stereo_calibration_logic_mock(temp_experiment_dir):
     assert np.allclose(result.R, np.eye(3), atol=1e-2)
     # T should be small
     assert np.linalg.norm(result.T) < 5.0 
+
+
+def test_choose_frame_stride_defaults_to_full_scan_for_small_inputs():
+    assert choose_frame_stride(0) == 1
+    assert choose_frame_stride(5) == 1
+    assert choose_frame_stride(100) == 1
+
+
+def test_choose_frame_stride_scales_for_large_inputs():
+    # Budget is derived from target runtime and per-frame estimate.
+    budget = int((TARGET_CALIBRATION_SECONDS * 1000.0) / ESTIMATED_MS_PER_FRAME)
+    total_frames = budget * 7
+    stride = choose_frame_stride(total_frames)
+    assert stride >= 7
+
+
+def test_detect_corners_uses_adaptive_stride(temp_experiment_dir):
+    frames_dir = temp_experiment_dir / "frames" / "cam0"
+    generated = list(detect_corners_in_dir(frames_dir, stride=None))
+    # The fixture creates 50 frames; adaptive stride should sample all by default.
+    assert len(generated) == 50

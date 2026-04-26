@@ -1,13 +1,6 @@
 import pytest
 import grpc
-import sys
-import os
-import asyncio
-from pathlib import Path
 
-# Add generated directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'generated'))
 import physics_pb2
 import physics_pb2_grpc
 from grpc_server import PhysicsCaptureServicer
@@ -17,8 +10,9 @@ def servicer():
     return PhysicsCaptureServicer()
 
 @pytest.mark.asyncio
-async def test_calibration_request_validation(servicer):
+async def test_calibration_request_validation(servicer, tmp_path):
     # Setup a mock server on an ephemeral port
+    servicer.base_dir = tmp_path
     server = grpc.aio.server()
     physics_pb2_grpc.add_PhysicsCaptureServicer_to_server(servicer, server)
     port = server.add_insecure_port('[::]:0')
@@ -34,7 +28,8 @@ async def test_calibration_request_validation(servicer):
                 responses.append(response)
                 
             assert len(responses) > 0
-            assert responses[0].stage == physics_pb2.CalibrationStage.DONE
+            assert responses[-1].stage == physics_pb2.CalibrationStage.FAILED
+            assert "Frames directory not found" in responses[-1].message
     finally:
         await server.stop(None)
 

@@ -46,8 +46,14 @@ SUBPIX_CRITERIA = (
 # Minimum number of valid frames needed for a reliable calibration.
 MIN_VALID_FRAMES = 10
 
-# Stride: check every Nth frame to avoid redundant near-identical views.
-FRAME_STRIDE = 5
+# Default stride fallback when dynamic selection cannot be computed.
+FRAME_STRIDE_DEFAULT = 5
+
+# Adaptive stride tuning:
+# target runtime and estimated checkerboard-detection cost per sampled frame.
+TARGET_CALIBRATION_SECONDS = 30.0
+ESTIMATED_MS_PER_FRAME = 35.0
+MAX_FRAME_STRIDE = 60
 
 
 class IntrinsicResult(NamedTuple):
@@ -85,9 +91,30 @@ def _sorted_frame_files(frames_dir: Path) -> list[Path]:
     return sorted(candidates, key=lambda p: p.name)
 
 
+def choose_frame_stride(
+    total_frames: int,
+    target_seconds: float = TARGET_CALIBRATION_SECONDS,
+    estimated_ms_per_frame: float = ESTIMATED_MS_PER_FRAME,
+) -> int:
+    """
+    Pick a sampling stride that aims to keep checkerboard scanning under target_seconds.
+
+    We bound the stride so tiny datasets are fully scanned, and huge datasets do not
+    devolve into extremely sparse sampling.
+    """
+    if total_frames <= 0:
+        return 1
+    if target_seconds <= 0 or estimated_ms_per_frame <= 0:
+        return FRAME_STRIDE_DEFAULT
+
+    frame_budget = max(1, int((target_seconds * 1000.0) / estimated_ms_per_frame))
+    stride = int(np.ceil(total_frames / frame_budget)) if total_frames > frame_budget else 1
+    return int(max(1, min(MAX_FRAME_STRIDE, stride)))
+
+
 def detect_corners_in_dir(
     frames_dir: Path,
-    stride: int = FRAME_STRIDE,
+    stride: int | None = None,
 ) -> Generator[tuple[int, int, CornerObservation | None], None, None]:
     """
     Scan frames_dir for checkerboard corners.
@@ -112,7 +139,10 @@ def detect_corners_in_dir(
         logger.warning("No frames found in %s", frames_dir)
         return
 
-    objp = _object_points()
+    if stride is None:
+        stride = choose_frame_stride(total)
+    stride = max(1, int(stride))
+
     sampled = frame_files[::stride]
 
     for i, path in enumerate(sampled):
