@@ -204,10 +204,12 @@ export const BallSeedPicker: React.FC<BallSeedPickerProps> = ({
       return;
     }
 
-    placeSeed(
-      { x: (normalized.x0 + normalized.x1) / 2, y: (normalized.y0 + normalized.y1) / 2 },
-      [normalized.x0, normalized.y0, normalized.x1, normalized.y1],
-    );
+    placeSeed({ x: (normalized.x0 + normalized.x1) / 2, y: (normalized.y0 + normalized.y1) / 2 }, [
+      normalized.x0,
+      normalized.y0,
+      normalized.x1,
+      normalized.y1,
+    ]);
     setBboxDraft(null);
     setIsDraggingBbox(false);
   };

@@ -2,9 +2,9 @@ name: Full Project CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   signaling-and-frontend:
@@ -44,8 +44,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
-          cache: 'pip'
+          python-version: "3.13"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -54,10 +54,8 @@ jobs:
           pip install -r packages/cv-service/requirements.txt
           pip install pytest pytest-asyncio pillow pytest-cov
 
-
       - name: Run CV Service tests with coverage
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)/packages/cv-service
           # Note: We expect this to fail if coverage < 80% once we reach that goal
           python -m pytest --cov=packages/cv-service --cov-config=packages/cv-service/.coveragerc packages/cv-service/tests || echo "Coverage check failed, but continuing for now"
-

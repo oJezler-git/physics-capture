@@ -14,7 +14,10 @@ export async function extractFrames(
   // so that the final fs.rename calls below are guaranteed to be atomic,
   // in-place moves rather than cross-device copies.
   const sessionId = crypto.randomUUID();
-  const tempDir = path.join(path.dirname(framesDir), `.ffmpeg-tmp-${sessionId}`);
+  const tempDir = path.join(
+    path.dirname(framesDir),
+    `.ffmpeg-tmp-${sessionId}`,
+  );
   await fs.promises.mkdir(tempDir, { recursive: true });
 
   const isPng = outputFormat === "png";

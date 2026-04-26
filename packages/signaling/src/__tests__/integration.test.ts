@@ -1,10 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
-import net from 'net';
-import { createClient, setClient, computePhysics, runCalibration } from '../grpc-client.js';
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { spawn, ChildProcess } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+import net from "net";
+import {
+  createClient,
+  setClient,
+  computePhysics,
+  runCalibration,
+} from "../grpc-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +18,7 @@ function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
-    server.on('error', reject);
+    server.on("error", reject);
     server.listen(0, () => {
       const port = (server.address() as net.AddressInfo).port;
       server.close(() => resolve(port));
@@ -21,16 +26,22 @@ function getFreePort(): Promise<number> {
   });
 }
 
-describe('Signaling <-> CV gRPC Integration', () => {
+describe("Signaling <-> CV gRPC Integration", () => {
   let pythonProcess: ChildProcess;
   let port: number;
-  const tempExperimentsDir = path.join(__dirname, 'temp_experiments');
+  const tempExperimentsDir = path.join(__dirname, "temp_experiments");
 
   beforeAll(async () => {
     port = await getFreePort();
-    const serverPath = path.resolve(__dirname, '../../../cv-service/grpc_server.py');
-    const venvPython = path.resolve(__dirname, '../../../../.venv/Scripts/python.exe');
-    
+    const serverPath = path.resolve(
+      __dirname,
+      "../../../cv-service/grpc_server.py",
+    );
+    const venvPython = path.resolve(
+      __dirname,
+      "../../../../.venv/Scripts/python.exe",
+    );
+
     if (!fs.existsSync(tempExperimentsDir)) {
       fs.mkdirSync(tempExperimentsDir, { recursive: true });
     }
@@ -41,7 +52,7 @@ describe('Signaling <-> CV gRPC Integration', () => {
         ...process.env,
         PYTHON_GRPC_PORT: port.toString(),
         PYTHON_GRPC_BIND_ADDR: `127.0.0.1:${port}`,
-        PYTHONPATH: path.resolve(__dirname, '../../../cv-service'),
+        PYTHONPATH: path.resolve(__dirname, "../../../cv-service"),
       },
       // stdio: 'inherit' // Uncomment for debugging
     });
@@ -52,11 +63,11 @@ describe('Signaling <-> CV gRPC Integration', () => {
     for (let i = 0; i < maxRetries; i++) {
       try {
         await new Promise((resolve, reject) => {
-          const socket = net.connect(port, '127.0.0.1', () => {
+          const socket = net.connect(port, "127.0.0.1", () => {
             socket.end();
             resolve(true);
           });
-          socket.on('error', reject);
+          socket.on("error", reject);
         });
         connected = true;
         break;
@@ -66,11 +77,13 @@ describe('Signaling <-> CV gRPC Integration', () => {
     }
 
     if (!connected) {
-      throw new Error(`Failed to connect to Python gRPC server on port ${port} after ${maxRetries} retries`);
+      throw new Error(
+        `Failed to connect to Python gRPC server on port ${port} after ${maxRetries} retries`,
+      );
     }
 
     // Update gRPC client to point to the test server
-    const testClient = createClient('127.0.0.1', port.toString());
+    const testClient = createClient("127.0.0.1", port.toString());
     setClient(testClient);
   }, 20000);
 
@@ -83,10 +96,10 @@ describe('Signaling <-> CV gRPC Integration', () => {
     }
   });
 
-  it('should successfully call RunCalibration', async () => {
+  it("should successfully call RunCalibration", async () => {
     const generator = runCalibration({
-      experiment_id: 'test-exp',
-      camera_ids: [0]
+      experiment_id: "test-exp",
+      camera_ids: [0],
     });
 
     const results = [];
@@ -95,15 +108,17 @@ describe('Signaling <-> CV gRPC Integration', () => {
     }
 
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].stage).toBe('DONE');
+    expect(results[0].stage).toBe("DONE");
   });
 
-  it('should handle errors for missing experiments in ComputePhysics', async () => {
+  it("should handle errors for missing experiments in ComputePhysics", async () => {
     // We expect a gRPC INTERNAL error because the experiment directory doesn't exist
-    await expect(computePhysics({
-      experiment_id: 'non-existent',
-      ball_configs: [],
-      mode: 'SINGLE_CAMERA_PLANAR'
-    } as any)).rejects.toThrow();
+    await expect(
+      computePhysics({
+        experiment_id: "non-existent",
+        ball_configs: [],
+        mode: "SINGLE_CAMERA_PLANAR",
+      } as any),
+    ).rejects.toThrow();
   });
 });

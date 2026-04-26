@@ -269,8 +269,18 @@ export class SyncMarkerRenderer {
       // Thin per-cell outline to help thresholding after compression.
       this.ctx.strokeStyle = 'rgba(255,255,255,0.18)';
       this.ctx.lineWidth = 1;
-      this.ctx.strokeRect(x0 + 0.5, y0a + 0.5, Math.max(1, x1 - x0) - 1, Math.max(1, y1a - y0a) - 1);
-      this.ctx.strokeRect(x0 + 0.5, y0b + 0.5, Math.max(1, x1 - x0) - 1, Math.max(1, y1b - y0b) - 1);
+      this.ctx.strokeRect(
+        x0 + 0.5,
+        y0a + 0.5,
+        Math.max(1, x1 - x0) - 1,
+        Math.max(1, y1a - y0a) - 1,
+      );
+      this.ctx.strokeRect(
+        x0 + 0.5,
+        y0b + 0.5,
+        Math.max(1, x1 - x0) - 1,
+        Math.max(1, y1b - y0b) - 1,
+      );
     }
 
     // Phased sine gratings: micro-time within display frame with quadrature redundancy.

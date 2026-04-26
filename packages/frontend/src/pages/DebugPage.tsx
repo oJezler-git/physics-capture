@@ -474,16 +474,22 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Monitor</h3>
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+              Monitor
+            </h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
-                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">Res</span>
+                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">
+                  Res
+                </span>
                 <span className="text-lg font-medium text-slate-200 mt-1">
                   {dims.width}x{dims.height}
                 </span>
               </div>
               <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
-                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">Status</span>
+                <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">
+                  Status
+                </span>
                 <span className="text-[10px] font-medium tracking-wider uppercase text-[var(--accent)] truncate mt-1.5 block">
                   {status}
                 </span>
@@ -506,7 +512,9 @@ export const DebugPage = () => {
           </section>
 
           <section className="space-y-6">
-            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Physics</h3>
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+              Physics
+            </h3>
             {physicsError && (
               <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-xs font-medium text-[var(--accent)] shadow-sm">
                 <span className="font-bold opacity-70 mr-2">ERROR:</span>

@@ -28,10 +28,13 @@ const packageDef = protoLoader.loadSync(PROTO_PATH, {
 const proto = grpc.loadPackageDefinition(packageDef) as any;
 const PhysicsCapture = proto.physicscapture.v1.PhysicsCapture;
 
-export function createClient(host = process.env.PYTHON_GRPC_HOST ?? "localhost", port = process.env.PYTHON_GRPC_PORT ?? "50052") {
+export function createClient(
+  host = process.env.PYTHON_GRPC_HOST ?? "localhost",
+  port = process.env.PYTHON_GRPC_PORT ?? "50052",
+) {
   return new PhysicsCapture(
     `${host}:${port}`,
-    grpc.credentials.createInsecure()
+    grpc.credentials.createInsecure(),
   );
 }
 
@@ -54,7 +57,7 @@ export function mapGrpcError(raw: Error): GrpcError {
 
 async function* callStreamingRpc<TRequest, TResponse>(
   method: (req: TRequest) => grpc.ClientReadableStream<TResponse>,
-  request: TRequest
+  request: TRequest,
 ): AsyncGenerator<TResponse, void, void> {
   const stream = method(request);
 
@@ -106,26 +109,31 @@ async function* callStreamingRpc<TRequest, TResponse>(
 export function runCalibration(request: CalibrationRequest) {
   return callStreamingRpc<CalibrationRequest, CalibrationStatus>(
     (req) => grpcClient.runCalibration(req),
-    request
+    request,
   );
 }
 
 export function trackBalls(request: TrackingRequest) {
   return callStreamingRpc<TrackingRequest, TrackingStatus>(
     (req) => grpcClient.trackBalls(req),
-    request
+    request,
   );
 }
 
-export async function computePhysics(request: PhysicsRequest): Promise<PhysicsResult> {
+export async function computePhysics(
+  request: PhysicsRequest,
+): Promise<PhysicsResult> {
   const deadlineMsRaw = process.env.PHYSICS_GRPC_DEADLINE_MS;
   const deadlineMsParsed = deadlineMsRaw ? Number(deadlineMsRaw) : NaN;
-  const deadlineMs = Number.isFinite(deadlineMsParsed) ? deadlineMsParsed : 120_000;
+  const deadlineMs = Number.isFinite(deadlineMsParsed)
+    ? deadlineMsParsed
+    : 120_000;
   return new Promise((resolve, reject) => {
     grpcClient.computePhysics(
       request,
       { deadline: Date.now() + deadlineMs },
-      (err: any, res: PhysicsResult) => (err ? reject(mapGrpcError(err)) : resolve(res))
+      (err: any, res: PhysicsResult) =>
+        err ? reject(mapGrpcError(err)) : resolve(res),
     );
   });
 }

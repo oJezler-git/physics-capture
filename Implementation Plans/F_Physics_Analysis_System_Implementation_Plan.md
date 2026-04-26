@@ -1,4 +1,5 @@
 # Module F — Physics Analysis System
+
 ## Full Implementation Plan
 
 > **System:** PhysicsCapture v1.2
@@ -13,24 +14,25 @@
 
 ### 0.1 Upstream dependencies
 
-| Provider | What it provides | Exact artefact |
-|---|---|---|
-| Sync module (`sync/timestamp_array.py`) | Master timestamp array: `frame_index → true_ms` | `experiments/{id}/results/sync.json` |
-| Tracking module (`tracking/sam2_tracker.py`, `centroid.py`) | Sub-pixel ball centroids per frame per camera | `experiments/{id}/results/tracks.json` |
+| Provider                                                     | What it provides                                                          | Exact artefact                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Sync module (`sync/timestamp_array.py`)                      | Master timestamp array: `frame_index → true_ms`                           | `experiments/{id}/results/sync.json`                                          |
+| Tracking module (`tracking/sam2_tracker.py`, `centroid.py`)  | Sub-pixel ball centroids per frame per camera                             | `experiments/{id}/results/tracks.json`                                        |
 | Calibration module (`calibration/intrinsic.py`, `stereo.py`) | px→mm scale factor (single-cam) or stereo projection matrices (multi-cam) | `experiments/{id}/calibration/cam0_intrinsics.json`, `stereo_extrinsics.json` |
-| Session Setup (Frontend → Node → gRPC) | Mass per ball (g), mass uncertainty per ball (g), number of balls (1–3) | Embedded in `PhysicsRequest` protobuf message |
+| Session Setup (Frontend → Node → gRPC)                       | Mass per ball (g), mass uncertainty per ball (g), number of balls (1–3)   | Embedded in `PhysicsRequest` protobuf message                                 |
 
 ### 0.2 Downstream consumers
 
-| Consumer | What it reads | Where it reads it |
-|---|---|---|
-| Node.js gRPC layer (`grpc-client.ts`) | `PhysicsResult` protobuf message (velocities, momenta, KE, CoR, % conservation) | gRPC streaming response |
-| Node.js file storage (`storage.ts`) | JSON representations of all physics outputs | `experiments/{id}/results/velocities.json`, `momentum.json` |
-| React Results screen | All output values with uncertainties | Via WebSocket relay from Node |
+| Consumer                              | What it reads                                                                   | Where it reads it                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Node.js gRPC layer (`grpc-client.ts`) | `PhysicsResult` protobuf message (velocities, momenta, KE, CoR, % conservation) | gRPC streaming response                                     |
+| Node.js file storage (`storage.ts`)   | JSON representations of all physics outputs                                     | `experiments/{id}/results/velocities.json`, `momentum.json` |
+| React Results screen                  | All output values with uncertainties                                            | Via WebSocket relay from Node                               |
 
 ### 0.3 Required data formats
 
 **`sync.json`** (written by sync module, read-only to physics module):
+
 ```json
 {
   "experiment_id": "string",
@@ -51,9 +53,11 @@
   "sync_residual_ms": 0.18
 }
 ```
+
 `timestamps_ms[i]` is the true wall-clock time (ms) of frame `i` for that camera, relative to a shared epoch defined as t=0 of cam0 frame 0. This is the canonical time axis for all physics fitting.
 
 **`tracks.json`** (written by tracking module, read-only to physics module):
+
 ```json
 {
   "experiment_id": "string",
@@ -72,6 +76,7 @@
 ```
 
 **Scale calibration** (`cam0_intrinsics.json`, relevant field):
+
 ```json
 {
   "scale_px_per_mm": 3.142,
@@ -80,6 +85,7 @@
 ```
 
 **`PhysicsRequest`** (gRPC input):
+
 ```protobuf
 message PhysicsRequest {
   string experiment_id = 1;
@@ -112,21 +118,22 @@ enum FrictionMode { IGNORE = 0; COMPENSATE = 1; }
 
 ### 0.6 Explicit assumptions
 
-| # | Assumption | Rationale |
-|---|---|---|
-| A1 | `sync.json` and `tracks.json` always exist and are valid before `ComputePhysics` is called | Node.js enforces job ordering |
-| A2 | Ball motion in the primary analysis window is approximately planar (single-cam mode) | System design decision §14 item 2 |
-| A3 | Balls are solid uniform spheres (I = 2/5·mr²) — rolling without slipping | System design decision §14 item 8 |
-| A4 | Collision occupies at most 5 frames (< 167 ms at 30 fps) | True for billiard/steel ball collisions |
-| A5 | Velocity sign convention: positive = direction of initial motion of ball 0 | Defined here; communicated to frontend |
-| A6 | Friction deceleration is constant over the pre-collision window | Linear deceleration model only |
-| A7 | At most 3 balls per experiment | System design decision §14 item 3 |
-| A8 | Frames with confidence < 0.7 have already been manually corrected before this module runs | Tracking module responsibility |
-| A9 | In single-camera mode the scale factor is the same for x and y (isotropic pixel pitch) | Standard for digital cameras |
+| #   | Assumption                                                                                 | Rationale                               |
+| --- | ------------------------------------------------------------------------------------------ | --------------------------------------- |
+| A1  | `sync.json` and `tracks.json` always exist and are valid before `ComputePhysics` is called | Node.js enforces job ordering           |
+| A2  | Ball motion in the primary analysis window is approximately planar (single-cam mode)       | System design decision §14 item 2       |
+| A3  | Balls are solid uniform spheres (I = 2/5·mr²) — rolling without slipping                   | System design decision §14 item 8       |
+| A4  | Collision occupies at most 5 frames (< 167 ms at 30 fps)                                   | True for billiard/steel ball collisions |
+| A5  | Velocity sign convention: positive = direction of initial motion of ball 0                 | Defined here; communicated to frontend  |
+| A6  | Friction deceleration is constant over the pre-collision window                            | Linear deceleration model only          |
+| A7  | At most 3 balls per experiment                                                             | System design decision §14 item 3       |
+| A8  | Frames with confidence < 0.7 have already been manually corrected before this module runs  | Tracking module responsibility          |
+| A9  | In single-camera mode the scale factor is the same for x and y (isotropic pixel pitch)     | Standard for digital cameras            |
 
 ### 0.7 Module boundary
 
 **Inside this module:**
+
 - Loading tracks and timestamps from JSON files on disk
 - Converting pixel positions → metric positions (mm)
 - Fitting kinematic models to position data
@@ -138,6 +145,7 @@ enum FrictionMode { IGNORE = 0; COMPENSATE = 1; }
 - Returning `PhysicsResult` via gRPC
 
 **Outside this module (treated as black boxes):**
+
 - SAM2 tracking and centroid extraction
 - Sync Marker decoding (Gray code + grating phase) and timestamp generation
 - Camera calibration and stereo triangulation
@@ -161,46 +169,46 @@ The Physics Analysis module ingests per-frame ball positions (in pixels) and the
 
 ### 1.3 Inputs (fully typed)
 
-| Field | Type | Units | Shape | Constraints |
-|---|---|---|---|---|
-| `experiment_id` | `str` | — | scalar | Valid directory under `/experiments/` |
-| `masses[i].ball_id` | `uint8` | — | scalar | 0–2 |
-| `masses[i].mass_g` | `float32` | grams | scalar | > 0 |
-| `masses[i].uncertainty_g` | `float32` | grams | scalar | > 0, default 1.0 |
-| `mode` | `enum` | — | scalar | PLANAR\_SINGLE\_CAM or STEREO\_3D |
-| `friction` | `enum` | — | scalar | IGNORE or COMPENSATE |
-| `timestamps_ms[n]` | `float64` | milliseconds | [N] | Monotonically increasing, N = frame count |
-| `positions_px[n]` | `float64` | pixels | [N, 2] | (x, y) per frame; NaN if frame missing |
-| `confidence[n]` | `float32` | — | [N] | 0.0–1.0 |
-| `scale_px_per_mm` | `float64` | px/mm | scalar | > 0 |
-| `scale_unc_px_per_mm` | `float64` | px/mm | scalar | > 0 |
+| Field                     | Type      | Units        | Shape  | Constraints                               |
+| ------------------------- | --------- | ------------ | ------ | ----------------------------------------- |
+| `experiment_id`           | `str`     | —            | scalar | Valid directory under `/experiments/`     |
+| `masses[i].ball_id`       | `uint8`   | —            | scalar | 0–2                                       |
+| `masses[i].mass_g`        | `float32` | grams        | scalar | > 0                                       |
+| `masses[i].uncertainty_g` | `float32` | grams        | scalar | > 0, default 1.0                          |
+| `mode`                    | `enum`    | —            | scalar | PLANAR_SINGLE_CAM or STEREO_3D            |
+| `friction`                | `enum`    | —            | scalar | IGNORE or COMPENSATE                      |
+| `timestamps_ms[n]`        | `float64` | milliseconds | [N]    | Monotonically increasing, N = frame count |
+| `positions_px[n]`         | `float64` | pixels       | [N, 2] | (x, y) per frame; NaN if frame missing    |
+| `confidence[n]`           | `float32` | —            | [N]    | 0.0–1.0                                   |
+| `scale_px_per_mm`         | `float64` | px/mm        | scalar | > 0                                       |
+| `scale_unc_px_per_mm`     | `float64` | px/mm        | scalar | > 0                                       |
 
-*Note: `timestamps_ms` and `positions_px` are per-ball, per-camera. In single-cam mode, one camera; stereo mode positions arrive already triangulated as (X_mm, Y_mm, Z_mm) and `scale_px_per_mm` is ignored.*
+_Note: `timestamps_ms` and `positions_px` are per-ball, per-camera. In single-cam mode, one camera; stereo mode positions arrive already triangulated as (X_mm, Y_mm, Z_mm) and `scale_px_per_mm` is ignored._
 
 ### 1.4 Outputs (fully typed)
 
-| Field | Type | Units | Shape | Constraints |
-|---|---|---|---|---|
-| `collision_frame` | `int32` | — | scalar | Frame index of detected collision; -1 if none detected |
-| `velocities[i].ball_id` | `uint8` | — | scalar | |
-| `velocities[i].v_before_mps` | `float64` | m/s | scalar | |
-| `velocities[i].v_before_unc_mps` | `float64` | m/s | scalar | > 0 |
-| `velocities[i].v_after_mps` | `float64` | m/s | scalar | |
-| `velocities[i].v_after_unc_mps` | `float64` | m/s | scalar | > 0 |
-| `velocities[i].friction_a_mps2` | `float64` | m/s² | scalar | Negative for deceleration; 0.0 if `friction=IGNORE` |
-| `momentum.p_before_kgmps` | `float64` | kg·m/s | scalar | |
-| `momentum.p_before_unc` | `float64` | kg·m/s | scalar | |
-| `momentum.p_after_kgmps` | `float64` | kg·m/s | scalar | |
-| `momentum.p_after_unc` | `float64` | kg·m/s | scalar | |
-| `momentum.conservation_pct` | `float64` | % | scalar | |
-| `momentum.conservation_pct_unc` | `float64` | % | scalar | |
-| `energy.ke_before_J` | `float64` | Joules | scalar | ≥ 0 |
-| `energy.ke_before_unc_J` | `float64` | Joules | scalar | > 0 |
-| `energy.ke_after_J` | `float64` | Joules | scalar | ≥ 0 |
-| `energy.ke_after_unc_J` | `float64` | Joules | scalar | > 0 |
-| `energy.cor` | `float64` | — | scalar | 0–1 for elastic–inelastic; may exceed 1 (measurement noise) |
-| `energy.cor_unc` | `float64` | — | scalar | > 0 |
-| `fit_diagnostics[i]` | `dict` | — | per ball | See §3.3 |
+| Field                            | Type      | Units  | Shape    | Constraints                                                 |
+| -------------------------------- | --------- | ------ | -------- | ----------------------------------------------------------- |
+| `collision_frame`                | `int32`   | —      | scalar   | Frame index of detected collision; -1 if none detected      |
+| `velocities[i].ball_id`          | `uint8`   | —      | scalar   |                                                             |
+| `velocities[i].v_before_mps`     | `float64` | m/s    | scalar   |                                                             |
+| `velocities[i].v_before_unc_mps` | `float64` | m/s    | scalar   | > 0                                                         |
+| `velocities[i].v_after_mps`      | `float64` | m/s    | scalar   |                                                             |
+| `velocities[i].v_after_unc_mps`  | `float64` | m/s    | scalar   | > 0                                                         |
+| `velocities[i].friction_a_mps2`  | `float64` | m/s²   | scalar   | Negative for deceleration; 0.0 if `friction=IGNORE`         |
+| `momentum.p_before_kgmps`        | `float64` | kg·m/s | scalar   |                                                             |
+| `momentum.p_before_unc`          | `float64` | kg·m/s | scalar   |                                                             |
+| `momentum.p_after_kgmps`         | `float64` | kg·m/s | scalar   |                                                             |
+| `momentum.p_after_unc`           | `float64` | kg·m/s | scalar   |                                                             |
+| `momentum.conservation_pct`      | `float64` | %      | scalar   |                                                             |
+| `momentum.conservation_pct_unc`  | `float64` | %      | scalar   |                                                             |
+| `energy.ke_before_J`             | `float64` | Joules | scalar   | ≥ 0                                                         |
+| `energy.ke_before_unc_J`         | `float64` | Joules | scalar   | > 0                                                         |
+| `energy.ke_after_J`              | `float64` | Joules | scalar   | ≥ 0                                                         |
+| `energy.ke_after_unc_J`          | `float64` | Joules | scalar   | > 0                                                         |
+| `energy.cor`                     | `float64` | —      | scalar   | 0–1 for elastic–inelastic; may exceed 1 (measurement noise) |
+| `energy.cor_unc`                 | `float64` | —      | scalar   | > 0                                                         |
+| `fit_diagnostics[i]`             | `dict`    | —      | per ball | See §3.3                                                    |
 
 ---
 
@@ -236,6 +244,7 @@ The module is decomposed into five independently-testable subcomponents with exp
 **Inputs:** `experiment_id: str`
 
 **Outputs:**
+
 ```python
 @dataclass
 class LoadedTrack:
@@ -249,12 +258,14 @@ class LoadedTrack:
 ```
 
 **Core logic:**
+
 1. Read `sync.json`; extract `timestamps_ms` array for the relevant camera_id.
 2. Read `tracks.json`; for each ball+camera combination, align frame indices against the timestamp array (index-to-index mapping — guaranteed 1:1 by sync module contract).
 3. Insert `np.nan` for any missing frame indices in the dense range `[min_frame, max_frame]`.
 4. Validate: assert `len(timestamps_ms) == len(x_px)`.
 
 **Failure modes:**
+
 - Missing files → raise `FileNotFoundError` with path; gRPC layer returns `NOT_FOUND`
 - Schema mismatch → raise `ValueError`; gRPC layer returns `INVALID_ARGUMENT`
 
@@ -265,6 +276,7 @@ class LoadedTrack:
 **Purpose:** Convert pixel coordinates to metres; attach timestamps in seconds; compute per-point position uncertainty in metres.
 
 **Inputs:**
+
 ```python
 track: LoadedTrack
 scale_px_per_mm: float
@@ -272,6 +284,7 @@ scale_unc_px_per_mm: float
 ```
 
 **Outputs:**
+
 ```python
 @dataclass
 class MetricTrack:
@@ -302,11 +315,13 @@ sigma_x_m = sigma_x_mm / 1000.0
 ```
 
 Timestamps:
+
 ```
 t_s[i] = timestamps_ms[i] / 1000.0
 ```
 
 **Failure modes:**
+
 - `scale_px_per_mm <= 0` → raise `ValueError`
 - All frames NaN → raise `InsufficientDataError` (custom exception)
 
@@ -317,6 +332,7 @@ t_s[i] = timestamps_ms[i] / 1000.0
 **Purpose:** Identify the collision frame and define pre/post windows using a rolling velocity estimator. Must not require any fitted parameters — this is a detection step only.
 
 **Inputs:**
+
 ```python
 track: MetricTrack         # for the primary ball (ball_id=0, or the initiating ball)
 window_frames: int = 5     # rolling window half-width for crude velocity estimate
@@ -326,6 +342,7 @@ post_window: int = 7       # frames after collision for post-collision fit
 ```
 
 **Outputs:**
+
 ```python
 @dataclass
 class CollisionResult:
@@ -374,6 +391,7 @@ post_end   = min(N-1, collision_frame + post_window + 1)
 **Constraint:** `pre_end - pre_start >= 4` and `post_end - post_start >= 4` are required for curve fitting. If not satisfied, raise `InsufficientWindowError`.
 
 **Failure modes:**
+
 - Track too short (< 20 non-NaN frames) → raise `InsufficientDataError`
 - No collision detected → return `collision_frame = -1`; caller fits a single window over all frames
 
@@ -384,6 +402,7 @@ post_end   = min(N-1, collision_frame + post_window + 1)
 **Purpose:** Fit the kinematic model `x(t) = x₀ + v₀·t + ½·a·t²` to a window of frames; extract `v₀` as a `ufloat` with correctly propagated covariance uncertainty.
 
 **Inputs:**
+
 ```python
 t_s:       np.ndarray   # float64, shape [M] — true timestamps in seconds
 x_m:       np.ndarray   # float64, shape [M] — metric positions in metres
@@ -391,6 +410,7 @@ sigma_x_m: np.ndarray   # float64, shape [M] — per-point position uncertainty 
 ```
 
 **Outputs:**
+
 ```python
 @dataclass
 class FitResult:
@@ -454,6 +474,7 @@ chi2_reduced = chi2 / dof
 4. If `pcov` contains `inf` entries (singular covariance — fit did not converge), raise `FitDivergenceError`.
 
 **Failure modes:**
+
 - `M < 4` → raise `InsufficientDataError`
 - `curve_fit` raises `RuntimeError` (max iterations) → raise `FitDivergenceError`
 - `chi2_reduced > 10` → emit `WARNING` log but do not raise; return result with flag
@@ -465,6 +486,7 @@ chi2_reduced = chi2 / dof
 **Purpose:** Given `ufloat` velocities and `ufloat` masses, compute all physics quantities. The `uncertainties` library propagates all uncertainty automatically — no manual error formulae required.
 
 **Inputs:**
+
 ```python
 masses:     List[UFloat]          # mass in kg, as ufloats — one per ball
 v_before:   List[UFloat]          # m/s per ball, before collision
@@ -473,6 +495,7 @@ ke_mode:    str = "rolling_sphere" # or "point_mass" — controls KE factor
 ```
 
 **Outputs:**
+
 ```python
 @dataclass
 class PhysicsOutput:
@@ -528,6 +551,7 @@ else:
 ```
 
 **Failure modes:**
+
 - `p_before_total.nominal_value ≈ 0` → conservation_pct would be div-by-zero → return `NaN` with a diagnostic flag; do not raise
 
 ---
@@ -583,6 +607,7 @@ def compute_physics(
 ### 3.2 JSON output files
 
 **`velocities.json`:**
+
 ```json
 {
   "experiment_id": "string",
@@ -591,7 +616,7 @@ def compute_physics(
     {
       "ball_id": 0,
       "v_before": { "value_mps": 1.342, "uncertainty_mps": 0.018 },
-      "v_after":  { "value_mps": 0.214, "uncertainty_mps": 0.022 },
+      "v_after": { "value_mps": 0.214, "uncertainty_mps": 0.022 },
       "friction_a": { "value_mps2": -0.041, "uncertainty_mps2": 0.007 },
       "fit_diagnostics": {
         "pre_window_frames": [40, 47],
@@ -607,6 +632,7 @@ def compute_physics(
 ```
 
 **`momentum.json`:**
+
 ```json
 {
   "experiment_id": "string",
@@ -616,17 +642,17 @@ def compute_physics(
     {
       "ball_id": 0,
       "p_before": { "value_kgmps": 0.0671, "uncertainty_kgmps": 0.0014 },
-      "p_after":  { "value_kgmps": 0.0107, "uncertainty_kgmps": 0.0012 },
+      "p_after": { "value_kgmps": 0.0107, "uncertainty_kgmps": 0.0012 },
       "ke_before": { "value_J": 0.04506, "uncertainty_J": 0.00121 },
-      "ke_after":  { "value_J": 0.000723, "uncertainty_J": 0.000165 }
+      "ke_after": { "value_J": 0.000723, "uncertainty_J": 0.000165 }
     }
   ],
   "system": {
     "p_before": { "value_kgmps": 0.0671, "uncertainty_kgmps": 0.0014 },
-    "p_after":  { "value_kgmps": 0.0659, "uncertainty_kgmps": 0.0018 },
+    "p_after": { "value_kgmps": 0.0659, "uncertainty_kgmps": 0.0018 },
     "conservation_pct": { "value": -1.79, "uncertainty": 2.31 },
     "ke_before": { "value_J": 0.04506, "uncertainty_J": 0.00121 },
-    "ke_after":  { "value_J": 0.02814, "uncertainty_J": 0.00094 },
+    "ke_after": { "value_J": 0.02814, "uncertainty_J": 0.00094 },
     "cor": { "value": 0.813, "uncertainty": 0.031 }
   }
 }
@@ -689,6 +715,7 @@ message PhysicsResult {
 ### 4.1 Full pipeline — numbered steps
 
 **Step 1: Load data**
+
 ```
 1.1  Open experiments/{id}/results/sync.json
 1.2  For camera_id=0 (single-cam mode): extract timestamps_ms array
@@ -700,6 +727,7 @@ message PhysicsResult {
 ```
 
 **Step 2: Convert to metric**
+
 ```
 2.1  For each ball b, for each frame i with non-NaN x_px:
        x_m[i] = x_px[i] / scale_px_per_mm / 1000.0
@@ -712,6 +740,7 @@ message PhysicsResult {
 ```
 
 **Step 3: Detect collision**
+
 ```
 3.1  Take primary track (ball_id=0); compute rolling velocity over window_frames=5:
        v_roll[i] = (x_m[i+5] - x_m[i-5]) / (t_s[i+5] - t_s[i-5])  for i in [5, N-6]
@@ -725,6 +754,7 @@ message PhysicsResult {
 ```
 
 **Step 4: Fit velocity (pre-collision)**
+
 ```
 4.1  Extract t_pre = t_s[pre_start:pre_end], x_pre = x_m[pre_start:pre_end]
 4.2  Drop NaN frames from both arrays simultaneously (must remain aligned)
@@ -740,6 +770,7 @@ message PhysicsResult {
 ```
 
 **Step 5: Friction compensation (if FrictionMode == COMPENSATE)**
+
 ```
 5.1  friction_a = a_pre.nominal_value   (scalar, m/s²)
 5.2  Project v_before to collision instant:
@@ -751,12 +782,14 @@ message PhysicsResult {
 ```
 
 **Step 6: Fit velocity (post-collision)**
+
 ```
 6.1  Same procedure as Step 4, applied to post-collision window
 6.2  v_at_collision_after = extrapolated velocity at collision_frame
 ```
 
 **Step 7: Build mass ufloats**
+
 ```
 7.1  For each ball i:
        mass_kg = ufloat(request.masses[i].mass_g / 1000.0,
@@ -764,6 +797,7 @@ message PhysicsResult {
 ```
 
 **Step 8: Compute physics**
+
 ```
 8.1  p_before[i] = mass_kg[i] * v_before[i]
 8.2  p_after[i]  = mass_kg[i] * v_after[i]
@@ -776,6 +810,7 @@ message PhysicsResult {
 ```
 
 **Step 9: Serialise**
+
 ```
 9.1  Write velocities.json and momentum.json to experiments/{id}/results/
 9.2  Build PhysicsResult protobuf message
@@ -789,6 +824,7 @@ message PhysicsResult {
 **Invocation type:** Synchronous, called once per experiment after tracking completes.
 
 **Trigger:** gRPC `ComputePhysics(PhysicsRequest)` call from Node.js after:
+
 1. `TrackBalls` has completed and `tracks.json` written
 2. Sync pipeline has completed and `sync.json` written
 3. Scale calibration confirmed and `cam0_intrinsics.json` written
@@ -847,6 +883,7 @@ message PhysicsResult {
 ### 7.1 Entry point: Node.js → gRPC → `ComputePhysics`
 
 **Call sequence:**
+
 ```
 1. Node.js grpc-client.ts: calls stub.ComputePhysics(request) after TrackBalls completes
 2. grpc_server.py: receives PhysicsRequest; validates experiment_id exists on disk
@@ -864,34 +901,36 @@ The `PhysicsResult` is returned immediately after computation (unary RPC). Node.
 
 ### 7.3 Error propagation
 
-| Error condition | Python raises | gRPC status code | Node.js action |
-|---|---|---|---|
-| `sync.json` missing | `FileNotFoundError` | `NOT_FOUND` | UI shows "Sync data missing" |
-| `tracks.json` missing | `FileNotFoundError` | `NOT_FOUND` | UI shows "Tracking data missing" |
-| Insufficient frames | `InsufficientDataError` | `FAILED_PRECONDITION` | UI shows "Not enough frames in window" |
-| Fit diverged | `FitDivergenceError` | `INTERNAL` | UI shows "Curve fit failed — try adjusting windows" |
-| No collision detected | (not an error) | `OK` | UI shows single-window results with no before/after split |
+| Error condition       | Python raises           | gRPC status code      | Node.js action                                            |
+| --------------------- | ----------------------- | --------------------- | --------------------------------------------------------- |
+| `sync.json` missing   | `FileNotFoundError`     | `NOT_FOUND`           | UI shows "Sync data missing"                              |
+| `tracks.json` missing | `FileNotFoundError`     | `NOT_FOUND`           | UI shows "Tracking data missing"                          |
+| Insufficient frames   | `InsufficientDataError` | `FAILED_PRECONDITION` | UI shows "Not enough frames in window"                    |
+| Fit diverged          | `FitDivergenceError`    | `INTERNAL`            | UI shows "Curve fit failed — try adjusting windows"       |
+| No collision detected | (not an error)          | `OK`                  | UI shows single-window results with no before/after split |
 
 ### 7.4 No retry logic at this level
+
 Physics computation is deterministic. If it fails, the root cause must be corrected (e.g. bad tracking data, insufficient window). Retrying without change is pointless. The UI exposes a "Re-run Physics" button with adjustable window parameters.
 
 ---
 
 ## 8. Edge Cases & Failure Handling
 
-| Scenario | Detection | Recovery |
-|---|---|---|
-| No collision in experiment (single ball, free roll) | `collision_frame == -1` | Fit single window over all frames; skip before/after split; `v_after = None`; CoR = N/A |
-| Ball leaves frame before collision | Many NaN in `x_m` | Count non-NaN frames in window; if < 4, raise `InsufficientWindowError` and expand window or abort |
-| Very short video (< 20 frames) | Detected in loader | Raise `InsufficientDataError` immediately |
-| Two balls collide but one was not tracked | Only one track in `tracks.json` | Proceed with single-ball mode; CoR still computable if wall collision |
-| `p_before ≈ 0` (ball nearly stationary before collision) | `|p_before.nominal_value| < 1e-6` | Set `conservation_pct = NaN`; log WARNING |
-| `chi2_reduced >> 1` (poor fit) | Threshold: > 5.0 | Log WARNING with window indices; include flag in diagnostics JSON; do NOT suppress result |
-| `pcov` contains `inf` | Check after `curve_fit` | Raise `FitDivergenceError`; log full diagnostic including `t_rel`, `x_m`, `sigma_x_m` |
-| 3-ball experiment — multiple collision events | Multiple peaks in `delta_v` | Detect all; fit pre/between/post windows for each sequential collision; this is an extension (see §14) — for now, detect first collision only and warn if second detected |
-| User enters mass = 0 | Validation in gRPC handler | Reject request with `INVALID_ARGUMENT` before physics runs |
+| Scenario                                                 | Detection                       | Recovery                                                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------------------------------- |
+| No collision in experiment (single ball, free roll)      | `collision_frame == -1`         | Fit single window over all frames; skip before/after split; `v_after = None`; CoR = N/A                                                                                   |
+| Ball leaves frame before collision                       | Many NaN in `x_m`               | Count non-NaN frames in window; if < 4, raise `InsufficientWindowError` and expand window or abort                                                                        |
+| Very short video (< 20 frames)                           | Detected in loader              | Raise `InsufficientDataError` immediately                                                                                                                                 |
+| Two balls collide but one was not tracked                | Only one track in `tracks.json` | Proceed with single-ball mode; CoR still computable if wall collision                                                                                                     |
+| `p_before ≈ 0` (ball nearly stationary before collision) | `                               | p_before.nominal_value                                                                                                                                                    | < 1e-6` | Set `conservation_pct = NaN`; log WARNING |
+| `chi2_reduced >> 1` (poor fit)                           | Threshold: > 5.0                | Log WARNING with window indices; include flag in diagnostics JSON; do NOT suppress result                                                                                 |
+| `pcov` contains `inf`                                    | Check after `curve_fit`         | Raise `FitDivergenceError`; log full diagnostic including `t_rel`, `x_m`, `sigma_x_m`                                                                                     |
+| 3-ball experiment — multiple collision events            | Multiple peaks in `delta_v`     | Detect all; fit pre/between/post windows for each sequential collision; this is an extension (see §14) — for now, detect first collision only and warn if second detected |
+| User enters mass = 0                                     | Validation in gRPC handler      | Reject request with `INVALID_ARGUMENT` before physics runs                                                                                                                |
 
 **How to simulate:**
+
 - No collision: use a synthetic track with constant velocity (zero delta_v)
 - Poor fit: inject 20% Gaussian noise to `x_m` in unit test
 - Diverged fit: provide only 2 data points (M < 4)
@@ -903,15 +942,15 @@ Physics computation is deterministic. If it fails, the root cause must be correc
 
 ### 9.1 Error budget (end-to-end, single camera, 30 fps, 1080p)
 
-| Source | Magnitude | Where introduced |
-|---|---|---|
-| Position tracking (SAM2 + Gaussian centroid) | ±0.3 px = ±0.095 mm at 3.14 px/mm | `converter.py` — `sigma_px_tracking = 0.3` |
-| Scale calibration | ±0.008 px/mm (0.25%) | `converter.py` — quadrature addition |
-| Timestamp sync | < 0.5 ms | `loader.py` — inherits from sync module |
-| Curve fit noise rejection | Reduces position noise by √M (M = frames in window) | `fitting.py` — using 7 frames: σ_fit ≈ σ_pos / √7 ≈ 0.036 mm |
-| **Effective velocity uncertainty** | **~1–2% at 1 m/s** | Derived from fit covariance |
-| Mass measurement | ±1 g / 50 g = ±2% | `momentum.py` — ufloat |
-| **Effective momentum uncertainty** | **~2–3%** | Quadrature sum of velocity + mass errors |
+| Source                                       | Magnitude                                           | Where introduced                                             |
+| -------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| Position tracking (SAM2 + Gaussian centroid) | ±0.3 px = ±0.095 mm at 3.14 px/mm                   | `converter.py` — `sigma_px_tracking = 0.3`                   |
+| Scale calibration                            | ±0.008 px/mm (0.25%)                                | `converter.py` — quadrature addition                         |
+| Timestamp sync                               | < 0.5 ms                                            | `loader.py` — inherits from sync module                      |
+| Curve fit noise rejection                    | Reduces position noise by √M (M = frames in window) | `fitting.py` — using 7 frames: σ_fit ≈ σ_pos / √7 ≈ 0.036 mm |
+| **Effective velocity uncertainty**           | **~1–2% at 1 m/s**                                  | Derived from fit covariance                                  |
+| Mass measurement                             | ±1 g / 50 g = ±2%                                   | `momentum.py` — ufloat                                       |
+| **Effective momentum uncertainty**           | **~2–3%**                                           | Quadrature sum of velocity + mass errors                     |
 
 ### 9.2 Error propagation chain
 
@@ -934,11 +973,13 @@ With `absolute_sigma=False` (scipy default), the covariance matrix is scaled by 
 ### 9.4 Timestamp error impact on velocity
 
 A timing error of Δt = 0.5 ms at t = 33 ms (1 frame interval) gives:
+
 ```
 Δv / v = Δt / t_window
        = 0.5 ms / (7 frames × 33 ms/frame)
        = 0.5 / 231 = 0.22%
 ```
+
 Timestamp error is negligible compared to position noise. It is not a separate term in the uncertainty budget.
 
 ---
@@ -948,6 +989,7 @@ Timestamp error is negligible compared to position noise. It is not a separate t
 ### 10.1 Unit tests — per subcomponent
 
 #### `test_loader.py`
+
 ```python
 def test_load_valid_experiment():
     # Write minimal sync.json + tracks.json to tmp dir
@@ -966,6 +1008,7 @@ def test_dense_frame_filling():
 ```
 
 #### `test_converter.py`
+
 ```python
 def test_px_to_metric_conversion():
     # Known scale: 3.0 px/mm
@@ -981,6 +1024,7 @@ def test_sigma_propagation():
 ```
 
 #### `test_collision.py`
+
 ```python
 def test_detects_known_collision():
     # Synthetic track: constant v=1.0 m/s for 20 frames,
@@ -999,6 +1043,7 @@ def test_insufficient_frames_raises():
 ```
 
 #### `test_fitting.py`
+
 ```python
 def test_perfect_constant_velocity():
     # t = [0, 1/30, 2/30, ..., 6/30]
@@ -1026,6 +1071,7 @@ def test_insufficient_points_raises():
 ```
 
 #### `test_momentum.py`
+
 ```python
 def test_momentum_conservation_perfect():
     # m1 = ufloat(0.05, 0.001), m2 = ufloat(0.05, 0.001)
@@ -1072,13 +1118,13 @@ Store a frozen `tracks.json` / `sync.json` from a real experiment (lab recording
 
 ### 10.4 Tolerances
 
-| Quantity | Tolerance |
-|---|---|
-| `collision_frame` detection | ± 1 frame |
+| Quantity                                   | Tolerance            |
+| ------------------------------------------ | -------------------- |
+| `collision_frame` detection                | ± 1 frame            |
 | `v0.nominal_value` (synthetic exact input) | < 0.001 m/s absolute |
-| `conservation_pct` (synthetic exact) | < 0.1% |
-| `cor` (synthetic elastic) | < 0.01 absolute |
-| `chi2_reduced` (perfect fit) | < 1.5 |
+| `conservation_pct` (synthetic exact)       | < 0.1%               |
+| `cor` (synthetic elastic)                  | < 0.01 absolute      |
+| `chi2_reduced` (perfect fit)               | < 1.5                |
 
 ---
 
@@ -1087,6 +1133,7 @@ Store a frozen `tracks.json` / `sync.json` from a real experiment (lab recording
 Each step produces a directly testable output.
 
 **Step 1 — Scaffold module structure (no logic)**
+
 ```
 packages/cv-service/physics/
   __init__.py
@@ -1106,30 +1153,37 @@ tests/physics/
   test_integration.py
   fixtures/         (synthetic tracks.json, sync.json)
 ```
+
 Observable output: `pytest tests/physics/` runs with all tests failing (not erroring).
 
 **Step 2 — Implement `loader.py` + pass its tests**
+
 - Read `sync.json` and `tracks.json`
 - Build dense `LoadedTrack` arrays with NaN filling
 - Observable: `test_loader.py` green
 
 **Step 3 — Implement `converter.py` + pass its tests**
+
 - px → mm → m conversion with sigma propagation
 - Observable: `test_converter.py` green; print sample MetricTrack to confirm units
 
 **Step 4 — Implement `fitting.py` + pass its tests**
+
 - `curve_fit` with `absolute_sigma=True`, `correlated_values`, time-centring
 - Observable: `test_fitting.py` green; manually verify uncertainty is non-zero and sensible on synthetic data
 
 **Step 5 — Implement `collision.py` + pass its tests**
+
 - Rolling velocity + MAD-based threshold + window extraction
 - Observable: `test_collision.py` green; plot `rolling_velocities` for synthetic tracks to visual-confirm
 
 **Step 6 — Implement `momentum.py` + pass its tests**
+
 - All physics quantities as ufloat operations
 - Observable: `test_momentum.py` green
 
 **Step 7 — Implement `pipeline.py` (orchestrator)**
+
 - Wire all subcomponents together
 - Handle `collision_frame == -1` (single-window mode)
 - Handle 1, 2, 3 ball cases
@@ -1137,17 +1191,20 @@ Observable output: `pytest tests/physics/` runs with all tests failing (not erro
 - Observable: `test_integration.py` green; inspect output JSON files manually
 
 **Step 8 — Wire to gRPC server**
+
 - Add `ComputePhysics` handler to `grpc_server.py`
 - Update `physics.proto` with `UncertainValue` type
 - Map `PhysicsOutput` → `PhysicsResult` protobuf
 - Observable: Call via `grpcurl` from command line; receive `PhysicsResult`
 
 **Step 9 — Wire to Node.js**
+
 - Update `grpc-client.ts` to call `ComputePhysics` after tracking job completes
 - Forward result to React via WebSocket
 - Observable: Full end-to-end flow with real experiment data; Results screen populates
 
 **Step 10 — Real-world validation**
+
 - Run experiment with known masses, known velocity (measured by ruler + stopwatch independently)
 - Compare physics output to hand calculation
 - Target: velocity within 2%, momentum within 3%
@@ -1210,6 +1267,7 @@ logger.error("physics.fit_diverged", extra={
 ### 13.2 Diagnostics in output JSON
 
 The `fit_diagnostics` block in `velocities.json` includes:
+
 - `pre_window_frames`: `[start, end]`
 - `post_window_frames`: `[start, end]`
 - `pre_chi2_reduced`: float
@@ -1224,6 +1282,7 @@ These are forwarded to the React Results screen and displayed as a collapsible "
 ### 13.3 Debug hook: position vs fit plot
 
 For development, `fitting.py` includes a conditional matplotlib export:
+
 ```python
 if os.environ.get("PHYSICS_DEBUG_PLOTS"):
     fig, ax = plt.subplots()
@@ -1232,20 +1291,24 @@ if os.environ.get("PHYSICS_DEBUG_PLOTS"):
     ax.set_xlabel("t (s)"); ax.set_ylabel("x (m)")
     fig.savefig(f"debug_fit_{ball_id}_{window}.png")
 ```
+
 Set `PHYSICS_DEBUG_PLOTS=1` during development; not enabled in production container.
 
 ---
 
 ## 14. Future Improvements
 
-| Limitation now | Future upgrade |
-|---|---|
-| Motion projected to 1D (axis of max variance) | Full 2D / 3D velocity vector fitting; report speed as magnitude with directional component |
-| First collision only in multi-ball 3-body scenarios | Sequential collision detection: find all peaks in `delta_v`, define windows between each pair |
-| Friction assumed constant (linear deceleration model) | Non-linear friction model: viscous `a ∝ v` or Coulomb `a = μg` with iterative fitting |
-| No inelastic deformation energy | Add plastic deformation term: `KE_loss = KE_before - KE_after - W_plastic` (user-entered deformation depth) |
-| `cor` only computed for 2-ball case | Generalise to 3-ball by computing pairwise relative velocities at collision frames |
-| Window size fixed at 7 frames | Expose as UI slider with live re-computation; store as part of experiment parameters |
-| No outlier rejection within fit window | Add iterative sigma-clipping: refit after removing frames with residual > 3σ |
-| Single-axis position only | 2D velocity vector: `(vx, vy)` from simultaneous fit on both axes; total speed = `sqrt(vx^2 + vy^2)` |
+| Limitation now                                        | Future upgrade                                                                                              |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Motion projected to 1D (axis of max variance)         | Full 2D / 3D velocity vector fitting; report speed as magnitude with directional component                  |
+| First collision only in multi-ball 3-body scenarios   | Sequential collision detection: find all peaks in `delta_v`, define windows between each pair               |
+| Friction assumed constant (linear deceleration model) | Non-linear friction model: viscous `a ∝ v` or Coulomb `a = μg` with iterative fitting                       |
+| No inelastic deformation energy                       | Add plastic deformation term: `KE_loss = KE_before - KE_after - W_plastic` (user-entered deformation depth) |
+| `cor` only computed for 2-ball case                   | Generalise to 3-ball by computing pairwise relative velocities at collision frames                          |
+| Window size fixed at 7 frames                         | Expose as UI slider with live re-computation; store as part of experiment parameters                        |
+| No outlier rejection within fit window                | Add iterative sigma-clipping: refit after removing frames with residual > 3σ                                |
+| Single-axis position only                             | 2D velocity vector: `(vx, vy)` from simultaneous fit on both axes; total speed = `sqrt(vx^2 + vy^2)`        |
+
+```
+
 ```

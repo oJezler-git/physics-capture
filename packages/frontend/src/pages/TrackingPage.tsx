@@ -451,7 +451,9 @@ export const TrackingPage = () => {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="ui-pill text-[var(--accent)] px-2 py-0.5 text-[9px]">{statusLabel}</span>
+                <span className="ui-pill text-[var(--accent)] px-2 py-0.5 text-[9px]">
+                  {statusLabel}
+                </span>
                 {status === 'tracking' && (
                   <div className="flex items-center gap-2">
                     <div className="w-16 h-1.5 rounded-full bg-[var(--bg-base)] overflow-hidden border border-[var(--line)]">

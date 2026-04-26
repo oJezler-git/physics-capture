@@ -137,9 +137,7 @@ export const ResultsPage = () => {
                 {physicsResult.syncStatus.isMock ? (
                   <span>Estimated (30 FPS)</span>
                 ) : (
-                  <span>
-                    Scientific Grade ({physicsResult.syncStatus.trueFps?.toFixed(2)} FPS)
-                  </span>
+                  <span>Scientific Grade ({physicsResult.syncStatus.trueFps?.toFixed(2)} FPS)</span>
                 )}
               </div>
             )}
@@ -170,7 +168,12 @@ export const ResultsPage = () => {
               <Button variant="alt" onClick={handleExportJson} className="px-4 py-2 text-[10px]">
                 JSON
               </Button>
-              <Button variant="main" onClick={handleExportPdf} disabled={isExportingPdf} className="px-6 py-2 text-xs">
+              <Button
+                variant="main"
+                onClick={handleExportPdf}
+                disabled={isExportingPdf}
+                className="px-6 py-2 text-xs"
+              >
                 {isExportingPdf ? 'Saving...' : 'Export PDF'}
               </Button>
             </div>
@@ -244,7 +247,10 @@ export const ResultsPage = () => {
                   {chartSeries.map((series) => (
                     <div key={`chart-${series.ballId}`} className="h-[200px] w-full">
                       <div className="flex items-center gap-2 mb-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: series.color }} />
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: series.color }}
+                        />
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                           Ball {series.ballId + 1} Velocity (m/s)
                         </p>
@@ -263,7 +269,12 @@ export const ResultsPage = () => {
                           />
                           <YAxis stroke="#475569" fontSize={9} unit="m/s" />
                           <Tooltip
-                            contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: '10px' }}
+                            contentStyle={{
+                              background: '#0f172a',
+                              border: '1px solid #334155',
+                              borderRadius: '8px',
+                              fontSize: '10px',
+                            }}
                             labelFormatter={(value) => `t = ${(Number(value) / 1000).toFixed(3)}s`}
                           />
                           <Line
@@ -304,22 +315,36 @@ export const ResultsPage = () => {
 
             <aside className="space-y-6" style={{ animationDelay: '150ms' }}>
               <section className="surface-panel p-5 glitch-in stagger-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Momentum Flow</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">
+                  Momentum Flow
+                </h3>
                 <div className="space-y-3">
                   {physicsResult.balls.map((ball) => (
-                    <article key={`p-${ball.ballId}`} className="surface-soft p-3 rounded-xl border border-[var(--line)]">
+                    <article
+                      key={`p-${ball.ballId}`}
+                      className="surface-soft p-3 rounded-xl border border-[var(--line)]"
+                    >
                       <div className="flex justify-between mb-2">
-                        <span className="text-[9px] font-bold uppercase text-slate-500">Ball {ball.ballId + 1}</span>
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BALL_COLORS[ball.ballId % BALL_COLORS.length] }} />
+                        <span className="text-[9px] font-bold uppercase text-slate-500">
+                          Ball {ball.ballId + 1}
+                        </span>
+                        <div
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: BALL_COLORS[ball.ballId % BALL_COLORS.length] }}
+                        />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-[8px] uppercase text-slate-500 mb-1">Before</p>
-                          <p className="text-xs font-mono text-slate-200">{ball.p_before.value.toFixed(3)}</p>
+                          <p className="text-xs font-mono text-slate-200">
+                            {ball.p_before.value.toFixed(3)}
+                          </p>
                         </div>
                         <div>
                           <p className="text-[8px] uppercase text-slate-500 mb-1">After</p>
-                          <p className="text-xs font-mono text-slate-200">{ball.p_after.value.toFixed(3)}</p>
+                          <p className="text-xs font-mono text-slate-200">
+                            {ball.p_after.value.toFixed(3)}
+                          </p>
                         </div>
                       </div>
                     </article>
@@ -328,21 +353,32 @@ export const ResultsPage = () => {
               </section>
 
               <section className="surface-panel p-5 glitch-in stagger-4">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Energy (J)</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">
+                  Energy (J)
+                </h3>
                 <div className="space-y-3">
                   {physicsResult.balls.map((ball) => (
-                    <article key={`ke-${ball.ballId}`} className="surface-soft p-3 rounded-xl border border-[var(--line)]">
+                    <article
+                      key={`ke-${ball.ballId}`}
+                      className="surface-soft p-3 rounded-xl border border-[var(--line)]"
+                    >
                       <div className="flex justify-between mb-2">
-                        <span className="text-[9px] font-bold uppercase text-slate-500">Ball {ball.ballId + 1}</span>
+                        <span className="text-[9px] font-bold uppercase text-slate-500">
+                          Ball {ball.ballId + 1}
+                        </span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-[8px] uppercase text-slate-500 mb-1">Pre</p>
-                          <p className="text-xs font-mono text-emerald-400">{ball.ke_before.value.toFixed(4)}</p>
+                          <p className="text-xs font-mono text-emerald-400">
+                            {ball.ke_before.value.toFixed(4)}
+                          </p>
                         </div>
                         <div>
                           <p className="text-[8px] uppercase text-slate-500 mb-1">Post</p>
-                          <p className="text-xs font-mono text-rose-400">{ball.ke_after.value.toFixed(4)}</p>
+                          <p className="text-xs font-mono text-rose-400">
+                            {ball.ke_after.value.toFixed(4)}
+                          </p>
                         </div>
                       </div>
                     </article>

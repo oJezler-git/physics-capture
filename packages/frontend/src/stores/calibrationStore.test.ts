@@ -71,7 +71,7 @@ describe('calibrationStore', () => {
   it('resets to idle state', () => {
     useCalibrationStore.getState().onCalibrationComplete(calibrationResultFixture);
     useCalibrationStore.getState().reset();
-    
+
     const state = useCalibrationStore.getState();
     expect(state.status).toBe('idle');
     expect(state.reprojectionError).toBeNull();
@@ -94,8 +94,8 @@ describe('calibrationStore', () => {
 
   it('falls back to intrinsic error if stereo is null', () => {
     const intrinsicOnly = {
-        ...calibrationResultFixture,
-        stereo: null
+      ...calibrationResultFixture,
+      stereo: null,
     };
     useCalibrationStore.getState().onCalibrationComplete(intrinsicOnly);
     expect(useCalibrationStore.getState().reprojectionError).toBe(0.45);

@@ -240,7 +240,10 @@ export const SetupPage = () => {
           <section className="surface-panel flex flex-col gap-5 p-5 glitch-in stagger-2">
             <div className="surface-soft flex flex-col items-center justify-center gap-3 p-5 text-center">
               {qrCodeUrl ? (
-                <div className="rounded-[1rem] border bg-white p-1.5 shadow-sm" style={{ borderColor: 'var(--line)' }}>
+                <div
+                  className="rounded-[1rem] border bg-white p-1.5 shadow-sm"
+                  style={{ borderColor: 'var(--line)' }}
+                >
                   <img src={qrCodeUrl} alt="Join QR code" className="h-40 w-40" />
                 </div>
               ) : (
@@ -252,8 +255,14 @@ export const SetupPage = () => {
               <div className="w-full">
                 <p className="eyebrow">Quick Code</p>
                 <div className="mt-1 flex items-center justify-center gap-2">
-                  <p className="font-mono text-xl font-bold tracking-widest text-[var(--accent)]">{inviteCode}</p>
-                  <Button variant="alt" onClick={() => copyText(inviteCode, 'code')} className="px-2.5 py-1 text-[10px]">
+                  <p className="font-mono text-xl font-bold tracking-widest text-[var(--accent)]">
+                    {inviteCode}
+                  </p>
+                  <Button
+                    variant="alt"
+                    onClick={() => copyText(inviteCode, 'code')}
+                    className="px-2.5 py-1 text-[10px]"
+                  >
                     {copied === 'code' ? '✓' : 'Copy'}
                   </Button>
                 </div>
@@ -262,35 +271,65 @@ export const SetupPage = () => {
 
             <div className="surface-soft p-5 space-y-3">
               <p className="eyebrow">Technical Details</p>
-              
+
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Session Key</span>
-                  <Button onClick={() => copyText(sessionId, 'session')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</Button>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
+                    Session Key
+                  </span>
+                  <Button
+                    onClick={() => copyText(sessionId, 'session')}
+                    className="text-[10px] text-[var(--accent)] hover:underline"
+                  >
+                    Copy
+                  </Button>
                 </div>
-                <p className="font-mono text-[10px] text-slate-300 truncate" title={sessionId}>{sessionId}</p>
+                <p className="font-mono text-[10px] text-slate-300 truncate" title={sessionId}>
+                  {sessionId}
+                </p>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Invite URL</span>
-                  <Button onClick={() => copyText(phoneUrl, 'url')} className="text-[10px] text-[var(--accent)] hover:underline">Copy</Button>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
+                    Invite URL
+                  </span>
+                  <Button
+                    onClick={() => copyText(phoneUrl, 'url')}
+                    className="text-[10px] text-[var(--accent)] hover:underline"
+                  >
+                    Copy
+                  </Button>
                 </div>
-                <p className="font-mono text-[10px] text-slate-400 truncate" title={phoneUrl}>{phoneUrl}</p>
+                <p className="font-mono text-[10px] text-slate-400 truncate" title={phoneUrl}>
+                  {phoneUrl}
+                </p>
               </div>
 
               <div className="space-y-1 pt-1 border-t border-[var(--line)]">
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium block">WebSocket</span>
-                <p className="font-mono text-[10px] text-slate-400 truncate" title={wsUrl}>{wsUrl}</p>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium block">
+                  WebSocket
+                </span>
+                <p className="font-mono text-[10px] text-slate-400 truncate" title={wsUrl}>
+                  {wsUrl}
+                </p>
                 <p className="text-[9px] text-slate-600 mt-1">
-                  Source: {connection.source === 'auto' ? 'LAN Auto' : connection.source === 'env' ? 'Env Override' : 'Browser'}
+                  Source:{' '}
+                  {connection.source === 'auto'
+                    ? 'LAN Auto'
+                    : connection.source === 'env'
+                      ? 'Env Override'
+                      : 'Browser'}
                 </p>
               </div>
             </div>
           </section>
 
           {/* Right Column: Recording Profile & Connected Devices */}
-          <div className="flex flex-col gap-6 glitch-in stagger-2" style={{ animationDelay: '100ms' }}>
+          <div
+            className="flex flex-col gap-6 glitch-in stagger-2"
+            style={{ animationDelay: '100ms' }}
+          >
             <section className="surface-panel p-5 space-y-3">
               <p className="eyebrow">Recording Profile</p>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -306,7 +345,9 @@ export const SetupPage = () => {
                         : 'border-[var(--line)] bg-[var(--bg-panel)] text-slate-400 hover:border-slate-500 hover:text-slate-200'
                     } ${profile.disabled ? 'cursor-not-allowed opacity-40' : ''}`}
                   >
-                    <div className={`text-xs font-semibold tracking-wide ${recordingMode === profile.mode ? 'text-[var(--accent)]' : 'text-slate-200'}`}>
+                    <div
+                      className={`text-xs font-semibold tracking-wide ${recordingMode === profile.mode ? 'text-[var(--accent)]' : 'text-slate-200'}`}
+                    >
                       {profile.label}
                     </div>
                     <div className="text-[11px] leading-relaxed opacity-80 hidden md:block">
@@ -322,7 +363,7 @@ export const SetupPage = () => {
                 <p className="eyebrow">Connected Devices</p>
                 <span className="ui-pill">{cameras.length} linked</span>
               </div>
-              
+
               <div className="surface-soft p-5 rounded-xl">
                 {cameras.length === 0 ? (
                   <div className="flex flex-col items-center justify-center text-center space-y-4 py-8">
@@ -330,8 +371,12 @@ export const SetupPage = () => {
                       <span className="h-2 w-2 rounded-full bg-slate-500" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-300">Waiting for phones to join...</p>
-                      <p className="text-[11px] text-slate-500 mt-1 max-w-[220px] mx-auto">Scan the QR code or open the Invite URL on a mobile device.</p>
+                      <p className="text-sm font-medium text-slate-300">
+                        Waiting for phones to join...
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1 max-w-[220px] mx-auto">
+                        Scan the QR code or open the Invite URL on a mobile device.
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -345,7 +390,10 @@ export const SetupPage = () => {
                           <div className="flex items-center gap-3">
                             <span
                               className="h-2 w-2 rounded-full shadow-sm"
-                              style={{ background: ballTone[index % ballTone.length], boxShadow: `0 0 8px ${ballTone[index % ballTone.length]}` }}
+                              style={{
+                                background: ballTone[index % ballTone.length],
+                                boxShadow: `0 0 8px ${ballTone[index % ballTone.length]}`,
+                              }}
                             />
                             <span className="text-sm font-semibold tracking-wide text-slate-200 truncate max-w-[120px]">
                               {camera.label}
@@ -353,8 +401,8 @@ export const SetupPage = () => {
                           </div>
                           <span
                             className={`px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider shrink-0 ${
-                              camera.status === 'live' 
-                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' 
+                              camera.status === 'live'
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
                                 : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
                             }`}
                           >

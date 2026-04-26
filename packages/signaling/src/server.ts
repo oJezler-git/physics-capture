@@ -11,11 +11,7 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { status as GrpcStatus } from "@grpc/grpc-js";
 import { extractFrames } from "./ffmpeg.js";
-import {
-  runCalibration,
-  trackBalls,
-  computePhysics,
-} from "./grpc-client.js";
+import { runCalibration, trackBalls, computePhysics } from "./grpc-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,7 +50,6 @@ const resolveExperimentDir = (experimentId: string): string | null => {
   }
   return experimentDir;
 };
-
 
 async function runSyncMarkerDecode(experimentId: string): Promise<void> {
   const venvPython = path.resolve(
@@ -328,7 +323,6 @@ app.post("/api/calibration/profiles", async (req, res) => {
   }
 });
 
-
 app.post("/api/calibrate", async (req, res) => {
   try {
     const { experimentId, manualScale, clientId, cameraIds } = req.body;
@@ -412,9 +406,7 @@ app.post("/api/calibrate", async (req, res) => {
     }
     // Allow caller to override detected cameras (e.g. force single-camera mode).
     const requestedCameraIds = Array.isArray(cameraIds)
-      ? cameraIds
-          .map(Number)
-          .filter((id) => Number.isInteger(id) && id >= 0)
+      ? cameraIds.map(Number).filter((id) => Number.isInteger(id) && id >= 0)
       : [];
     const useCameraIds: number[] =
       requestedCameraIds.length > 0
@@ -691,9 +683,13 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     res.json(responsePayload);
   } catch (err: unknown) {
     console.error("Physics endpoint error:", err);
-    const message = err instanceof Error ? err.message : "Failed to compute physics";
+    const message =
+      err instanceof Error ? err.message : "Failed to compute physics";
     const grpcCode =
-      err && typeof err === "object" && "code" in err && typeof err.code === "number"
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      typeof err.code === "number"
         ? (err.code as number)
         : undefined;
 
@@ -826,11 +822,9 @@ app.post("/api/track", async (req, res) => {
       end_frame_idx !== undefined &&
       end_frame_idx < start_frame_idx
     ) {
-      return res
-        .status(400)
-        .json({
-          error: "Invalid frame range: end_frame_idx < start_frame_idx",
-        });
+      return res.status(400).json({
+        error: "Invalid frame range: end_frame_idx < start_frame_idx",
+      });
     }
 
     console.log(
@@ -1058,7 +1052,6 @@ app.get(
     }
   },
 );
-
 
 wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
   ws.on("message", (data: string) => {

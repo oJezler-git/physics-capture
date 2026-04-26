@@ -121,11 +121,7 @@ export const FrameScrubber: React.FC<FrameScrubberProps> = ({
     <div className="surface-panel rise-in flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center gap-3">
         {onPlayToggle && (
-          <Button
-            variant="main"
-            onClick={onPlayToggle}
-            className="min-w-[7rem]"
-          >
+          <Button variant="main" onClick={onPlayToggle} className="min-w-[7rem]">
             {isPlaying ? 'PAUSE' : 'PLAY'}
           </Button>
         )}

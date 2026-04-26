@@ -395,7 +395,9 @@ export const PhonePage = () => {
       )}
 
       <div className="absolute z-20 left-3 right-3 bottom-3 sm:left-auto sm:w-[min(420px,calc(100vw-1.5rem))] lg:w-[min(340px,34vw)] max-h-[42vh] overflow-y-auto rounded-3xl border border-[var(--line)] bg-[#09090b]/80 p-5 shadow-lg backdrop-blur-xl custom-scrollbar">
-        <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-2">console</p>
+        <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-2">
+          console
+        </p>
         {debugLog.length === 0 ? (
           <p className="text-xs text-slate-500">No logs yet...</p>
         ) : (
@@ -406,7 +408,9 @@ export const PhonePage = () => {
           ))
         )}
         {errorMessage && (
-          <p className="text-[11px] leading-4 text-[var(--accent)] break-all mt-1">error={errorMessage}</p>
+          <p className="text-[11px] leading-4 text-[var(--accent)] break-all mt-1">
+            error={errorMessage}
+          </p>
         )}
       </div>
     </div>

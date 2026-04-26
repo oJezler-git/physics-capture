@@ -9,7 +9,10 @@ import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '
 export type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
   | { type: 'peer:joined'; clientId: string; role: 'pc' | 'phone' }
-  | { type: 'calibration:progress'; data: { progress: number; stage?: string; message?: string; reprojection_error_px?: number } }
+  | {
+      type: 'calibration:progress';
+      data: { progress: number; stage?: string; message?: string; reprojection_error_px?: number };
+    }
   | { type: 'calibration:failed'; data: { message: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }

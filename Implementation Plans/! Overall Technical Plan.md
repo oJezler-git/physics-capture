@@ -46,6 +46,7 @@ Based on the strict constraints of the physical setup (unlocked auto-exposure, m
 Instead, PhysicsCapture uses a **static Sync Marker** on the laptop screen that turns synchronisation into a signal-processing problem.
 
 **Setup:**
+
 - The laptop screen renders a **high-contrast rectangular border** (used as a stable localisation target for perspective rectification).
 - Inside the border are two stacked elements:
   - **Top (macro-time):** a 10-bit **Gray code** strip that increments once per display refresh frame.
@@ -53,6 +54,7 @@ Instead, PhysicsCapture uses a **static Sync Marker** on the laptop screen that 
 - The phones record the Sync Marker for **3 seconds before** the ball roll and **3 seconds after** it ends, and it remains visible in-frame throughout the recording.
 
 **Python CV Sync Analysis:**
+
 - After upload and frame extraction, the Python pipeline locates the marker border, computes a homography, and uses `cv2.warpPerspective` to rectify the ROI.
 - **Macro-time (Gray code):** sample bit centers, threshold to 0/1, and decode the Gray-coded integer frame counter `N`.
 - **Micro-time (grating phase):** crop the sine region, vertically average (`roi.mean(axis=0)`) to a 1D signal, then take a 1D FFT (`np.fft.fft`) and read phase (`np.angle`) at the known spatial frequency bin to obtain `φ`.
@@ -65,6 +67,7 @@ Instead, PhysicsCapture uses a **static Sync Marker** on the laptop screen that 
   per-device clock drift.
 
 **Physics Engine Integration:**
+
 - All velocity fitting and physics calculations evaluate positions using **true timestamps**
   from the master timestamp array — never raw frame indices.
 - This eliminates the two dominant sources of multi-camera timing error: shutter phase
@@ -78,6 +81,7 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 ## 3. Camera Configuration
 
 ### Phone Web App Settings (getUserMedia)
+
 ```javascript
 {
   video: {
@@ -95,18 +99,20 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 > velocity uncertainty, well below typical lab equipment. A native iOS app is not being pursued.
 
 ### Recommended Physical Setup
+
 - **Camera 1 (primary):** Side-on, perpendicular to ball travel axis, at ball height
 - **Camera 2 (overhead):** Directly above, captures X-Z plane
 - Together: full 3D position reconstruction without parallax ambiguity
 
 ### Recording Format
+
 - The phone web app uses the native **`MediaRecorder` API** to capture video locally
   on the device during the experiment at a massive constant bitrate:
   ```javascript
   new MediaRecorder(stream, {
-    mimeType: 'video/webm;codecs=vp9',  // avc1 fallback on iOS
-    videoBitsPerSecond: 100_000_000      // 100 Mbps
-  })
+    mimeType: "video/webm;codecs=vp9", // avc1 fallback on iOS
+    videoBitsPerSecond: 100_000_000, // 100 Mbps
+  });
   ```
   At 100 Mbps, inter-frame compression artefacts are negligible for physics tracking purposes.
 - Recording happens entirely on the phone — **no network transfer occurs during capture**.
@@ -125,28 +131,31 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 ## 4. Frontend (React + Vite + TypeScript)
 
 ### Stack
-| Concern | Library | Reason |
-|---|---|---|
-| Framework | React 18 + Vite | You know it, fast HMR |
-| Language | TypeScript strict mode | Catch unit/type bugs early |
-| Styling | Tailwind CSS | Fast layout |
-| State | Zustand | Lightweight, no boilerplate |
-| WebRTC | Native browser API + simple-peer | Peer connection abstraction |
-| WebSocket | Native + `ws` types | Signaling + control messages |
-| Canvas | Native Canvas2D API | Direct pixel access, no abstraction overhead |
-| Video | HTML5 `<video>` + `MediaStream` | |
-| Graphing | Recharts | Velocity/momentum output charts |
-| Protocol buffers | `protobufjs` | Type-safe gRPC messages |
+
+| Concern          | Library                          | Reason                                       |
+| ---------------- | -------------------------------- | -------------------------------------------- |
+| Framework        | React 18 + Vite                  | You know it, fast HMR                        |
+| Language         | TypeScript strict mode           | Catch unit/type bugs early                   |
+| Styling          | Tailwind CSS                     | Fast layout                                  |
+| State            | Zustand                          | Lightweight, no boilerplate                  |
+| WebRTC           | Native browser API + simple-peer | Peer connection abstraction                  |
+| WebSocket        | Native + `ws` types              | Signaling + control messages                 |
+| Canvas           | Native Canvas2D API              | Direct pixel access, no abstraction overhead |
+| Video            | HTML5 `<video>` + `MediaStream`  |                                              |
+| Graphing         | Recharts                         | Velocity/momentum output charts              |
+| Protocol buffers | `protobufjs`                     | Type-safe gRPC messages                      |
 
 ### Key UI Screens
 
 #### 1. Session Setup
+
 - Add camera devices (PC webcam or linked phones via QR code/room code)
 - Camera preview with live feed from all devices
 - Position guidance: ensure the laptop screen Sync Marker (border + Gray code + grating) is visible in all camera frames
 - **Ball configuration:** number of balls (1–3), mass per ball in grams, mass uncertainty (default ±1g)
 
 #### 2. Calibration
+
 - User places calibration board (checkerboard) in frame
 - System detects corners automatically (OpenCV via backend)
 - Intrinsic calibration per camera (focal length, distortion coefficients)
@@ -154,6 +163,7 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 - Calibration quality score shown (reprojection error in pixels)
 
 #### 3. Experiment Recording
+
 - Laptop screen displays the Sync Marker (phased grating + Gray code) automatically
 - Live preview from all cameras simultaneously (via WebRTC)
 - Press record → all phones begin `MediaRecorder` local capture
@@ -161,6 +171,7 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 - Stop recording → phones upload single video file to server → `ffmpeg` extracts PNG frames
 
 #### 4. Ball Selection & Tracking
+
 - Frame scrubber per camera
 - User clicks/draws bounding box around each ball on frame 0 (up to **3 balls**)
 - "Track" button triggers SAM2 pipeline on backend — all balls tracked simultaneously in one pass
@@ -170,6 +181,7 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 - **Single-camera mode:** motion treated as planar; ruler calibration used for px→mm scale
 
 #### 5. Results
+
 - Velocity vs time graph per ball (with error bars)
 - Pre/post collision velocity table
 - Momentum before/after (each ball + total system)
@@ -184,7 +196,9 @@ residuals of the linear fit to the unwrapped phase timeline `Φ(n)` and Gray-cod
 ## 5. Node.js Backend (Signaling + Coordination)
 
 ### Role
+
 Node is **not** the compute layer. It is the coordinator:
+
 - WebRTC signaling (ICE candidates, SDP exchange) and live preview relay
 - File storage coordination (receives post-recording video files from phones)
 - Video frame extraction: invokes `ffmpeg` via `child_process` to unpack `.webm`/`.mp4`
@@ -193,6 +207,7 @@ Node is **not** the compute layer. It is the coordinator:
 - WebSocket relay for UI ↔ Python status updates
 
 ### Stack
+
 ```
 Node.js 20 LTS
 Express 5
@@ -204,6 +219,7 @@ ffmpeg  (system dependency — frame extraction from uploaded video)
 ```
 
 ### File Storage
+
 ```
 /experiments/
   {experimentId}/
@@ -237,6 +253,7 @@ ffmpeg  (system dependency — frame extraction from uploaded video)
 
 The critical tracking step uses **SAM2** (Meta's Segment Anything Model 2).
 SAM2 is PyTorch-native. Running it from C++ via ONNX introduces:
+
 - Quantisation loss
 - Architecture compromises
 - Maintenance burden
@@ -249,6 +266,7 @@ is equally capable in Python — OpenCV's Python bindings call the same C++ code
 replaced module by module with a C++ gRPC service without touching the rest of the system.
 
 ### Stack
+
 ```
 Python 3.11
 FastAPI + uvicorn          (REST API + WebSocket status)
@@ -267,6 +285,7 @@ uncertainties              (automatic error propagation through all physics calc
 ## 7. Computer Vision Pipeline
 
 ### Step 1: Camera Intrinsic Calibration
+
 ```
 Tool: OpenCV calibrateCamera()
 Input: 20+ images of 9×7 checkerboard from each camera
@@ -280,6 +299,7 @@ Applied to all captured frames before any tracking:
 ```
 
 ### Step 2: Stereo Calibration (Multi-Camera)
+
 ```
 Tool: OpenCV stereoCalibrate()
 Input: Simultaneous checkerboard images from both cameras
@@ -299,6 +319,7 @@ This gives us the precise 3D relationship between camera positions.
 Meta's Segment Anything Model 2 is a foundation model for visual segmentation
 in images and video. Given an initial prompt (click or bounding box), it tracks
 the target object through an entire video sequence. It handles:
+
 - Texture-less objects (a yellow tennis ball is actually easy)
 - Partial occlusion
 - Motion blur
@@ -334,6 +355,7 @@ for frame_idx, obj_ids, masks in predictor.propagate_in_video(inference_state):
 ```
 
 **Sub-pixel centroid extraction:**
+
 ```python
 def get_subpixel_centroid(mask, frame):
     # Use mask as region of interest
@@ -345,6 +367,7 @@ def get_subpixel_centroid(mask, frame):
 ```
 
 **Confidence & fallback:**
+
 - SAM2 outputs mask confidence per frame
 - Frames below threshold (< 0.7) are flagged
 - User is prompted to manually correct flagged frames in UI
@@ -355,7 +378,7 @@ For maximum accuracy, track forward AND backward through the video,
 then take weighted average of both passes (weighted by confidence score).
 This is standard practice in research and significantly reduces drift.
 
-### Step 4: 3D Reconstruction *(multi-camera only — optional)*
+### Step 4: 3D Reconstruction _(multi-camera only — optional)_
 
 Single-camera experiments use the planar assumption: 2D pixel coordinates are converted
 directly to real-world distances using the ruler scale factor. No stereo reconstruction needed.
@@ -382,6 +405,7 @@ def triangulate_position(p0, p1, P0, P1):
 ```
 
 ### Step 5: Scale Calibration
+
 - User marks two points of known distance in frame (e.g. ends of a 1m ruler)
 - Pixel-to-metre scale factor computed per camera
 - Applied to all position measurements
@@ -405,22 +429,23 @@ def fit_velocity_segment(times, positions):
     """
     Fit constant velocity model to a window of frames.
     Returns velocity with uncertainty.
-    
+
     For rolling ball: v = v0 + a*t (allow small deceleration for friction)
     """
     def linear_model(t, x0, v0, a):
         return x0 + v0*t + 0.5*a*t**2
-    
-    popt, pcov = curve_fit(linear_model, times, positions, 
+
+    popt, pcov = curve_fit(linear_model, times, positions,
                             sigma=position_uncertainties,
                             absolute_sigma=True)
-    
+
     # pcov is the covariance matrix → extract uncertainties
     x0, v0, a = correlated_values(popt, pcov)
     return v0  # ufloat with automatic uncertainty propagation
 ```
 
 ### Collision Frame Detection
+
 ```
 1. Compute rolling velocity estimate over window of 5 frames
 2. Monitor for sudden velocity change > threshold
@@ -431,6 +456,7 @@ def fit_velocity_segment(times, positions):
 ```
 
 ### Momentum & Energy Calculations
+
 ```python
 # All calculations use `uncertainties` library
 # Uncertainty propagates automatically through every operation
@@ -462,6 +488,7 @@ position tracking accuracy, calibration error, and mass measurement error.
 Results display as e.g. `v = 1.34 ± 0.02 m/s` not just `v = 1.34 m/s`.
 
 ### Friction Compensation (optional)
+
 If surface friction is measurable (from pre-collision deceleration),
 it can be subtracted from the model. The fitting function already includes
 an acceleration term `a` — if this is consistent across pre-collision frames,
@@ -519,6 +546,7 @@ message BallResult {
 ## 10. Full Dependency List
 
 ### Node.js Service
+
 ```json
 {
   "dependencies": {
@@ -533,10 +561,12 @@ message BallResult {
   }
 }
 ```
+
 > **System dependency:** `ffmpeg` must be installed and on `PATH`.
 > Used via `child_process.spawn` for video → PNG frame extraction.
 
 ### Python Service
+
 ```
 torch>=2.3
 torchvision
@@ -554,6 +584,7 @@ Pillow
 ```
 
 ### Frontend
+
 ```json
 {
   "dependencies": {
@@ -577,16 +608,16 @@ Pillow
 Expected end-to-end accuracy for a typical rolling ball experiment
 (1m field of view, 30fps, 1080p):
 
-| Error Source | Magnitude | Mitigation |
-|---|---|---|
-| Frame timestamp sync | < 0.5ms | Sync Marker — Gray code + grating phase, line fit on `Φ(n)` |
-| Ball position (single camera) | ±0.3px → ±0.3mm | SAM2 + Gaussian sub-pixel fit |
-| Ball position (stereo 3D) | ±0.5mm | Stereo triangulation |
-| Lens distortion | <0.1px after correction | Checkerboard calibration |
-| Scale calibration | ±0.5mm/m | Physical ruler, multiple samples |
-| Velocity fit | ±0.005–0.02 m/s | Multi-frame polynomial fit + covariance |
-| **Total velocity uncertainty** | **~1–2%** | All above combined via propagation |
-| **Total momentum uncertainty** | **~2–3%** | Includes mass measurement error |
+| Error Source                   | Magnitude               | Mitigation                                                  |
+| ------------------------------ | ----------------------- | ----------------------------------------------------------- |
+| Frame timestamp sync           | < 0.5ms                 | Sync Marker — Gray code + grating phase, line fit on `Φ(n)` |
+| Ball position (single camera)  | ±0.3px → ±0.3mm         | SAM2 + Gaussian sub-pixel fit                               |
+| Ball position (stereo 3D)      | ±0.5mm                  | Stereo triangulation                                        |
+| Lens distortion                | <0.1px after correction | Checkerboard calibration                                    |
+| Scale calibration              | ±0.5mm/m                | Physical ruler, multiple samples                            |
+| Velocity fit                   | ±0.005–0.02 m/s         | Multi-frame polynomial fit + covariance                     |
+| **Total velocity uncertainty** | **~1–2%**               | All above combined via propagation                          |
+| **Total momentum uncertainty** | **~2–3%**               | Includes mass measurement error                             |
 
 For comparison: typical undergraduate lab equipment achieves 5–15% momentum error.
 
@@ -595,6 +626,7 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 ## 12. Build Order
 
 ### Sprint 1 — Core Infrastructure
+
 - [ ] Repo setup: monorepo (Node + Python + React in `/packages`)
 - [ ] WebRTC signaling: phone → PC connection (one phone, for live preview only)
 - [ ] `MediaRecorder` local capture on phone PWA (100 Mbps, webm/mp4)
@@ -602,7 +634,8 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 - [ ] `ffmpeg` frame extraction pipeline on Node.js server → PNG sequence
 - [ ] Basic React UI: camera preview, record button, upload progress indicator
 
-### Sprint 2 — Single Camera Tracking ✦ *First working tool*
+### Sprint 2 — Single Camera Tracking ✦ _First working tool_
+
 - [ ] SAM2 service running locally
 - [ ] gRPC interface Node ↔ Python
 - [ ] User clicks up to 3 balls on frame 0 → tracking runs → paths overlaid on video
@@ -615,6 +648,7 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 > Sprints 3–4 add sync accuracy and 3D reconstruction but are not blocking.
 
 ### Sprint 3 — Synchronisation
+
 - [ ] Sync Marker: laptop screen displays phased grating + Gray code (static border, no fast-moving geometry)
 - [ ] Phone PWA: ensure Sync Marker is framed at start/end of every recording (3s pre/post)
 - [ ] Python: rectify marker ROI (`warpPerspective`) + decode Gray code + extract grating phase via FFT
@@ -623,13 +657,15 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 - [ ] Physics Engine: all calculations consume true timestamps, not raw frame indices
 - [ ] Multi-camera UI: side-by-side synchronised scrubbing
 
-### Sprint 4 — Multi-Camera Calibration & 3D *(optional — not required for planar experiments)*
+### Sprint 4 — Multi-Camera Calibration & 3D _(optional — not required for planar experiments)_
+
 - [ ] Checkerboard calibration flow (UI + OpenCV backend)
 - [ ] Stereo extrinsic calibration
 - [ ] 3D triangulation pipeline
 - [ ] 3D trajectory visualisation in UI (Three.js or simple canvas projection)
 
 ### Sprint 5 — Physics Polish
+
 - [ ] Full uncertainty propagation throughout
 - [ ] Friction compensation
 - [ ] Coefficient of restitution
@@ -637,6 +673,7 @@ For comparison: typical undergraduate lab equipment achieves 5–15% momentum er
 - [ ] Results export (CSV, JSON)
 
 ### Sprint 6 — Hardening
+
 - [ ] Experiment database (save, reload, compare)
 - [ ] Calibration profiles (save per venue/setup)
 - [ ] Error reporting + manual override flows
@@ -768,4 +805,4 @@ All open questions resolved:
 
 ---
 
-*Plan version 1.2 — MediaRecorder migration, Sync Marker sync, rolling KE correction*
+_Plan version 1.2 — MediaRecorder migration, Sync Marker sync, rolling KE correction_

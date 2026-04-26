@@ -1,0 +1,8 @@
+node_modules
+.venv
+.pytest_cache
+pytest_tmp_cv
+packages/cv-service/.pytest_cache
+packages/cv-service/tmp_pytest
+packages/cv-service/tests/.tmp
+packages/cv-service/tests/pytest-cache-files-*
