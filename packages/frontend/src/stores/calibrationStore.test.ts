@@ -1,4 +1,4 @@
-import type { CalibrationProfile, CalibrationResult } from '../types';
+import type { CalibrationResult } from '../types';
 import { useCalibrationStore } from './calibrationStore';
 
 const calibrationResultFixture: CalibrationResult = {
@@ -43,8 +43,14 @@ describe('calibrationStore', () => {
     expect(useCalibrationStore.getState().status).toBe('running');
     expect(useCalibrationStore.getState().progress).toBe(0);
 
-    useCalibrationStore.getState().onCalibrationProgress(0.35);
+    useCalibrationStore.getState().onCalibrationProgress({
+      progress: 0.35,
+      stage: 'DETECTING_CORNERS',
+      message: 'Searching for checkerboard corners',
+    });
     expect(useCalibrationStore.getState().progress).toBe(0.35);
+    expect(useCalibrationStore.getState().calibrationStage).toBe('DETECTING_CORNERS');
+    expect(useCalibrationStore.getState().stageMessage).toContain('checkerboard');
 
     useCalibrationStore.getState().onCalibrationComplete(calibrationResultFixture);
     const completed = useCalibrationStore.getState();

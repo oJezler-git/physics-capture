@@ -49,8 +49,17 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
   startCalibration: () =>
     set({ status: 'running', reprojectionError: null, progress: 0, error: null, calibrationStage: null, stageMessage: null }),
 
-  onCalibrationProgress: ({ progress, stage, message }) =>
-    set({ status: 'running', progress, calibrationStage: stage ?? null, stageMessage: message ?? null }),
+  onCalibrationProgress: ({ progress, stage, message, reprojection_error_px }) =>
+    set((state) => ({
+      status: 'running',
+      progress,
+      calibrationStage: stage ?? null,
+      stageMessage: message ?? null,
+      reprojectionError:
+        typeof reprojection_error_px === 'number'
+          ? reprojection_error_px
+          : state.reprojectionError,
+    })),
 
   onCalibrationComplete: (result) =>
     set({

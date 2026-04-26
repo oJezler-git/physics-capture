@@ -4,7 +4,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { Button } from '../components/ui/Button';
-import type { CalibrationProfile, CalibrationResult } from '../types';
+import type { CalibrationProfile } from '../types';
 
 interface Point {
   x: number;
@@ -97,7 +97,6 @@ export const CalibrationPage = () => {
         body: JSON.stringify({
           experimentId,
           clientId: 'pc',
-          cameraIds: cameras.map((c, i) => i),
         }),
       });
 
@@ -108,20 +107,9 @@ export const CalibrationPage = () => {
       const result = await response.json();
       onCalibrationComplete(result);
     } catch (requestError) {
-      if (window.location.hostname === 'localhost') {
-        const fallbackResult: CalibrationResult = {
-          experimentId,
-          intrinsics: [],
-          stereo: null,
-          rulerScaleFactor: null,
-          completedAt: Date.now(),
-        };
-        onCalibrationComplete(fallbackResult);
-      } else {
-        const message =
-          requestError instanceof Error ? requestError.message : 'Calibration failed unexpectedly';
-        onCalibrationFailed(message);
-      }
+      const message =
+        requestError instanceof Error ? requestError.message : 'Calibration failed unexpectedly';
+      onCalibrationFailed(message);
     } finally {
       setIsBusy(false);
     }

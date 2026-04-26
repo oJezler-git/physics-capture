@@ -43,6 +43,18 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3001;
 const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.env.PYTHON_GRPC_PORT ?? "50052"}`;
 
+const resolveExperimentDir = (experimentId: string): string | null => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
+    return null;
+  }
+  const experimentDir = path.resolve(EXPERIMENTS_DIR, experimentId);
+  const relative = path.relative(EXPERIMENTS_DIR, experimentDir);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return null;
+  }
+  return experimentDir;
+};
+
 
 async function runSyncMarkerDecode(experimentId: string): Promise<void> {
   const venvPython = path.resolve(
@@ -320,8 +332,15 @@ app.post("/api/calibration/profiles", async (req, res) => {
 app.post("/api/calibrate", async (req, res) => {
   try {
     const { experimentId, manualScale, clientId, cameraIds } = req.body;
+    if (typeof experimentId !== "string") {
+      return res.status(400).json({ error: "Missing experimentId" });
+    }
+    const experimentDir = resolveExperimentDir(experimentId);
+    if (!experimentDir) {
+      return res.status(400).json({ error: "Invalid experimentId" });
+    }
 
-    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
+    const calibDir = path.join(experimentDir, "calibration");
     if (!existsSync(calibDir))
       await fs.promises.mkdir(calibDir, { recursive: true });
 
@@ -380,7 +399,7 @@ app.post("/api/calibrate", async (req, res) => {
     };
 
     // Detect which cameras have extracted frames in this experiment.
-    const framesRoot = path.join(EXPERIMENTS_DIR, experimentId, "frames");
+    const framesRoot = path.join(experimentDir, "frames");
     let detectedCameraIds: number[] = [];
     if (existsSync(framesRoot)) {
       const entries = await fs.promises.readdir(framesRoot, {
@@ -392,9 +411,14 @@ app.post("/api/calibrate", async (req, res) => {
         .sort((a, b) => a - b);
     }
     // Allow caller to override detected cameras (e.g. force single-camera mode).
+    const requestedCameraIds = Array.isArray(cameraIds)
+      ? cameraIds
+          .map(Number)
+          .filter((id) => Number.isInteger(id) && id >= 0)
+      : [];
     const useCameraIds: number[] =
-      Array.isArray(cameraIds) && cameraIds.length > 0
-        ? cameraIds.map(Number)
+      requestedCameraIds.length > 0
+        ? requestedCameraIds
         : detectedCameraIds.length > 0
           ? detectedCameraIds
           : [0];
