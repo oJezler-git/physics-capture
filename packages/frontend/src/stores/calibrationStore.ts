@@ -15,14 +15,19 @@ interface CalibrationState {
   stereoExtrinsics: StereoExtrinsics | null;
   rulerScaleFactor: number | null; // px/mm; null if stereo calibration used
   progress: number;
-  calibrationStage: string | null;  // e.g. 'DETECTING_CORNERS', 'CALIBRATING_STEREO'
-  stageMessage: string | null;       // human-readable message from the Python service
+  calibrationStage: string | null; // e.g. 'DETECTING_CORNERS', 'CALIBRATING_STEREO'
+  stageMessage: string | null; // human-readable message from the Python service
   error: string | null;
 
   // Actions
   setProfiles: (profiles: CalibrationProfile[]) => void;
   startCalibration: () => void;
-  onCalibrationProgress: (payload: { progress: number; stage?: string; message?: string; reprojection_error_px?: number }) => void;
+  onCalibrationProgress: (payload: {
+    progress: number;
+    stage?: string;
+    message?: string;
+    reprojection_error_px?: number;
+  }) => void;
   onCalibrationComplete: (result: CalibrationResult) => void;
   onCalibrationFailed: (error: string) => void;
   saveProfile: (name: string) => void;
@@ -47,7 +52,14 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
   setProfiles: (profiles) => set({ profiles }),
 
   startCalibration: () =>
-    set({ status: 'running', reprojectionError: null, progress: 0, error: null, calibrationStage: null, stageMessage: null }),
+    set({
+      status: 'running',
+      reprojectionError: null,
+      progress: 0,
+      error: null,
+      calibrationStage: null,
+      stageMessage: null,
+    }),
 
   onCalibrationProgress: ({ progress, stage, message, reprojection_error_px }) =>
     set((state) => ({
@@ -56,9 +68,7 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
       calibrationStage: stage ?? null,
       stageMessage: message ?? null,
       reprojectionError:
-        typeof reprojection_error_px === 'number'
-          ? reprojection_error_px
-          : state.reprojectionError,
+        typeof reprojection_error_px === 'number' ? reprojection_error_px : state.reprojectionError,
     })),
 
   onCalibrationComplete: (result) =>

@@ -12,9 +12,20 @@
     "dev:cv": ".venv\\Scripts\\python packages/cv-service/grpc_server.py",
     "test:frontend": "npm test --workspace=frontend",
     "test:cv": "pytest packages/cv-service/tests",
-    "test:signaling": "npm test --workspace=signaling"
+    "test:signaling": "npm test --workspace=signaling",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,md,yml,yaml,css,scss,html}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.6.2"
   }
 }

@@ -176,6 +176,13 @@ From the project root:
 - **Signaling unit/integration tests:** `npm run test:signaling`
 - **CV service tests:** `npm run test:cv`
 
+### Formatting
+
+Formatting is automated on commit via a Husky pre-commit hook that runs `lint-staged` + Prettier on staged files.
+
+- **Format all files manually:** `npm run format`
+- **Check formatting only:** `npm run format:check`
+
 #### CV Service (Targeted Calibration Tests)
 
 For focused calibration verification:
@@ -195,14 +202,19 @@ Remove-Item -Recurse -Force .\pytest_tmp_cv
 - **CV service coverage:** `.venv/Scripts/python -m pytest --cov=packages/cv-service --cov-config=packages/cv-service/.coveragerc packages/cv-service/tests`
 
 #### Backend (Signaling)
+
 The signaling service uses `vitest` for both unit and inter-process gRPC integration tests.
+
 - **Run tests:** `npm test --workspace=signaling`
 
 #### Frontend
+
 The frontend uses `vitest` for UI logic and state management.
+
 - **Run tests:** `npm test --workspace=frontend`
 
 #### Full Project (CI)
+
 The unified CI pipeline runs automatically on every push or pull request to `main` via `.github/workflows/full-ci.yml`, ensuring that all backend and frontend components remain verified.
 
 ## License
