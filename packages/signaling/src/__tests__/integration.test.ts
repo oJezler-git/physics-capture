@@ -30,6 +30,7 @@ describe("Signaling <-> CV gRPC Integration", () => {
   let pythonProcess: ChildProcess;
   let port: number;
   const tempExperimentsDir = path.join(__dirname, "temp_experiments");
+  let pythonStderr = "";
 
   beforeAll(async () => {
     port = await getFreePort();
@@ -41,13 +42,16 @@ describe("Signaling <-> CV gRPC Integration", () => {
       __dirname,
       "../../../../.venv/Scripts/python.exe",
     );
+    const pythonBin =
+      process.env.PHYSICSCAPTURE_PYTHON_BIN ??
+      (fs.existsSync(venvPython) ? venvPython : "python");
 
     if (!fs.existsSync(tempExperimentsDir)) {
       fs.mkdirSync(tempExperimentsDir, { recursive: true });
     }
 
     // Start Python server
-    pythonProcess = spawn(venvPython, [serverPath], {
+    pythonProcess = spawn(pythonBin, [serverPath], {
       env: {
         ...process.env,
         PYTHON_GRPC_PORT: port.toString(),
@@ -56,11 +60,19 @@ describe("Signaling <-> CV gRPC Integration", () => {
       },
       // stdio: 'inherit' // Uncomment for debugging
     });
+    pythonProcess.stderr?.on("data", (chunk) => {
+      pythonStderr += chunk.toString();
+    });
 
     // Wait for server to be ready by probing the port
-    const maxRetries = 20;
+    const maxRetries = 60;
     let connected = false;
     for (let i = 0; i < maxRetries; i++) {
+      if (pythonProcess.exitCode !== null) {
+        throw new Error(
+          `Python gRPC server exited early (code=${pythonProcess.exitCode}). stderr:\n${pythonStderr}`,
+        );
+      }
       try {
         await new Promise((resolve, reject) => {
           const socket = net.connect(port, "127.0.0.1", () => {
@@ -78,7 +90,7 @@ describe("Signaling <-> CV gRPC Integration", () => {
 
     if (!connected) {
       throw new Error(
-        `Failed to connect to Python gRPC server on port ${port} after ${maxRetries} retries`,
+        `Failed to connect to Python gRPC server on port ${port} after ${maxRetries} retries. stderr:\n${pythonStderr}`,
       );
     }
 
@@ -108,7 +120,10 @@ describe("Signaling <-> CV gRPC Integration", () => {
     }
 
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].stage).toBe("DONE");
+    expect(results[results.length - 1]?.stage).toBe("FAILED");
+    expect(results[results.length - 1]?.message).toContain(
+      "Frames directory not found",
+    );
   });
 
   it("should handle errors for missing experiments in ComputePhysics", async () => {

@@ -54,3 +54,7 @@ solution.md
 /pytest_tmp_cv/
 /packages/cv-service/tmp_pytest/
 /packages/cv-service/tests/.tmp/
+
+# Playwright artifacts
+/packages/frontend/test-results/
+/packages/frontend/playwright-report/
