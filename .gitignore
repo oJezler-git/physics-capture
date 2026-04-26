@@ -39,6 +39,7 @@ out/
 htmlcov/
 *.lcov
 coverage.xml
+.pytest_cache/
 
 # Documentation
 solution.md
@@ -48,3 +49,8 @@ solution.md
 # Runtime experiment artifacts
 /experiments/
 /packages/experiments/
+
+# Local test temp folders
+/pytest_tmp_cv/
+/packages/cv-service/tmp_pytest/
+/packages/cv-service/tests/.tmp/

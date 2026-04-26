@@ -170,10 +170,29 @@ This project maintains a robust testing suite for all components to ensure produ
 
 ### Commands
 
-#### Backend (CV Service)
-The CV service uses `pytest` and maintains coverage reporting.
-- **Run tests:** `export PYTHONPATH=$PYTHONPATH:$(pwd)/packages/cv-service && .venv/Scripts/python -m pytest packages/cv-service/tests`
-- **Check coverage:** `export PYTHONPATH=$PYTHONPATH:$(pwd)/packages/cv-service && .venv/Scripts/python -m pytest --cov=packages/cv-service --cov-config=packages/cv-service/.coveragerc packages/cv-service/tests`
+From the project root:
+
+- **Frontend unit tests:** `npm run test:frontend`
+- **Signaling unit/integration tests:** `npm run test:signaling`
+- **CV service tests:** `npm run test:cv`
+
+#### CV Service (Targeted Calibration Tests)
+
+For focused calibration verification:
+
+```powershell
+pytest -q packages/cv-service/tests/calibration/test_calibration.py packages/cv-service/tests/test_grpc_server.py --basetemp=c:/Users/<you>/.../physics-capture/pytest_tmp_cv
+```
+
+The `--basetemp` folder is only temporary pytest output. It is safe to delete after a run.
+
+```powershell
+Remove-Item -Recurse -Force .\pytest_tmp_cv
+```
+
+#### Coverage
+
+- **CV service coverage:** `.venv/Scripts/python -m pytest --cov=packages/cv-service --cov-config=packages/cv-service/.coveragerc packages/cv-service/tests`
 
 #### Backend (Signaling)
 The signaling service uses `vitest` for both unit and inter-process gRPC integration tests.
