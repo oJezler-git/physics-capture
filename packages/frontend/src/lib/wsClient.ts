@@ -9,7 +9,7 @@ import type { BallTrack, CalibrationResult, CameraDevice, PhysicsResult } from '
 export type InboundMessage =
   | { type: 'phone:joined'; data: CameraDevice }
   | { type: 'peer:joined'; clientId: string; role: 'pc' | 'phone' }
-  | { type: 'calibration:progress'; data: { progress: number; stage: string } }
+  | { type: 'calibration:progress'; data: { progress: number; stage?: string; message?: string; reprojection_error_px?: number } }
   | { type: 'calibration:failed'; data: { message: string } }
   | { type: 'calibration:complete'; data: CalibrationResult }
   | { type: 'tracking:update'; data: { tracks: BallTrack[]; progress: number } }
@@ -187,7 +187,7 @@ export class WSClient {
         // Presence info only; room membership is handled server-side.
         break;
       case 'calibration:progress':
-        useCalibrationStore.getState().onCalibrationProgress(msg.data.progress);
+        useCalibrationStore.getState().onCalibrationProgress(msg.data);
         break;
       case 'calibration:complete':
         useCalibrationStore.getState().onCalibrationComplete(msg.data);

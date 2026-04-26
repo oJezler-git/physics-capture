@@ -17,12 +17,12 @@ describe('extractFrames - Unit', () => {
 
   it('calls ffmpeg with correct arguments for PNG', async () => {
     // We need to ensure readdir returns the expected files for both the tempDir scan and the final framesDir scan.
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir) => {
-        if (dir.includes('.ffmpeg-tmp-')) {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation((async (dir: any) => {
+        if (typeof dir === 'string' && dir.includes('.ffmpeg-tmp-')) {
             return ['000001.png', '000002.png', '000003.png', '000004.png', '000005.png'];
         }
         return [];
-    });
+    }) as any);
     vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
     
     // Mock the spawned process

@@ -35,7 +35,7 @@ try:
 except ImportError:
     # Fallback for systems without SAM2 installed
     class SAM2Tracker:
-        def track(self, frames_dir, seeds):
+        def track(self, frames_dir, seeds, start_frame_idx=None, end_frame_idx=None):
             # Fallback for when SAM2 is not installed: just yield seed positions
             logger.warning("SAM2 is not installed. Using basic seed-only tracking fallback.")
             frame_files = sorted(list(frames_dir.glob("*.jpg")) + list(frames_dir.glob("*.png")))
@@ -62,14 +62,150 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         return float(value)
 
     async def RunCalibration(self, request, context):
-        logger.info(f"RunCalibration for experiment {request.experiment_id}")
-        # Placeholder implementation
+        experiment_id = request.experiment_id
+        camera_ids = list(request.camera_ids) if request.camera_ids else [0]
+        logger.info(
+            "RunCalibration for experiment=%s cameras=%s", experiment_id, camera_ids
+        )
+
+        experiment_dir = self.base_dir / experiment_id
+        calib_dir = experiment_dir / "calibration"
+        calib_dir.mkdir(parents=True, exist_ok=True)
+
+        from calibration.intrinsic import (
+            detect_corners_in_dir,
+            calibrate_camera_from_corners,
+            save_intrinsics,
+        )
+        from calibration.stereo import stereo_calibrate, save_stereo_extrinsics
+
+        # --- Stage 1: Detect corners per camera ---
+        corners_per_camera: dict[int, list] = {}
+        total_cameras = len(camera_ids)
+
+        for cam_idx, camera_id in enumerate(camera_ids):
+            frames_dir = experiment_dir / "frames" / f"cam{camera_id}"
+            if not frames_dir.exists():
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_id,
+                    stage=physics_pb2.CalibrationStage.FAILED,
+                    progress=0.0,
+                    message=f"Frames directory not found: {frames_dir}",
+                )
+                return
+
+            observations = []
+            for frame_i, total_frames, obs in detect_corners_in_dir(frames_dir):
+                progress = (cam_idx + frame_i / max(1, total_frames)) / total_cameras * 0.5
+                msg = (
+                    f"Camera {camera_id}: frame {frame_i}/{total_frames} — "
+                    + ("✓ board found" if obs is not None else "no board")
+                )
+                if obs is not None:
+                    observations.append(obs)
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_id,
+                    stage=physics_pb2.CalibrationStage.DETECTING_CORNERS,
+                    progress=progress,
+                    message=msg,
+                )
+                await asyncio.sleep(0)
+
+            corners_per_camera[camera_id] = observations
+            logger.info(
+                "Camera %d: found %d valid calibration frames", camera_id, len(observations)
+            )
+
+        # --- Stage 2: Intrinsic calibration per camera ---
         yield physics_pb2.CalibrationStatus(
-            camera_id=request.camera_ids[0] if request.camera_ids else 0,
+            camera_id=camera_ids[0],
+            stage=physics_pb2.CalibrationStage.CALIBRATING_INTRINSICS,
+            progress=0.5,
+            message="Computing intrinsic parameters...",
+        )
+        await asyncio.sleep(0)
+
+        worst_reproj = 0.0
+        intrinsic_ok = True
+        for camera_id in camera_ids:
+            observations = corners_per_camera.get(camera_id, [])
+            result = calibrate_camera_from_corners(observations)
+            if result is None:
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_id,
+                    stage=physics_pb2.CalibrationStage.FAILED,
+                    progress=0.5,
+                    message=(
+                        f"Camera {camera_id}: not enough checkerboard detections "
+                        f"({len(observations)} frames found, need ≥10). "
+                        "Move the board to more positions and ensure good lighting."
+                    ),
+                )
+                intrinsic_ok = False
+                break
+
+            out_path = calib_dir / f"cam{camera_id}_intrinsics.json"
+            save_intrinsics(result, out_path, camera_id=camera_id)
+            worst_reproj = max(worst_reproj, result.reprojection_error_px)
+
+            yield physics_pb2.CalibrationStatus(
+                camera_id=camera_id,
+                stage=physics_pb2.CalibrationStage.CALIBRATING_INTRINSICS,
+                progress=0.65,
+                reprojection_error_px=result.reprojection_error_px,
+                message=f"Camera {camera_id} intrinsics: {result.reprojection_error_px:.3f}px RMS",
+            )
+            await asyncio.sleep(0)
+
+        if not intrinsic_ok:
+            return
+
+        # --- Stage 3: Stereo calibration (only if two cameras) ---
+        if len(camera_ids) >= 2:
+            yield physics_pb2.CalibrationStatus(
+                camera_id=camera_ids[0],
+                stage=physics_pb2.CalibrationStage.CALIBRATING_STEREO,
+                progress=0.75,
+                message="Running stereo calibration...",
+            )
+            await asyncio.sleep(0)
+
+            stereo_result = stereo_calibrate(experiment_dir, camera_ids=camera_ids[:2])
+            if stereo_result is not None:
+                import numpy as np
+                save_stereo_extrinsics(
+                    stereo_result,
+                    calib_dir / "stereo_extrinsics.json",
+                )
+                worst_reproj = max(worst_reproj, stereo_result.reprojection_error_px)
+                baseline_mm = float(np.linalg.norm(stereo_result.T))
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_ids[0],
+                    stage=physics_pb2.CalibrationStage.CALIBRATING_STEREO,
+                    progress=0.90,
+                    reprojection_error_px=stereo_result.reprojection_error_px,
+                    message=f"Stereo: {stereo_result.reprojection_error_px:.3f}px RMS, baseline {baseline_mm:.1f}mm",
+                )
+                await asyncio.sleep(0)
+            else:
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_ids[0],
+                    stage=physics_pb2.CalibrationStage.CALIBRATING_STEREO,
+                    progress=0.90,
+                    message=(
+                        "Stereo calibration skipped: not enough simultaneous "
+                        "board views. Intrinsics saved."
+                    ),
+                )
+                await asyncio.sleep(0)
+
+        # --- Stage 4: Done ---
+        yield physics_pb2.CalibrationStatus(
+            camera_id=camera_ids[0],
             stage=physics_pb2.CalibrationStage.DONE,
             progress=1.0,
-            reprojection_error_px=0.1,
-            message="Calibration complete (simulated)"
+            reprojection_error_px=worst_reproj,
+            message="Calibration complete.",
         )
 
     async def TrackBalls(self, request, context):

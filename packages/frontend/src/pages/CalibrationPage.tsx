@@ -50,6 +50,8 @@ export const CalibrationPage = () => {
     status,
     reprojectionError,
     progress,
+    calibrationStage,
+    stageMessage,
     rulerScaleFactor,
     error,
     setProfiles,
@@ -58,6 +60,8 @@ export const CalibrationPage = () => {
     onCalibrationFailed,
     loadProfile,
     setRulerScale,
+    stereoExtrinsics,
+    intrinsics,
   } = useCalibrationStore();
 
   const [isBusy, setIsBusy] = useState(false);
@@ -90,7 +94,11 @@ export const CalibrationPage = () => {
       const response = await fetch('/api/calibrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ experimentId }),
+        body: JSON.stringify({
+          experimentId,
+          clientId: 'pc',
+          cameraIds: cameras.map((c, i) => i),
+        }),
       });
 
       if (!response.ok) {
@@ -172,6 +180,12 @@ export const CalibrationPage = () => {
     return distancePx / knownDistanceMm;
   }, [rulerPoints, knownDistanceMm]);
 
+  const baselineMm = useMemo(() => {
+    if (!stereoExtrinsics?.T) return null;
+    const [x, y, z] = stereoExtrinsics.T;
+    return Math.sqrt(x * x + y * y + z * z);
+  }, [stereoExtrinsics]);
+
   const updateBallMass = (index: number, field: 'mass_g' | 'uncertainty_g', value: number) => {
     const current = ballConfigs[index] || {
       ballId: index,
@@ -231,7 +245,14 @@ export const CalibrationPage = () => {
           <section className="surface-panel space-y-4 p-5 glitch-in stagger-2">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl">Calibration Status</h2>
-              <span className="ui-pill">{status}</span>
+              <div className="flex items-center gap-2">
+                {stereoExtrinsics && (
+                  <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
+                    STEREO ACTIVE
+                  </span>
+                )}
+                <span className="ui-pill">{status}</span>
+              </div>
             </div>
 
             <div className="h-2 overflow-hidden border border-[var(--line)] bg-[var(--bg-panel)] rounded-full">
@@ -241,7 +262,48 @@ export const CalibrationPage = () => {
               />
             </div>
 
-            {isBusy && (
+            {(calibrationStage || stageMessage) && (
+              <div className="space-y-1.5 rounded-xl border border-[var(--line)] bg-[var(--bg-base)]/50 p-3 shadow-inner">
+                {calibrationStage && (
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--accent)] opacity-80">
+                    Stage: {calibrationStage.replace(/_/g, ' ')}
+                  </p>
+                )}
+                {stageMessage && (
+                  <p className="text-xs font-medium leading-relaxed text-slate-300 italic">
+                    &ldquo;{stageMessage}&rdquo;
+                  </p>
+                )}
+              </div>
+            )}
+
+            {stereoExtrinsics && (
+              <div className="surface-soft border border-indigo-500/20 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
+                  <p className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                    3D Stereo Matrix Recovered
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[10px] text-slate-400 uppercase">Baseline Distance</p>
+                    <p className="text-lg font-mono text-white">
+                      {baselineMm?.toFixed(1)} <span className="text-xs opacity-50">mm</span>
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 uppercase">RMS Error</p>
+                    <p className="text-lg font-mono text-white">
+                      {stereoExtrinsics.reprojection_error_px.toFixed(3)}{' '}
+                      <span className="text-xs opacity-50">px</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isBusy && !stageMessage && (
               <div className="surface-soft p-3">
                 <LoadingSkeleton lines={3} />
               </div>
@@ -262,6 +324,28 @@ export const CalibrationPage = () => {
             {error && (
               <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-sm font-medium text-[var(--accent)]">
                 {error}
+              </div>
+            )}
+
+            {(status === 'idle' || status === 'running') && (
+              <div className="surface-soft border-l-4 border-[var(--accent)] p-4 space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Checkerboard Instructions
+                </h3>
+                <ul className="space-y-2 text-xs text-slate-400">
+                  <li className="flex gap-2">
+                    <span className="text-[var(--accent)]">●</span>
+                    Move the board slowly to fill the frame from different angles and depths.
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-[var(--accent)]">●</span>
+                    Keep the board within view of both cameras simultaneously for 3D stereo.
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-[var(--accent)]">●</span>
+                    Avoid glare on the board surface; matte paper works best.
+                  </li>
+                </ul>
               </div>
             )}
 

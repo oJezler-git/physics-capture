@@ -15,12 +15,14 @@ interface CalibrationState {
   stereoExtrinsics: StereoExtrinsics | null;
   rulerScaleFactor: number | null; // px/mm; null if stereo calibration used
   progress: number;
+  calibrationStage: string | null;  // e.g. 'DETECTING_CORNERS', 'CALIBRATING_STEREO'
+  stageMessage: string | null;       // human-readable message from the Python service
   error: string | null;
 
   // Actions
   setProfiles: (profiles: CalibrationProfile[]) => void;
   startCalibration: () => void;
-  onCalibrationProgress: (progress: number) => void;
+  onCalibrationProgress: (payload: { progress: number; stage?: string; message?: string; reprojection_error_px?: number }) => void;
   onCalibrationComplete: (result: CalibrationResult) => void;
   onCalibrationFailed: (error: string) => void;
   saveProfile: (name: string) => void;
@@ -37,15 +39,18 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
   intrinsics: [],
   stereoExtrinsics: null,
   rulerScaleFactor: null,
+  calibrationStage: null,
+  stageMessage: null,
   progress: 0,
   error: null,
 
   setProfiles: (profiles) => set({ profiles }),
 
   startCalibration: () =>
-    set({ status: 'running', reprojectionError: null, progress: 0, error: null }),
+    set({ status: 'running', reprojectionError: null, progress: 0, error: null, calibrationStage: null, stageMessage: null }),
 
-  onCalibrationProgress: (progress) => set({ status: 'running', progress }),
+  onCalibrationProgress: ({ progress, stage, message }) =>
+    set({ status: 'running', progress, calibrationStage: stage ?? null, stageMessage: message ?? null }),
 
   onCalibrationComplete: (result) =>
     set({
@@ -90,6 +95,8 @@ export const useCalibrationStore = create<CalibrationState>((set) => ({
       intrinsics: [],
       stereoExtrinsics: null,
       rulerScaleFactor: null,
+      calibrationStage: null,
+      stageMessage: null,
       progress: 0,
       error: null,
     }),

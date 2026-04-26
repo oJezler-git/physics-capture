@@ -11,11 +11,24 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { status as GrpcStatus } from "@grpc/grpc-js";
 import { extractFrames } from "./ffmpeg.js";
-import { trackBalls, computePhysics } from "./grpc-client.js";
+import {
+  runCalibration,
+  trackBalls,
+  computePhysics,
+} from "./grpc-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXPERIMENTS_DIR = path.resolve(__dirname, "../../experiments");
+const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
+
+// WebSocket Signaling Hub State
+const rooms = new Map<
+  string,
+  { members: Map<string, { ws: WebSocket; role: string }> }
+>();
+const clientToRoom = new Map<string, string>();
+const servedFramesCount = new Map<string, number>();
 
 const app = express();
 const TEMP_DIR = path.join(EXPERIMENTS_DIR, "temp");
@@ -30,14 +43,15 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3001;
 const grpcEndpoint = `${process.env.PYTHON_GRPC_HOST ?? "localhost"}:${process.env.PYTHON_GRPC_PORT ?? "50052"}`;
 
-const PROFILES_FILE = path.join(EXPERIMENTS_DIR, "calibration_profiles.json");
-
-const servedFramesCount = new Map<string, number>();
 
 async function runSyncMarkerDecode(experimentId: string): Promise<void> {
-  const venvPython = path.resolve(__dirname, "../../../.venv/Scripts/python.exe");
+  const venvPython = path.resolve(
+    __dirname,
+    "../../../.venv/Scripts/python.exe",
+  );
   const python =
-    process.env.PHYSICSCAPTURE_PYTHON_BIN ?? (existsSync(venvPython) ? venvPython : "python");
+    process.env.PHYSICSCAPTURE_PYTHON_BIN ??
+    (existsSync(venvPython) ? venvPython : "python");
   const displayHz = process.env.SYNC_MARKER_DISPLAY_HZ ?? "60";
   const sampleStride = process.env.SYNC_MARKER_SAMPLE_STRIDE ?? "5";
 
@@ -45,7 +59,9 @@ async function runSyncMarkerDecode(experimentId: string): Promise<void> {
   const framesRoot = path.join(experimentDir, "frames");
   if (!existsSync(framesRoot)) return;
 
-  const entries = await fs.promises.readdir(framesRoot, { withFileTypes: true });
+  const entries = await fs.promises.readdir(framesRoot, {
+    withFileTypes: true,
+  });
   const cameraIds = entries
     .filter((entry) => entry.isDirectory() && /^cam\d+$/.test(entry.name))
     .map((entry) => Number(entry.name.replace("cam", "")))
@@ -54,7 +70,10 @@ async function runSyncMarkerDecode(experimentId: string): Promise<void> {
 
   if (cameraIds.length === 0) return;
 
-  const scriptPath = path.resolve(__dirname, "../../cv-service/sync/sync_marker_cli.py");
+  const scriptPath = path.resolve(
+    __dirname,
+    "../../cv-service/sync/sync_marker_cli.py",
+  );
 
   await new Promise<void>((resolve, reject) => {
     const proc = spawn(
@@ -160,7 +179,9 @@ app.use(express.json());
 
 // Global request logger
 app.use((req, res, next) => {
-  const frameMatch = req.url.match(/\/api\/experiments\/([^\/]+)\/frames\/([^\/]+)\//);
+  const frameMatch = req.url.match(
+    /\/api\/experiments\/([^\/]+)\/frames\/([^\/]+)\//,
+  );
   if (frameMatch) {
     const key = `${frameMatch[1]}-${frameMatch[2]}`;
     const count = (servedFramesCount.get(key) || 0) + 1;
@@ -169,7 +190,9 @@ app.use((req, res, next) => {
     if (count <= 5) {
       console.log(`[REQ] ${req.method} ${req.url}`);
     } else if (count === 6) {
-      console.log(`[REQ] ${req.method} ${req.url} (further logs for this camera hidden)`);
+      console.log(
+        `[REQ] ${req.method} ${req.url} (further logs for this camera hidden)`,
+      );
     }
   } else {
     console.log(`[REQ] ${req.method} ${req.url}`);
@@ -180,7 +203,9 @@ app.use((req, res, next) => {
 app.get("/api/experiments", async (req, res) => {
   try {
     console.log("[API] Listing experiments from:", EXPERIMENTS_DIR);
-    const entries = await fs.promises.readdir(EXPERIMENTS_DIR, { withFileTypes: true });
+    const entries = await fs.promises.readdir(EXPERIMENTS_DIR, {
+      withFileTypes: true,
+    });
     const experiments = entries
       .filter((e) => e.isDirectory() && e.name !== "temp")
       .map((e) => e.name);
@@ -203,7 +228,9 @@ app.get("/api/experiments/:experimentId/metadata", (req, res) => {
   const frames = fs
     .readdirSync(cam0Dir)
     .filter((f: string) => /\.(jpg|jpeg|png)$/i.test(f))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    .sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+    );
 
   // Extract physical indices from filenames like 000001.png
   const sequenceToPhysical = frames.map((filename) => {
@@ -211,7 +238,8 @@ app.get("/api/experiments/:experimentId/metadata", (req, res) => {
     return match ? parseInt(match[0], 10) - 1 : 0;
   });
 
-  const maxPhysicalIndex = sequenceToPhysical.length > 0 ? Math.max(...sequenceToPhysical) : 0;
+  const maxPhysicalIndex =
+    sequenceToPhysical.length > 0 ? Math.max(...sequenceToPhysical) : 0;
   const frameCount = maxPhysicalIndex + 1;
 
   // Create a map for the UI: physicalIndex -> filename (null if missing)
@@ -234,12 +262,17 @@ app.get("/api/network/host-hint", async (req, res) => {
     const candidates = getPrivateIPv4Candidates();
     const outboundHost = await detectOutboundIPv4();
     const preferredHost =
-      outboundHost && isPrivateIPv4(outboundHost) ? outboundHost : (candidates[0]?.address ?? null);
+      outboundHost && isPrivateIPv4(outboundHost)
+        ? outboundHost
+        : (candidates[0]?.address ?? null);
 
     res.json({
       preferredHost,
       outboundHost,
-      candidates: candidates.map(({ interfaceName, address }) => ({ interfaceName, address })),
+      candidates: candidates.map(({ interfaceName, address }) => ({
+        interfaceName,
+        address,
+      })),
     });
   } catch (err) {
     console.error("Host hint error:", err);
@@ -272,7 +305,10 @@ app.post("/api/calibration/profiles", async (req, res) => {
       if ((err as any).code !== "ENOENT") throw err;
     }
     profiles.unshift(newProfile);
-    await fs.promises.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+    await fs.promises.writeFile(
+      PROFILES_FILE,
+      JSON.stringify(profiles, null, 2),
+    );
     res.status(201).json({ message: "Profile saved" });
   } catch (err) {
     console.error("Profile save error:", err);
@@ -281,24 +317,38 @@ app.post("/api/calibration/profiles", async (req, res) => {
 });
 
 
-import { runCalibration } from "./grpc-client.js";
-
 app.post("/api/calibrate", async (req, res) => {
   try {
-    const { experimentId, manualScale } = req.body;
-    
-    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
-    if (!existsSync(calibDir)) await fs.promises.mkdir(calibDir, { recursive: true });
-    const calibPath = path.join(calibDir, "cam0_intrinsics.json");
+    const { experimentId, manualScale, clientId, cameraIds } = req.body;
 
-    if (typeof manualScale === 'number' && manualScale > 0) {
-      console.log(`[API] Applying manual scale for ${experimentId}: ${manualScale.toFixed(4)} px/mm`);
+    const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
+    if (!existsSync(calibDir))
+      await fs.promises.mkdir(calibDir, { recursive: true });
+
+    // ── Ruler / manual scale path ─────────────────────────────────────────────
+    if (typeof manualScale === "number" && manualScale > 0) {
+      console.log(
+        `[API] Applying manual scale for ${experimentId}: ${manualScale.toFixed(4)} px/mm`,
+      );
+      const calibPath = path.join(calibDir, "cam0_intrinsics.json");
+
+      // Preserve any existing intrinsic data, just update the scale fields.
+      let existing: Record<string, unknown> = {};
+      if (existsSync(calibPath)) {
+        try {
+          existing = JSON.parse(await fs.promises.readFile(calibPath, "utf-8"));
+        } catch {}
+      }
       const calibData = {
+        ...existing,
         scale_px_per_mm: manualScale,
-        scale_uncertainty_px_per_mm: 0.005 // Fixed uncertainty for manual measurement
+        scale_uncertainty_px_per_mm: 0.005,
       };
-      await fs.promises.writeFile(calibPath, JSON.stringify(calibData, null, 2));
-      
+      await fs.promises.writeFile(
+        calibPath,
+        JSON.stringify(calibData, null, 2),
+      );
+
       return res.json({
         experimentId,
         intrinsics: [calibData],
@@ -308,31 +358,112 @@ app.post("/api/calibrate", async (req, res) => {
       });
     }
 
-    // Otherwise, run automated calibration (placeholder)
+    // ── gRPC calibration path ────────────────────────────────────────────
+    // Resolve the WebSocket target for live progress pushes.
+    const wsTarget = (() => {
+      if (!clientId) return null;
+      const roomId = clientToRoom.get(clientId);
+      if (!roomId) return null;
+      return rooms.get(roomId)?.members.get(clientId) ?? null;
+    })();
+
+    const pushProgress = (payload: object) => {
+      if (wsTarget) {
+        try {
+          wsTarget.ws.send(
+            JSON.stringify({ type: "calibration:progress", data: payload }),
+          );
+        } catch {
+          /* ws closed — ignore */
+        }
+      }
+    };
+
+    // Detect which cameras have extracted frames in this experiment.
+    const framesRoot = path.join(EXPERIMENTS_DIR, experimentId, "frames");
+    let detectedCameraIds: number[] = [];
+    if (existsSync(framesRoot)) {
+      const entries = await fs.promises.readdir(framesRoot, {
+        withFileTypes: true,
+      });
+      detectedCameraIds = entries
+        .filter((e) => e.isDirectory() && /^cam\d+$/.test(e.name))
+        .map((e) => Number(e.name.replace("cam", "")))
+        .sort((a, b) => a - b);
+    }
+    // Allow caller to override detected cameras (e.g. force single-camera mode).
+    const useCameraIds: number[] =
+      Array.isArray(cameraIds) && cameraIds.length > 0
+        ? cameraIds.map(Number)
+        : detectedCameraIds.length > 0
+          ? detectedCameraIds
+          : [0];
+
+    console.log(
+      `[API] Running calibration for ${experimentId}, cameras=${useCameraIds}`,
+    );
+
     const calibrationStream = runCalibration({
       experiment_id: experimentId,
-      camera_ids: [0] 
+      camera_ids: useCameraIds,
     });
 
-    let finalStatus;
+    let finalStatus: any = null;
     for await (const status of calibrationStream) {
-        console.log("Calibration status:", status);
-        finalStatus = status;
+      console.log(
+        "[Calibration]",
+        status.stage,
+        status.progress?.toFixed(2),
+        status.message,
+      );
+      pushProgress({
+        stage: status.stage,
+        progress: status.progress,
+        reprojection_error_px: status.reprojection_error_px,
+        message: status.message,
+        camera_id: status.camera_id,
+      });
+      finalStatus = status;
     }
 
-    const calibData = {
-      scale_px_per_mm: 3.142, // Default mock scale if real calibration fails/placeholder
-      scale_uncertainty_px_per_mm: 0.008,
-      reprojection_error_px: 0.124
-    };
-    await fs.promises.writeFile(calibPath, JSON.stringify(calibData, null, 2));
+    // Check if calibration succeeded.
+    if (!finalStatus || finalStatus.stage === "FAILED") {
+      const msg =
+        finalStatus?.message ?? "Calibration failed (no status received).";
+      pushProgress({ stage: "FAILED", progress: 0, message: msg });
+      return res.status(422).json({ error: msg });
+    }
 
-    res.json({
-        experimentId,
-        intrinsics: [calibData],
-        stereo: null,
-        rulerScaleFactor: 3.142,
-        completedAt: Date.now(),
+    // Read back the intrinsics the Python service wrote to disk.
+    const intrinsicsResults: object[] = [];
+    for (const camId of useCameraIds) {
+      const p = path.join(calibDir, `cam${camId}_intrinsics.json`);
+      if (existsSync(p)) {
+        try {
+          intrinsicsResults.push(
+            JSON.parse(await fs.promises.readFile(p, "utf-8")),
+          );
+        } catch {}
+      }
+    }
+
+    const stereoPath = path.join(calibDir, "stereo_extrinsics.json");
+    let stereoData: object | null = null;
+    if (existsSync(stereoPath)) {
+      try {
+        stereoData = JSON.parse(
+          await fs.promises.readFile(stereoPath, "utf-8"),
+        );
+      } catch {}
+    }
+
+    return res.json({
+      experimentId,
+      intrinsics: intrinsicsResults,
+      stereo: stereoData,
+      rulerScaleFactor: null,
+      reprojection_error_px: finalStatus.reprojection_error_px ?? 0,
+      completedAt: Date.now(),
     });
   } catch (err: any) {
     console.error("Calibration error:", err);
@@ -353,11 +484,15 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     const framesDir = path.join(experimentDir, "frames", `cam${camera_id}`);
     // Use JPEG by default so CV tracking can consume extracted frames directly
     // without expensive PNG->JPEG conversion.
-    const outputFormat = process.env.FRAME_EXTRACT_FORMAT === "png" ? "png" : "jpg";
-    
+    const outputFormat =
+      process.env.FRAME_EXTRACT_FORMAT === "png" ? "png" : "jpg";
+
     await fs.promises.mkdir(rawDir, { recursive: true });
-    
-    const destPath = path.join(rawDir, `cam${camera_id}${path.extname(file.originalname)}`);
+
+    const destPath = path.join(
+      rawDir,
+      `cam${camera_id}${path.extname(file.originalname)}`,
+    );
     await fs.promises.rename(file.path, destPath);
 
     // Extraction
@@ -369,7 +504,12 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
       console.warn("[sync] Sync Marker decode failed:", err);
     });
 
-    res.json({ experiment_id, camera_id, stored_path: destPath, frame_count: frameCount });
+    res.json({
+      experiment_id,
+      camera_id,
+      stored_path: destPath,
+      frame_count: frameCount,
+    });
   } catch (err: any) {
     console.error("Upload error:", err);
     res.status(500).json({ error: err.message });
@@ -379,7 +519,9 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
 app.post("/api/experiments/:experimentId/physics", async (req, res) => {
   try {
     const { experimentId } = req.params;
-    const massConfigs = Array.isArray(req.body?.massConfigs) ? req.body.massConfigs : [];
+    const massConfigs = Array.isArray(req.body?.massConfigs)
+      ? req.body.massConfigs
+      : [];
 
     if (!experimentId) {
       return res.status(400).json({ error: "Missing experiment id" });
@@ -394,7 +536,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         (cfg: any) =>
           Number.isFinite(cfg?.ballId) &&
           Number.isFinite(cfg?.mass_g) &&
-          Number.isFinite(cfg?.uncertainty_g)
+          Number.isFinite(cfg?.uncertainty_g),
       )
       .map((cfg: any) => ({
         ball_id: Number(cfg.ballId),
@@ -410,9 +552,12 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       experiment_id: experimentId,
       ball_configs,
       mode: "SINGLE_CAMERA_PLANAR",
-    } as any);
+    });
 
-    const massByBallId = new Map<number, { value: number; uncertainty: number }>();
+    const massByBallId = new Map<
+      number,
+      { value: number; uncertainty: number }
+    >();
     for (const cfg of ball_configs) {
       massByBallId.set(cfg.ball_id, {
         value: cfg.mass_kg,
@@ -423,13 +568,20 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     // Read sync metadata to communicate accuracy to the frontend
     let syncStatus = { isMock: true, trueFps: 30, rmsMs: 0 };
     try {
-      const syncPath = path.join(EXPERIMENTS_DIR, experimentId, "results", "sync.json");
+      const syncPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "results",
+        "sync.json",
+      );
       if (existsSync(syncPath)) {
-        const syncData = JSON.parse(await fs.promises.readFile(syncPath, "utf-8"));
+        const syncData = JSON.parse(
+          await fs.promises.readFile(syncPath, "utf-8"),
+        );
         syncStatus = {
           isMock: !!syncData.is_mock,
           trueFps: syncData.cameras?.cam0?.true_fps ?? 30,
-          rmsMs: syncData.cameras?.cam0?.fit_residual_rms_ms ?? 0
+          rmsMs: syncData.cameras?.cam0?.fit_residual_rms_ms ?? 0,
         };
       }
     } catch (e) {
@@ -441,7 +593,10 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       computedAt: Date.now(),
       syncStatus,
       balls: (grpcResult?.balls ?? []).map((ball: any) => {
-        const mass = massByBallId.get(ball.ball_id) ?? { value: 0, uncertainty: 0 };
+        const mass = massByBallId.get(ball.ball_id) ?? {
+          value: 0,
+          uncertainty: 0,
+        };
         return {
           ballId: ball.ball_id,
           mass_kg: mass,
@@ -464,22 +619,26 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
           // Approximation until KE is exposed per-ball in proto.
           ke_before: {
             value: 0.7 * mass.value * Math.pow(ball.v_before ?? 0, 2),
-            uncertainty: 0.7 * mass.value * Math.pow(ball.v_before_uncertainty ?? 0, 2),
+            uncertainty:
+              0.7 * mass.value * Math.pow(ball.v_before_uncertainty ?? 0, 2),
           },
           ke_after: {
             value: 0.7 * mass.value * Math.pow(ball.v_after ?? 0, 2),
-            uncertainty: 0.7 * mass.value * Math.pow(ball.v_after_uncertainty ?? 0, 2),
+            uncertainty:
+              0.7 * mass.value * Math.pow(ball.v_after_uncertainty ?? 0, 2),
           },
         };
       }),
       system: {
         p_before_total: {
           value: grpcResult?.system?.total_momentum_before ?? 0,
-          uncertainty: grpcResult?.system?.total_momentum_before_uncertainty ?? 0,
+          uncertainty:
+            grpcResult?.system?.total_momentum_before_uncertainty ?? 0,
         },
         p_after_total: {
           value: grpcResult?.system?.total_momentum_after ?? 0,
-          uncertainty: grpcResult?.system?.total_momentum_after_uncertainty ?? 0,
+          uncertainty:
+            grpcResult?.system?.total_momentum_after_uncertainty ?? 0,
         },
         ke_before_total: {
           value: grpcResult?.system?.ke_before ?? 0,
@@ -491,11 +650,14 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         },
         momentum_conserved_pct: {
           value: grpcResult?.system?.momentum_conservation_error_pct ?? 0,
-          uncertainty: grpcResult?.system?.momentum_conservation_error_pct_uncertainty ?? 0,
+          uncertainty:
+            grpcResult?.system?.momentum_conservation_error_pct_uncertainty ??
+            0,
         },
         coeff_of_restitution: {
           value: grpcResult?.system?.coefficient_of_restitution ?? 0,
-          uncertainty: grpcResult?.system?.coefficient_of_restitution_uncertainty ?? 0,
+          uncertainty:
+            grpcResult?.system?.coefficient_of_restitution_uncertainty ?? 0,
         },
         collision_frame_idx: 0,
       },
@@ -503,10 +665,13 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     };
 
     res.json(responsePayload);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Physics endpoint error:", err);
-    const message = String(err?.message ?? "Failed to compute physics");
-    const grpcCode = typeof err?.code === "number" ? (err.code as number) : undefined;
+    const message = err instanceof Error ? err.message : "Failed to compute physics";
+    const grpcCode =
+      err && typeof err === "object" && "code" in err && typeof err.code === "number"
+        ? (err.code as number)
+        : undefined;
 
     const isGrpcUnavailable =
       grpcCode === GrpcStatus.UNAVAILABLE ||
@@ -516,12 +681,14 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
 
     if (isGrpcUnavailable) {
       return res.status(503).json({
-        error:
-          `Physics service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
+        error: `Physics service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
       });
     }
 
-    if (grpcCode === GrpcStatus.DEADLINE_EXCEEDED || message.includes("DEADLINE_EXCEEDED")) {
+    if (
+      grpcCode === GrpcStatus.DEADLINE_EXCEEDED ||
+      message.includes("DEADLINE_EXCEEDED")
+    ) {
       return res.status(504).json({
         error:
           "Physics compute timed out. Retry, or increase PHYSICS_GRPC_DEADLINE_MS for slower machines / larger datasets.",
@@ -540,11 +707,14 @@ app.post("/api/experiments/:experimentId/correct", async (req, res) => {
   try {
     const { experimentId } = req.params;
     const correction = req.body;
-    
+
     // In a real implementation we would update tracks.json here.
     // For now, we'll just acknowledge it so the frontend doesn't error.
-    console.log(`[API] Received correction for experiment ${experimentId}:`, correction);
-    
+    console.log(
+      `[API] Received correction for experiment ${experimentId}:`,
+      correction,
+    );
+
     res.json({ success: true });
   } catch (err: any) {
     console.error("Correction error:", err);
@@ -552,43 +722,62 @@ app.post("/api/experiments/:experimentId/correct", async (req, res) => {
   }
 });
 
-app.get("/api/debug/sync/:experimentId/frame/:frameIndex/cam/:cameraId", (req, res) => {
-  const { experimentId, frameIndex, cameraId } = req.params;
-  const experimentDir = path.resolve(EXPERIMENTS_DIR, experimentId);
-  const venvPython = path.resolve(__dirname, "../../../.venv/Scripts/python.exe");
-  const python =
-    process.env.PHYSICSCAPTURE_PYTHON_BIN ?? (existsSync(venvPython) ? venvPython : "python");
-  const scriptPath = path.resolve(__dirname, "../../cv-service/sync/_debug_candidates_json.py");
+app.get(
+  "/api/debug/sync/:experimentId/frame/:frameIndex/cam/:cameraId",
+  (req, res) => {
+    const { experimentId, frameIndex, cameraId } = req.params;
+    const experimentDir = path.resolve(EXPERIMENTS_DIR, experimentId);
+    const venvPython = path.resolve(
+      __dirname,
+      "../../../.venv/Scripts/python.exe",
+    );
+    const python =
+      process.env.PHYSICSCAPTURE_PYTHON_BIN ??
+      (existsSync(venvPython) ? venvPython : "python");
+    const scriptPath = path.resolve(
+      __dirname,
+      "../../cv-service/sync/_debug_candidates_json.py",
+    );
 
-  const proc = spawn(python, [
-    scriptPath,
-    "--experiment-dir",
-    experimentDir,
-    "--camera-id",
-    cameraId,
-    "--frame-index",
-    frameIndex,
-  ]);
+    const proc = spawn(python, [
+      scriptPath,
+      "--experiment-dir",
+      experimentDir,
+      "--camera-id",
+      cameraId,
+      "--frame-index",
+      frameIndex,
+    ]);
 
-  let output = "";
-  proc.stdout.on("data", (data) => (output += data.toString()));
-  proc.on("close", (code) => {
-    if (code !== 0) {
-      console.error(`[DEBUG] Sync script failed with code ${code}. Output: ${output}`);
-      return res.status(500).json({ error: "Debug script failed" });
-    }
-    try {
-      res.json(JSON.parse(output));
-    } catch (err) {
-      console.error("[DEBUG] Failed to parse JSON:", output);
-      res.status(500).json({ error: "Failed to parse debug output" });
-    }
-  });
-});
+    let output = "";
+    proc.stdout.on("data", (data) => (output += data.toString()));
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        console.error(
+          `[DEBUG] Sync script failed with code ${code}. Output: ${output}`,
+        );
+        return res.status(500).json({ error: "Debug script failed" });
+      }
+      try {
+        res.json(JSON.parse(output));
+      } catch (err) {
+        console.error("[DEBUG] Failed to parse JSON:", output);
+        res.status(500).json({ error: "Failed to parse debug output" });
+      }
+    });
+  },
+);
 
 app.post("/api/track", async (req, res) => {
   try {
-    const { experiment_id, seeds, start_frame_idx, end_frame_idx, model_id, clientId } = req.body as {
+    const {
+      experiment_id,
+      seeds,
+      start_frame_idx,
+      end_frame_idx,
+      model_id,
+      clientId,
+    } = req.body as {
       experiment_id?: string;
       seeds?: Array<{
         ball_id: number;
@@ -604,14 +793,20 @@ app.post("/api/track", async (req, res) => {
     };
 
     if (!experiment_id || !Array.isArray(seeds) || seeds.length === 0) {
-      return res.status(400).json({ error: "Missing required tracking payload" });
+      return res
+        .status(400)
+        .json({ error: "Missing required tracking payload" });
     }
     if (
       start_frame_idx !== undefined &&
       end_frame_idx !== undefined &&
       end_frame_idx < start_frame_idx
     ) {
-      return res.status(400).json({ error: "Invalid frame range: end_frame_idx < start_frame_idx" });
+      return res
+        .status(400)
+        .json({
+          error: "Invalid frame range: end_frame_idx < start_frame_idx",
+        });
     }
 
     console.log(
@@ -636,7 +831,13 @@ app.post("/api/track", async (req, res) => {
     let latestProgress = 0;
     let statusCount = 0;
 
-    for await (const status of trackBalls({ experiment_id, seeds, model_id, start_frame_idx, end_frame_idx })) {
+    for await (const status of trackBalls({
+      experiment_id,
+      seeds,
+      model_id,
+      start_frame_idx,
+      end_frame_idx,
+    })) {
       const physicalFrame = status.frame;
 
       if (end_frame_idx !== undefined && physicalFrame > end_frame_idx) {
@@ -653,10 +854,12 @@ app.post("/api/track", async (req, res) => {
           const room = rooms.get(roomId);
           const target = room?.members.get(clientId);
           if (target) {
-            target.ws.send(JSON.stringify({
-              type: "tracking:progress",
-              data: { progress: latestProgress }
-            }));
+            target.ws.send(
+              JSON.stringify({
+                type: "tracking:progress",
+                data: { progress: latestProgress },
+              }),
+            );
           }
         }
       }
@@ -698,29 +901,39 @@ app.post("/api/track", async (req, res) => {
 
     // Persist tracks.json for the physics pipeline
     const resultsDir = path.join(EXPERIMENTS_DIR, experiment_id, "results");
-    if (!existsSync(resultsDir)) await fs.promises.mkdir(resultsDir, { recursive: true });
-    
+    if (!existsSync(resultsDir))
+      await fs.promises.mkdir(resultsDir, { recursive: true });
+
     const tracksPath = path.join(resultsDir, "tracks.json");
     const tracksData = {
       experiment_id,
-      balls: tracks.map(t => ({
+      balls: tracks.map((t) => ({
         ball_id: t.ballId,
         camera_id: t.cameraId,
-        frames: t.points.map(p => ({
+        frames: t.points.map((p) => ({
           frame_idx: p.frameIdx,
           x_px: p.x,
           y_px: p.y,
-          confidence: p.confidence
-        }))
-      }))
+          confidence: p.confidence,
+        })),
+      })),
     };
-    await fs.promises.writeFile(tracksPath, JSON.stringify(tracksData, null, 2));
+    await fs.promises.writeFile(
+      tracksPath,
+      JSON.stringify(tracksData, null, 2),
+    );
 
     // Also persist sync.json with mock timestamps if it doesn't exist
     const syncPath = path.join(resultsDir, "sync.json");
     if (!existsSync(syncPath)) {
-      const maxFrame = Math.max(...tracks.flatMap(t => t.points.map(p => p.frameIdx)), 0);
-      const timestamps = Array.from({ length: maxFrame + 1 }, (_, i) => i * (1000 / 30));
+      const maxFrame = Math.max(
+        ...tracks.flatMap((t) => t.points.map((p) => p.frameIdx)),
+        0,
+      );
+      const timestamps = Array.from(
+        { length: maxFrame + 1 },
+        (_, i) => i * (1000 / 30),
+      );
       const syncData = {
         schema_version: "1.0",
         experiment_id: experiment_id,
@@ -730,9 +943,9 @@ app.post("/api/track", async (req, res) => {
             frame_count: maxFrame + 1,
             true_fps: 30.0,
             phase_offset_ms: 0.0,
-            timestamps_ms: timestamps
-          }
-        }
+            timestamps_ms: timestamps,
+          },
+        },
       };
       await fs.promises.writeFile(syncPath, JSON.stringify(syncData, null, 2));
     }
@@ -756,8 +969,7 @@ app.post("/api/track", async (req, res) => {
 
     if (isGrpcUnavailable) {
       return res.status(503).json({
-        error:
-          `Tracking service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
+        error: `Tracking service unavailable at ${grpcEndpoint}. Start the CV gRPC service (\`npm run dev:cv\`) and retry.`,
       });
     }
 
@@ -765,64 +977,64 @@ app.post("/api/track", async (req, res) => {
   }
 });
 
-app.get("/api/experiments/:experimentId/frames/:cameraId/:frameFile", async (req, res) => {
-  try {
-    const { experimentId, cameraId, frameFile } = req.params;
+app.get(
+  "/api/experiments/:experimentId/frames/:cameraId/:frameFile",
+  async (req, res) => {
+    try {
+      const { experimentId, cameraId, frameFile } = req.params;
 
-    if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
-      return res.status(400).json({ error: "Invalid experiment id" });
-    }
-    if (!/^\d+$/.test(cameraId)) {
-      return res.status(400).json({ error: "Invalid camera id" });
-    }
+      if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
+        return res.status(400).json({ error: "Invalid experiment id" });
+      }
+      if (!/^\d+$/.test(cameraId)) {
+        return res.status(400).json({ error: "Invalid camera id" });
+      }
 
-    const key = `${experimentId}-${cameraId}`;
-    const count = servedFramesCount.get(key) || 0;
+      const key = `${experimentId}-${cameraId}`;
+      const count = servedFramesCount.get(key) || 0;
 
-    // Support both numeric-only (new) and frame_ prefixed (old) formats
-    let framePath = path.join(
-      EXPERIMENTS_DIR,
-      experimentId,
-      "frames",
-      `cam${cameraId}`,
-      frameFile,
-    );
-
-    // Backward compatibility check for legacy JPEG frame dumps.
-    if (!existsSync(framePath) && /^\d{6}\.jpg$/i.test(frameFile)) {
-      const legacyPath = path.join(
+      // Support both numeric-only (new) and frame_ prefixed (old) formats
+      let framePath = path.join(
         EXPERIMENTS_DIR,
         experimentId,
         "frames",
         `cam${cameraId}`,
-        `frame_${frameFile}`
+        frameFile,
       );
-      if (existsSync(legacyPath)) {
-        framePath = legacyPath;
+
+      // Backward compatibility check for legacy JPEG frame dumps.
+      if (!existsSync(framePath) && /^\d{6}\.jpg$/i.test(frameFile)) {
+        const legacyPath = path.join(
+          EXPERIMENTS_DIR,
+          experimentId,
+          "frames",
+          `cam${cameraId}`,
+          `frame_${frameFile}`,
+        );
+        if (existsSync(legacyPath)) {
+          framePath = legacyPath;
+        }
       }
+
+      if (count <= 5) {
+        console.log(`[API] Serving frame: ${framePath}`);
+      } else if (count === 6) {
+        console.log(`[API] Serving frames for ${key} (further logs hidden)`);
+      }
+
+      if (!existsSync(framePath)) {
+        console.warn("[API] Frame not found at:", framePath);
+        return res.status(404).json({ error: "Frame not found" });
+      }
+
+      res.sendFile(framePath);
+    } catch (err: any) {
+      console.error("Frame fetch error:", err);
+      res.status(500).json({ error: err.message ?? "Failed to fetch frame" });
     }
+  },
+);
 
-    if (count <= 5) {
-      console.log(`[API] Serving frame: ${framePath}`);
-    } else if (count === 6) {
-      console.log(`[API] Serving frames for ${key} (further logs hidden)`);
-    }
-
-    if (!existsSync(framePath)) {
-      console.warn("[API] Frame not found at:", framePath);
-      return res.status(404).json({ error: "Frame not found" });
-    }
-
-    res.sendFile(framePath);
-  } catch (err: any) {
-    console.error("Frame fetch error:", err);
-    res.status(500).json({ error: err.message ?? "Failed to fetch frame" });
-  }
-});
-
-// WebSocket Signaling Hub
-const rooms = new Map<string, { members: Map<string, { ws: WebSocket; role: string }> }>();
-const clientToRoom = new Map<string, string>();
 
 wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
   ws.on("message", (data: string) => {
@@ -837,7 +1049,7 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
         if (!rooms.has(roomId)) {
           rooms.set(roomId, { members: new Map() });
         }
-        
+
         const room = rooms.get(roomId)!;
         room.members.set(clientId, { ws, role });
         clientToRoom.set(clientId, roomId);
@@ -845,31 +1057,35 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
         console.log(`Client ${clientId} joined room ${roomId} as ${role}`);
 
         // If a phone joins, broadcast to the PC. If PC joins, we can potentially broadcast to other members.
-        if (role === 'phone') {
+        if (role === "phone") {
           room.members.forEach((member) => {
-            if (member.role === 'pc') {
-              member.ws.send(JSON.stringify({ 
-                type: 'phone:joined', 
-                data: {
-                  id: clientId,
-                  type: 'phone',
-                  label: msg.label || 'Phone',
-                  status: 'connecting',
-                  peerId: clientId
-                } 
-              }));
+            if (member.role === "pc") {
+              member.ws.send(
+                JSON.stringify({
+                  type: "phone:joined",
+                  data: {
+                    id: clientId,
+                    type: "phone",
+                    label: msg.label || "Phone",
+                    status: "connecting",
+                    peerId: clientId,
+                  },
+                }),
+              );
             }
           });
         }
-        
+
         // Also broadcast the join to everyone in the room (for presence/WebRTC)
         room.members.forEach((member) => {
           if (member.ws !== ws) {
-            member.ws.send(JSON.stringify({
-              type: 'peer:joined',
-              clientId: clientId,
-              role: role
-            }));
+            member.ws.send(
+              JSON.stringify({
+                type: "peer:joined",
+                clientId: clientId,
+                role: role,
+              }),
+            );
           }
         });
         return;
@@ -880,12 +1096,12 @@ wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
         const senderId = ws.clientId;
         const roomId = senderId ? clientToRoom.get(senderId) : undefined;
         if (!roomId) return;
-        
+
         const room = rooms.get(roomId);
         let targetId = msg.to;
         if (!targetId) {
-          if (msg.type === 'peer:offer') {
-            targetId = 'pc';
+          if (msg.type === "peer:offer") {
+            targetId = "pc";
           } else if (msg.data?.peerId) {
             targetId = msg.data.peerId;
           }
