@@ -5,7 +5,7 @@ import logging
 import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import List
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -165,3 +165,32 @@ def load_experiment_data(
         ))
         
     return loaded_tracks, scale
+
+
+def load_experiment_data_multi(
+    experiment_dir: Path,
+    camera_id_strs: List[str],
+) -> tuple[dict[str, List[LoadedTrack]], ScaleCalibration]:
+    """
+    Load tracks for multiple cameras from shared files.
+    Returns a map of camera id string -> tracks, plus scale from cam0 calibration.
+    """
+    if not camera_id_strs:
+        raise ValueError("At least one camera id is required.")
+
+    tracks_by_camera: dict[str, List[LoadedTrack]] = {}
+    scale: ScaleCalibration | None = None
+
+    for camera_id_str in camera_id_strs:
+        tracks, camera_scale = load_experiment_data(
+            experiment_dir=experiment_dir,
+            camera_id_str=camera_id_str,
+        )
+        tracks_by_camera[camera_id_str] = tracks
+        if scale is None:
+            scale = camera_scale
+
+    if scale is None:
+        raise ValueError("Unable to load scale calibration.")
+
+    return tracks_by_camera, scale

@@ -306,13 +306,19 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                     "uncertainty_g": m.mass_uncertainty_kg * 1000.0
                 })
                 
+            mode_value = request.mode if request.mode else physics_pb2.SINGLE_CAMERA_PLANAR
+            mode_name = physics_pb2.PhysicsMode.Name(mode_value)
+            ke_mode = os.getenv("PHYSICS_KE_MODE", "rolling_sphere")
+            friction_mode = os.getenv("PHYSICS_FRICTION_MODE", "IGNORE")
+
             # Run the actual pipeline
             results = run_physics_pipeline(
                 experiment_id=request.experiment_id,
                 base_dir=self.base_dir,
                 masses=masses,
-                ke_mode="rolling_sphere", # Could be configurable
-                friction_mode="IGNORE"     # Could be configurable
+                mode=mode_name,
+                ke_mode=ke_mode,
+                friction_mode=friction_mode
             )
             
             p_data = results["momentum"]

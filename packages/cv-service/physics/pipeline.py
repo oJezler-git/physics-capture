@@ -6,11 +6,12 @@ from typing import List, Dict, Any, Optional
 from uncertainties import ufloat, UFloat
 import numpy as np
 
-from .loader import load_experiment_data, LoadedTrack, ScaleCalibration
+from .loader import load_experiment_data, load_experiment_data_multi, LoadedTrack, ScaleCalibration
 from .converter import convert_to_metric, MetricTrack
 from .collision import detect_collision, CollisionResult
 from .fitting import fit_velocity_segment, FitResult, kinematic_model
 from .momentum import compute_physics, PhysicsOutput
+from .triangulation import triangulate_loaded_tracks, triangulated_to_metric_track
 
 def ufloat_to_dict(u: Optional[UFloat], key_stem: str, unit: str) -> dict:
     suffix = f"_{unit}" if unit else ""
@@ -28,6 +29,7 @@ def run_physics_pipeline(
     experiment_id: str,
     base_dir: Path,
     masses: List[Dict[str, float]],  # List of {"ball_id": int, "mass_g": float, "uncertainty_g": float}
+    mode: str = "SINGLE_CAMERA_PLANAR",
     ke_mode: str = "rolling_sphere",
     friction_mode: str = "IGNORE"
 ) -> Dict[str, Any]:
@@ -37,10 +39,24 @@ def run_physics_pipeline(
     experiment_dir = base_dir / experiment_id
     
     # 1. Load data
-    loaded_tracks, scale = load_experiment_data(experiment_dir)
-    
-    # 2. Convert to metric
-    metric_tracks = [convert_to_metric(t, scale) for t in loaded_tracks]
+    if mode == "STEREO_3D":
+        tracks_by_camera, _ = load_experiment_data_multi(experiment_dir, ["cam0", "cam1"])
+        cam0_by_ball = {track.ball_id: track for track in tracks_by_camera.get("cam0", [])}
+        cam1_by_ball = {track.ball_id: track for track in tracks_by_camera.get("cam1", [])}
+        common_ball_ids = sorted(set(cam0_by_ball.keys()) & set(cam1_by_ball.keys()))
+        if not common_ball_ids:
+            raise ValueError("No overlapping ball IDs across cam0/cam1 for stereo mode.")
+        metric_tracks = []
+        for ball_id in common_ball_ids:
+            tri_track = triangulate_loaded_tracks(
+                experiment_dir=experiment_dir,
+                cam0_track=cam0_by_ball[ball_id],
+                cam1_track=cam1_by_ball[ball_id],
+            )
+            metric_tracks.append(triangulated_to_metric_track(tri_track))
+    else:
+        loaded_tracks, scale = load_experiment_data(experiment_dir)
+        metric_tracks = [convert_to_metric(t, scale) for t in loaded_tracks]
     
     # 3. Detect collision (using ball 0 as primary)
     primary_track = next((t for t in metric_tracks if t.ball_id == 0), metric_tracks[0])
