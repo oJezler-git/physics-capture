@@ -564,10 +564,21 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       return res.status(400).json({ error: "No valid mass configs provided" });
     }
 
+    const experimentDir = resolveExperimentDir(experimentId);
+    if (!experimentDir) {
+      return res.status(400).json({ error: "Invalid experiment id" });
+    }
+    const stereoPath = path.join(
+      experimentDir,
+      "calibration",
+      "stereo_extrinsics.json",
+    );
+    const mode = existsSync(stereoPath) ? "STEREO_3D" : "SINGLE_CAMERA_PLANAR";
+
     const grpcResult = await computePhysics({
       experiment_id: experimentId,
       ball_configs,
-      mode: "SINGLE_CAMERA_PLANAR",
+      mode,
     });
 
     const massByBallId = new Map<
@@ -602,6 +613,60 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       }
     } catch (e) {
       console.warn("[API] Failed to read sync metadata:", e);
+    }
+
+    let trajectoryByBall = new Map<number, any[]>();
+    try {
+      const positionsPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "results",
+        "positions_3d.json",
+      );
+      if (existsSync(positionsPath)) {
+        const positionsData = JSON.parse(
+          await fs.promises.readFile(positionsPath, "utf-8"),
+        );
+        const frames = Array.isArray(positionsData?.frames)
+          ? positionsData.frames
+          : [];
+        trajectoryByBall = frames.reduce(
+          (map: Map<number, any[]>, frame: any) => {
+            const frameIndex = Number(frame?.frame ?? 0);
+            const balls = Array.isArray(frame?.balls) ? frame.balls : [];
+            for (const ball of balls) {
+              const ballId = Number(ball?.ball_id);
+              if (!Number.isFinite(ballId)) continue;
+              if (!map.has(ballId)) map.set(ballId, []);
+              map.get(ballId)!.push({
+                frameIdx: frameIndex,
+                x: Number(ball?.x_m ?? 0),
+                y: Number(ball?.y_m ?? 0),
+                z: Number(ball?.z_m ?? 0),
+                x_unc: Number(ball?.x_unc_m ?? 0),
+                y_unc: Number(ball?.y_unc_m ?? 0),
+                z_unc: Number(ball?.z_unc_m ?? 0),
+                flagged: Boolean(ball?.flagged),
+              });
+            }
+            return map;
+          },
+          new Map<number, any[]>(),
+        );
+      }
+    } catch (e) {
+      console.warn("[API] Failed to read positions_3d.json:", e);
+    }
+
+    let stereoExtrinsics: any = null;
+    try {
+      if (existsSync(stereoPath)) {
+        stereoExtrinsics = JSON.parse(
+          await fs.promises.readFile(stereoPath, "utf-8"),
+        );
+      }
+    } catch (e) {
+      console.warn("[API] Failed to read stereo_extrinsics.json:", e);
     }
 
     const responsePayload = {
@@ -643,6 +708,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
             uncertainty:
               0.7 * mass.value * Math.pow(ball.v_after_uncertainty ?? 0, 2),
           },
+          trajectory3d: trajectoryByBall.get(ball.ball_id) ?? [],
         };
       }),
       system: {
@@ -678,6 +744,10 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         collision_frame_idx: 0,
       },
       velocityTimeSeries: [],
+      reconstruction3d: {
+        mode,
+        stereoExtrinsics,
+      },
     };
 
     res.json(responsePayload);
