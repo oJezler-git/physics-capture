@@ -323,6 +323,26 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
             
             p_data = results["momentum"]
             v_data = results["velocities"]
+            positions_3d_data = results.get("positions_3d") or {}
+            trajectory_by_ball = {}
+            for frame in positions_3d_data.get("frames", []):
+                frame_idx = int(frame.get("frame", 0))
+                for ball_point in frame.get("balls", []):
+                    ball_id = int(ball_point.get("ball_id", -1))
+                    if ball_id < 0:
+                        continue
+                    trajectory_by_ball.setdefault(ball_id, []).append(
+                        physics_pb2.Point3D(
+                            x=float(ball_point.get("x_m", 0.0)),
+                            y=float(ball_point.get("y_m", 0.0)),
+                            z=float(ball_point.get("z_m", 0.0)),
+                            x_unc=float(ball_point.get("x_unc_m", 0.0)),
+                            y_unc=float(ball_point.get("y_unc_m", 0.0)),
+                            z_unc=float(ball_point.get("z_unc_m", 0.0)),
+                            flagged=bool(ball_point.get("flagged", False)),
+                            frame_idx=frame_idx,
+                        )
+                    )
             
             # Map results to protobuf
             ball_results = []
@@ -340,7 +360,8 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                     momentum_before=b_p["p_before"]["value_kgmps"],
                     momentum_before_uncertainty=b_p["p_before"]["uncertainty_kgmps"],
                     momentum_after=b_p["p_after"]["value_kgmps"],
-                    momentum_after_uncertainty=b_p["p_after"]["uncertainty_kgmps"]
+                    momentum_after_uncertainty=b_p["p_after"]["uncertainty_kgmps"],
+                    trajectory_3d=trajectory_by_ball.get(ball_id, []),
                 ))
                 
             sys_p = p_data["system"]

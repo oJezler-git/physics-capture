@@ -79,6 +79,18 @@ export interface BallResult {
   momentum_before_uncertainty: number;
   momentum_after: number;
   momentum_after_uncertainty: number;
+  trajectory_3d: Point3D[];
+}
+
+export interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+  x_unc: number;
+  y_unc: number;
+  z_unc: number;
+  flagged: boolean;
+  frame_idx: number;
 }
 
 export interface SystemResult {

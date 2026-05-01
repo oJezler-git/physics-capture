@@ -4,136 +4,123 @@ package physicscapture.v1;
 
 option java_multiple_files = true;
 
-// ─────────────────────────────────────────
-//  Enumerations
-// ─────────────────────────────────────────
-
 enum CalibrationStage {
   CALIBRATION_STAGE_UNSPECIFIED = 0;
-  DETECTING_CORNERS             = 1;
-  CALIBRATING_INTRINSICS        = 2;
-  CALIBRATING_STEREO            = 3;
-  DONE                          = 4;
-  FAILED                        = 5;
+  DETECTING_CORNERS = 1;
+  CALIBRATING_INTRINSICS = 2;
+  CALIBRATING_STEREO = 3;
+  DONE = 4;
+  FAILED = 5;
 }
 
 enum PhysicsMode {
   PHYSICS_MODE_UNSPECIFIED = 0;
-  SINGLE_CAMERA_PLANAR     = 1;
-  STEREO_3D                = 2;
+  SINGLE_CAMERA_PLANAR = 1;
+  STEREO_3D = 2;
 }
 
-// ─────────────────────────────────────────
-//  Service
-// ─────────────────────────────────────────
-
 service PhysicsCapture {
-  // Streaming: pushes CalibrationStatus messages until calibration completes.
   rpc RunCalibration(CalibrationRequest) returns (stream CalibrationStatus);
-
-  // Streaming: pushes TrackingStatus per frame as SAM2 processes the video.
   rpc TrackBalls(TrackingRequest) returns (stream TrackingStatus);
-
-  // Unary: single request/response once tracking is complete.
   rpc ComputePhysics(PhysicsRequest) returns (PhysicsResult);
 }
 
-// ─────────────────────────────────────────
-//  Calibration messages
-// ─────────────────────────────────────────
-
 message CalibrationRequest {
-  string        experiment_id = 1;
-  repeated int32 camera_ids   = 2;   // e.g. [0, 1]; must be distinct
+  string experiment_id = 1;
+  repeated int32 camera_ids = 2;
 }
 
 message CalibrationStatus {
-  int32            camera_id             = 1;
-  CalibrationStage stage                 = 2;
-  float            progress              = 3;   // [0.0, 1.0]
-  float            reprojection_error_px = 4;   // pixels RMS; 0.0 if not yet computed
-  string           message               = 5;   // human-readable; may be empty
+  int32 camera_id = 1;
+  CalibrationStage stage = 2;
+  float progress = 3;
+  float reprojection_error_px = 4;
+  string message = 5;
 }
 
-// ─────────────────────────────────────────
-//  Tracking messages
-// ─────────────────────────────────────────
-
 message TrackingRequest {
-  string           experiment_id = 1;
-  repeated BallSeed seeds        = 2;   // user click per ball per camera
-  optional string  model_id      = 3;
-  optional int32   start_frame_idx = 4; // inclusive physical frame index
-  optional int32   end_frame_idx   = 5; // inclusive physical frame index
+  string experiment_id = 1;
+  repeated BallSeed seeds = 2;
+  optional string model_id = 3;
+  optional int32 start_frame_idx = 4;
+  optional int32 end_frame_idx = 5;
 }
 
 message BallSeed {
-  int32 ball_id   = 1;   // 0-indexed; consistent across cameras
+  int32 ball_id = 1;
   int32 camera_id = 2;
   int32 frame_idx = 3;
-  float x         = 4;   // pixels
-  float y         = 5;   // pixels
+  float x = 4;
+  float y = 5;
 }
 
 message TrackingStatus {
-  int32                 frame            = 1;
-  float                 progress         = 2;   // [0.0, 1.0]
-  repeated TrackedPoint points           = 3;
-  float                 frame_confidence = 4;   // SAM2 composite mask confidence [0.0, 1.0]
+  int32 frame = 1;
+  float progress = 2;
+  repeated TrackedPoint points = 3;
+  float frame_confidence = 4;
 }
 
 message TrackedPoint {
-  int32 ball_id    = 1;
-  int32 camera_id  = 2;
-  float x          = 3;   // pixels (undistorted)
-  float y          = 4;   // pixels (undistorted)
-  float confidence = 5;  // per-point confidence [0.0, 1.0]
+  int32 ball_id = 1;
+  int32 camera_id = 2;
+  float x = 3;
+  float y = 4;
+  float confidence = 5;
 }
 
-// ─────────────────────────────────────────
-//  Physics messages
-// ─────────────────────────────────────────
-
 message PhysicsRequest {
-  string              experiment_id = 1;
-  repeated BallConfig ball_configs  = 2;
-  PhysicsMode         mode          = 3;
+  string experiment_id = 1;
+  repeated BallConfig ball_configs = 2;
+  PhysicsMode mode = 3;
 }
 
 message BallConfig {
-  int32 ball_id              = 1;
-  float mass_kg              = 2;   // kg; > 0
-  float mass_uncertainty_kg  = 3;   // kg; >= 0
+  int32 ball_id = 1;
+  float mass_kg = 2;
+  float mass_uncertainty_kg = 3;
 }
 
 message PhysicsResult {
-  repeated BallResult balls  = 1;
-  SystemResult        system = 2;
+  repeated BallResult balls = 1;
+  SystemResult system = 2;
+}
+
+message Point3D {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  double x_unc = 4;
+  double y_unc = 5;
+  double z_unc = 6;
+  bool flagged = 7;
+  int32 frame_idx = 8;
 }
 
 message BallResult {
-  int32 ball_id                      = 1;
-  float v_before                     = 2;   // m/s
-  float v_before_uncertainty         = 3;   // m/s
-  float v_after                      = 4;   // m/s
-  float v_after_uncertainty          = 5;   // m/s
-  float momentum_before              = 6;   // kg·m/s
-  float momentum_before_uncertainty  = 7;   // kg·m/s
-  float momentum_after               = 8;   // kg·m/s
-  float momentum_after_uncertainty   = 9;   // kg·m/s
+  int32 ball_id = 1;
+  float v_before = 2;
+  float v_before_uncertainty = 3;
+  float v_after = 4;
+  float v_after_uncertainty = 5;
+  float momentum_before = 6;
+  float momentum_before_uncertainty = 7;
+  float momentum_after = 8;
+  float momentum_after_uncertainty = 9;
+  repeated Point3D trajectory_3d = 10;
 }
 
 message SystemResult {
-  float total_momentum_before                       = 1;   // kg·m/s
-  float total_momentum_before_uncertainty           = 2;
-  float total_momentum_after                        = 3;
-  float total_momentum_after_uncertainty            = 4;
-  float ke_before                                   = 5;   // J
-  float ke_before_uncertainty                       = 6;
-  float ke_after                                    = 7;
-  float ke_after_uncertainty                        = 8;
-  float momentum_conservation_error_pct             = 9;   // %
+  float total_momentum_before = 1;
+  float total_momentum_before_uncertainty = 2;
+  float total_momentum_after = 3;
+  float total_momentum_after_uncertainty = 4;
+  float ke_before = 5;
+  float ke_before_uncertainty = 6;
+  float ke_after = 7;
+  float ke_after_uncertainty = 8;
+  float momentum_conservation_error_pct = 9;
   float momentum_conservation_error_pct_uncertainty = 10;
-  float coefficient_of_restitution                  = 11;  // -1.0 if not applicable
-  float coefficient_of_restitution_uncertainty      = 12;
+  float coefficient_of_restitution = 11;
+  float coefficient_of_restitution_uncertainty = 12;
 }

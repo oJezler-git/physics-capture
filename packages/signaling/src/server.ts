@@ -617,6 +617,25 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     }
 
     let trajectoryByBall = new Map<number, any[]>();
+    for (const ball of grpcResult?.balls ?? []) {
+      const points = Array.isArray(ball?.trajectory_3d)
+        ? ball.trajectory_3d.map((point: any) => ({
+            frameIdx: Number(point?.frame_idx ?? 0),
+            x: Number(point?.x ?? 0),
+            y: Number(point?.y ?? 0),
+            z: Number(point?.z ?? 0),
+            x_unc: Number(point?.x_unc ?? 0),
+            y_unc: Number(point?.y_unc ?? 0),
+            z_unc: Number(point?.z_unc ?? 0),
+            flagged: Boolean(point?.flagged),
+          }))
+        : [];
+      if (points.length > 0) {
+        points.sort((left, right) => left.frameIdx - right.frameIdx);
+        trajectoryByBall.set(Number(ball.ball_id), points);
+      }
+    }
+
     try {
       const positionsPath = path.join(
         EXPERIMENTS_DIR,
@@ -624,7 +643,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         "results",
         "positions_3d.json",
       );
-      if (existsSync(positionsPath)) {
+      if (trajectoryByBall.size === 0 && existsSync(positionsPath)) {
         const positionsData = JSON.parse(
           await fs.promises.readFile(positionsPath, "utf-8"),
         );

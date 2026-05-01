@@ -26,11 +26,7 @@ if _version_not_supported:
 
 
 class PhysicsCaptureStub(object):
-    """─────────────────────────────────────────
-    Service
-    ─────────────────────────────────────────
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -56,29 +52,22 @@ class PhysicsCaptureStub(object):
 
 
 class PhysicsCaptureServicer(object):
-    """─────────────────────────────────────────
-    Service
-    ─────────────────────────────────────────
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def RunCalibration(self, request, context):
-        """Streaming: pushes CalibrationStatus messages until calibration completes.
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def TrackBalls(self, request, context):
-        """Streaming: pushes TrackingStatus per frame as SAM2 processes the video.
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ComputePhysics(self, request, context):
-        """Unary: single request/response once tracking is complete.
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -110,11 +99,7 @@ def add_PhysicsCaptureServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class PhysicsCapture(object):
-    """─────────────────────────────────────────
-    Service
-    ─────────────────────────────────────────
-
-    """
+    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def RunCalibration(request,
