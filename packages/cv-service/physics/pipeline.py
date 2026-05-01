@@ -39,6 +39,7 @@ def run_physics_pipeline(
     experiment_dir = base_dir / experiment_id
     
     # 1. Load data
+    positions_3d_data: Optional[Dict[str, Any]] = None
     if mode == "STEREO_3D":
         tracks_by_camera, _ = load_experiment_data_multi(experiment_dir, ["cam0", "cam1"])
         cam0_by_ball = {track.ball_id: track for track in tracks_by_camera.get("cam0", [])}
@@ -46,6 +47,7 @@ def run_physics_pipeline(
         common_ball_ids = sorted(set(cam0_by_ball.keys()) & set(cam1_by_ball.keys()))
         if not common_ball_ids:
             raise ValueError("No overlapping ball IDs across cam0/cam1 for stereo mode.")
+        tri_tracks = []
         metric_tracks = []
         for ball_id in common_ball_ids:
             tri_track = triangulate_loaded_tracks(
@@ -53,7 +55,37 @@ def run_physics_pipeline(
                 cam0_track=cam0_by_ball[ball_id],
                 cam1_track=cam1_by_ball[ball_id],
             )
+            tri_tracks.append(tri_track)
             metric_tracks.append(triangulated_to_metric_track(tri_track))
+        frame_count = max((track.xyz_m.shape[0] for track in tri_tracks), default=0)
+        frames = []
+        for frame_idx in range(frame_count):
+            frame_entry = {"frame": frame_idx, "balls": []}
+            for tri_track in tri_tracks:
+                if frame_idx >= tri_track.xyz_m.shape[0]:
+                    continue
+                xyz = tri_track.xyz_m[frame_idx]
+                if np.isnan(xyz).any():
+                    continue
+                frame_entry["balls"].append(
+                    {
+                        "ball_id": tri_track.ball_id,
+                        "x_m": float(xyz[0]),
+                        "y_m": float(xyz[1]),
+                        "z_m": float(xyz[2]),
+                        "x_unc_m": 0.001,
+                        "y_unc_m": 0.001,
+                        "z_unc_m": 0.002,
+                        "flagged": False,
+                    }
+                )
+            frames.append(frame_entry)
+        positions_3d_data = {
+            "experiment_id": experiment_id,
+            "coordinate_system": "cam0_origin_right_handed_y_up",
+            "units": "metres",
+            "frames": frames,
+        }
     else:
         loaded_tracks, scale = load_experiment_data(experiment_dir)
         metric_tracks = [convert_to_metric(t, scale) for t in loaded_tracks]
@@ -176,8 +208,12 @@ def run_physics_pipeline(
         json.dump(velocities_data, f, indent=2)
     with open(results_dir / "momentum.json", 'w') as f:
         json.dump(momentum_data, f, indent=2)
+    if positions_3d_data is not None:
+        with open(results_dir / "positions_3d.json", "w") as f:
+            json.dump(positions_3d_data, f, indent=2)
         
     return {
         "velocities": velocities_data,
-        "momentum": momentum_data
+        "momentum": momentum_data,
+        "positions_3d": positions_3d_data,
     }
