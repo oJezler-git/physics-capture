@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import { status as GrpcStatus } from "@grpc/grpc-js";
 import { extractFrames } from "./ffmpeg.js";
 import { runCalibration, trackBalls, computePhysics } from "./grpc-client.js";
+import { buildTrajectoryByBall } from "./lib/reconstruction.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -627,32 +628,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         const positionsData = JSON.parse(
           await fs.promises.readFile(positionsPath, "utf-8"),
         );
-        const frames = Array.isArray(positionsData?.frames)
-          ? positionsData.frames
-          : [];
-        trajectoryByBall = frames.reduce(
-          (map: Map<number, any[]>, frame: any) => {
-            const frameIndex = Number(frame?.frame ?? 0);
-            const balls = Array.isArray(frame?.balls) ? frame.balls : [];
-            for (const ball of balls) {
-              const ballId = Number(ball?.ball_id);
-              if (!Number.isFinite(ballId)) continue;
-              if (!map.has(ballId)) map.set(ballId, []);
-              map.get(ballId)!.push({
-                frameIdx: frameIndex,
-                x: Number(ball?.x_m ?? 0),
-                y: Number(ball?.y_m ?? 0),
-                z: Number(ball?.z_m ?? 0),
-                x_unc: Number(ball?.x_unc_m ?? 0),
-                y_unc: Number(ball?.y_unc_m ?? 0),
-                z_unc: Number(ball?.z_unc_m ?? 0),
-                flagged: Boolean(ball?.flagged),
-              });
-            }
-            return map;
-          },
-          new Map<number, any[]>(),
-        );
+        trajectoryByBall = buildTrajectoryByBall(positionsData);
       }
     } catch (e) {
       console.warn("[API] Failed to read positions_3d.json:", e);
