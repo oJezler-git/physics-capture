@@ -19,12 +19,12 @@ const framePoint = (points: Point3D[] | undefined, frameIdx: number) =>
 
 type CameraMode = 'off' | 'track' | 'follow';
 
-const TrailRenderer = ({ ball, currentFrame }: { ball: BallResult; currentFrame: number }) => {
-  const trail = useMemo(
-    () => (ball.trajectory3d ?? []).map((p) => [p.x, p.y, p.z] as [number, number, number]),
-    [ball.trajectory3d],
+const TrailRenderer = ({ ball, currentFrame }: { ball: BallResult, currentFrame: number }) => {
+  const trail = useMemo(() => 
+    (ball.trajectory3d ?? []).map((p) => [p.x, p.y, p.z] as [number, number, number]),
+    [ball.trajectory3d]
   );
-
+  
   const point = framePoint(ball.trajectory3d, currentFrame);
   const visibleTrail = trail.slice(0, currentFrame + 1);
 
@@ -32,60 +32,26 @@ const TrailRenderer = ({ ball, currentFrame }: { ball: BallResult; currentFrame:
 
   return (
     <group key={`ball-3d-${ball.ballId}`}>
-      <Line
-        points={visibleTrail}
-        color={BALL_COLORS[ball.ballId % BALL_COLORS.length]}
-        lineWidth={2}
-        transparent
-        opacity={0.6}
-      />
-
+      <Line points={visibleTrail} color={BALL_COLORS[ball.ballId % BALL_COLORS.length]} lineWidth={2} transparent opacity={0.6} />
+      
       <group>
-        <Line
-          points={[
-            [point.x, point.y, point.z],
-            [point.x, 0, point.z],
-          ]}
-          color="#94a3b8"
-          lineWidth={1}
-          transparent
-          opacity={0.3}
-          dashed
-        />
-        <Line
-          points={[
-            [point.x - 0.05, 0, point.z],
-            [point.x + 0.05, 0, point.z],
-          ]}
-          color="#38bdf8"
-          lineWidth={1}
-          transparent
-          opacity={0.5}
-        />
-        <Line
-          points={[
-            [point.x, 0, point.z - 0.05],
-            [point.x, 0, point.z + 0.05],
-          ]}
-          color="#38bdf8"
-          lineWidth={1}
-          transparent
-          opacity={0.5}
-        />
-
+        <Line points={[[point.x, point.y, point.z], [point.x, 0, point.z]]} color="#94a3b8" lineWidth={1} transparent opacity={0.3} dashed />
+        <Line points={[[point.x - 0.05, 0, point.z], [point.x + 0.05, 0, point.z]]} color="#38bdf8" lineWidth={1} transparent opacity={0.5} />
+        <Line points={[[point.x, 0, point.z - 0.05], [point.x, 0, point.z + 0.05]]} color="#38bdf8" lineWidth={1} transparent opacity={0.5} />
+        
         <mesh position={[point.x, point.y, point.z]} castShadow>
           <sphereGeometry args={[0.02, 32, 32]} />
-          <meshStandardMaterial
-            color={point.flagged ? '#ef4444' : BALL_COLORS[ball.ballId % BALL_COLORS.length]}
-            emissive={point.flagged ? '#7f1d1d' : '#000000'}
-            metalness={0.1}
-            roughness={0.3}
+          <meshStandardMaterial 
+            color={point.flagged ? '#ef4444' : BALL_COLORS[ball.ballId % BALL_COLORS.length]} 
+            emissive={point.flagged ? '#7f1d1d' : '#000000'} 
+            metalness={0.1} 
+            roughness={0.3} 
           />
         </mesh>
-        <Text
-          position={[point.x, point.y + 0.05, point.z]}
-          fontSize={0.03}
-          color="white"
+        <Text 
+          position={[point.x, point.y + 0.05, point.z]} 
+          fontSize={0.03} 
+          color="white" 
           anchorX="center"
           anchorY="bottom"
           outlineWidth={0.005}
@@ -98,17 +64,17 @@ const TrailRenderer = ({ ball, currentFrame }: { ball: BallResult; currentFrame:
   );
 };
 
-const SceneContent = ({
-  mode,
-  targetVec,
-  balls,
-  currentFrame,
-  phone1Position,
-  phone1Rotation,
-}: {
-  mode: CameraMode;
-  targetVec: THREE.Vector3 | null;
-  balls: BallResult[];
+const SceneContent = ({ 
+  mode, 
+  targetVec, 
+  balls, 
+  currentFrame, 
+  phone1Position, 
+  phone1Rotation 
+}: { 
+  mode: CameraMode; 
+  targetVec: THREE.Vector3 | null; 
+  balls: BallResult[]; 
   currentFrame: number;
   phone1Position: [number, number, number];
   phone1Rotation: [number, number, number];
@@ -135,56 +101,43 @@ const SceneContent = ({
       <directionalLight position={[2, 3, 1]} intensity={0.8} castShadow />
       <Grid args={[10, 10]} cellColor="#203047" sectionColor="#304c6e" fadeDistance={12} />
       <ContactShadows resolution={1024} scale={10} blur={2} opacity={0.5} far={1} color="#000000" />
+      
       <mesh position={[0, 0.04, 0]} castShadow>
         <boxGeometry args={[0.07, 0.14, 0.01]} />
         <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.2} />
       </mesh>
-      <mesh
-        position={new THREE.Vector3(...phone1Position)}
-        rotation={new THREE.Euler(...phone1Rotation)}
-        castShadow
-      >
+      <mesh position={new THREE.Vector3(...phone1Position)} rotation={new THREE.Euler(...phone1Rotation)} castShadow>
         <boxGeometry args={[0.07, 0.14, 0.01]} />
         <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.2} />
       </mesh>
       <Line points={[[0, 0.04, 0], phone1Position]} color="#64748b" lineWidth={1} dashed />
+      
       {balls.map((ball) => (
         <TrailRenderer key={`ball-3d-${ball.ballId}`} ball={ball} currentFrame={currentFrame} />
       ))}
       <EffectComposer>
         <Bloom luminanceThreshold={0.5} mipmapBlur intensity={0.25} />
       </EffectComposer>
-      <OrbitControls
-        ref={controlsRef}
-        makeDefault
+      <OrbitControls 
+        ref={controlsRef} 
+        makeDefault 
         enableRotate={mode !== 'follow'}
         enablePan={mode !== 'follow'}
         enableZoom={true}
-      />{' '}
-    </>
+      />    </>
   );
 };
 
-export const ThreeDScene = ({
-  balls,
-  currentFrame,
-  reconstruction3d,
-  followBallId = null,
-}: ThreeDSceneProps) => {
+export const ThreeDScene = ({ balls, currentFrame, reconstruction3d, followBallId = null }: ThreeDSceneProps) => {
   const [cameraMode, setCameraMode] = useState<CameraMode>('off');
-  const targetBall =
-    followBallId !== null ? balls.find((b) => b.ballId === followBallId) : balls[0];
+  const targetBall = followBallId !== null ? balls.find(b => b.ballId === followBallId) : balls[0];
   const currentPos = targetBall ? framePoint(targetBall.trajectory3d, currentFrame) : null;
   const targetVec = currentPos ? new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z) : null;
 
   const phone1Position = useMemo(() => {
     const t = reconstruction3d?.stereoExtrinsics?.T;
     if (!t || t.length < 3) return [0.3, 0, 0] as [number, number, number];
-    return [Number(t[0]) / 1000, Number(t[1]) / 1000, Number(t[2]) / 1000] as [
-      number,
-      number,
-      number,
-    ];
+    return [Number(t[0]) / 1000, Number(t[1]) / 1000, Number(t[2]) / 1000] as [number, number, number];
   }, [reconstruction3d?.stereoExtrinsics?.T]);
 
   const phone1Rotation = useMemo(() => {
@@ -199,28 +152,23 @@ export const ThreeDScene = ({
   return (
     <div className="surface-panel p-4 h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-          3D Reconstruction
-        </h3>
-        <button
-          onClick={() => {
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">3D Reconstruction</h3>
+        <button onClick={() => {
             const modes: CameraMode[] = ['off', 'track', 'follow'];
             setCameraMode(modes[(modes.indexOf(cameraMode) + 1) % modes.length]);
-          }}
-          className="text-[10px] bg-slate-800 px-2 py-1 rounded"
-        >
+        }} className="text-[10px] bg-slate-800 px-2 py-1 rounded">
           MODE: {cameraMode.toUpperCase()}
         </button>
       </div>
       <div className="flex-1 overflow-hidden rounded-xl border border-[var(--line)] bg-[#0b1220]">
         <Canvas shadows={{ type: 1 }} camera={{ position: [1.2, 1.0, 1.5], fov: 45 }}>
-          <SceneContent
-            mode={cameraMode}
-            targetVec={targetVec}
-            balls={balls}
-            currentFrame={currentFrame}
-            phone1Position={phone1Position}
-            phone1Rotation={phone1Rotation}
+          <SceneContent 
+            mode={cameraMode} 
+            targetVec={targetVec} 
+            balls={balls} 
+            currentFrame={currentFrame} 
+            phone1Position={phone1Position} 
+            phone1Rotation={phone1Rotation} 
           />
         </Canvas>
       </div>

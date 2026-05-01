@@ -17,6 +17,7 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
+    "@react-three/postprocessing": "^3.0.4",
     "@types/three": "^0.184.0",
     "@web-kits/audio": "^0.1.0",
     "clsx": "^2.1.1",
