@@ -146,3 +146,106 @@ def test_full_pipeline_synthetic_without_calibration_file(tmp_path):
     )
 
     assert results["momentum"]["system"]["p_before"]["value_kgmps"] is not None
+
+
+def test_full_pipeline_stereo_mode_synthetic(tmp_path):
+    experiment_id = "test_experiment_stereo"
+    exp_dir = tmp_path / experiment_id
+    results_dir = exp_dir / "results"
+    calibration_dir = exp_dir / "calibration"
+    frame_dir0 = exp_dir / "frames" / "cam0"
+    frame_dir1 = exp_dir / "frames" / "cam1"
+
+    results_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+    frame_dir0.mkdir(parents=True)
+    frame_dir1.mkdir(parents=True)
+
+    from PIL import Image
+    Image.new("RGB", (1280, 720)).save(frame_dir0 / "000001.png")
+    Image.new("RGB", (1280, 720)).save(frame_dir1 / "000001.png")
+
+    total_frames = 80
+    fps = 30.0
+    dt = 1.0 / fps
+    timestamps_ms = [i * dt * 1000.0 for i in range(total_frames)]
+    collision_frame = 40
+
+    fx = 1000.0
+    fy = 1000.0
+    cx = 640.0
+    cy = 360.0
+    baseline_mm = 100.0
+    z_mm = 2000.0
+
+    ball0_cam0_frames = []
+    ball0_cam1_frames = []
+    for i in range(total_frames):
+        t = i * dt
+        if i < collision_frame:
+            x_world_mm = 100.0 + 1000.0 * t
+        else:
+            t_col = collision_frame * dt
+            x_col = 100.0 + 1000.0 * t_col
+            x_world_mm = x_col - 500.0 * (t - t_col)
+
+        y_world_mm = 0.0
+        x0 = fx * (x_world_mm / z_mm) + cx
+        y0 = fy * (y_world_mm / z_mm) + cy
+        x1 = fx * ((x_world_mm - baseline_mm) / z_mm) + cx
+        y1 = y0
+
+        ball0_cam0_frames.append({"frame_idx": i, "x_px": x0, "y_px": y0, "confidence": 1.0})
+        ball0_cam1_frames.append({"frame_idx": i, "x_px": x1, "y_px": y1, "confidence": 1.0})
+
+    with open(results_dir / "sync.json", "w") as f:
+        json.dump(
+            {
+                "cameras": {
+                    "cam0": {"timestamps_ms": timestamps_ms},
+                    "cam1": {"timestamps_ms": timestamps_ms},
+                }
+            },
+            f,
+        )
+    with open(results_dir / "tracks.json", "w") as f:
+        json.dump(
+            {
+                "balls": [
+                    {"ball_id": 0, "camera_id": 0, "frames": ball0_cam0_frames},
+                    {"ball_id": 0, "camera_id": 1, "frames": ball0_cam1_frames},
+                ]
+            },
+            f,
+        )
+
+    with open(calibration_dir / "cam0_intrinsics.json", "w") as f:
+        json.dump({"scale_px_per_mm": 1.0, "scale_uncertainty_px_per_mm": 0.001}, f)
+    with open(calibration_dir / "cam1_intrinsics.json", "w") as f:
+        json.dump({"scale_px_per_mm": 1.0, "scale_uncertainty_px_per_mm": 0.001}, f)
+    with open(calibration_dir / "stereo_extrinsics.json", "w") as f:
+        json.dump(
+            {
+                "R": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                "T": [-baseline_mm, 0.0, 0.0],
+                "E": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                "F": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                "P0": [[fx, 0.0, cx, 0.0], [0.0, fy, cy, 0.0], [0.0, 0.0, 1.0, 0.0]],
+                "P1": [[fx, 0.0, cx, -fx * baseline_mm], [0.0, fy, cy, 0.0], [0.0, 0.0, 1.0, 0.0]],
+                "reprojection_error_px": 0.1,
+            },
+            f,
+        )
+
+    results = run_physics_pipeline(
+        experiment_id=experiment_id,
+        base_dir=tmp_path,
+        masses=[{"ball_id": 0, "mass_g": 100.0, "uncertainty_g": 1.0}],
+        mode="STEREO_3D",
+        ke_mode="point_mass",
+    )
+
+    v_before = results["velocities"]["balls"][0]["v_before"]["value_mps"]
+    v_after = results["velocities"]["balls"][0]["v_after"]["value_mps"]
+    assert pytest.approx(v_before, abs=0.03) == 1.0
+    assert pytest.approx(v_after, abs=0.03) == -0.5
