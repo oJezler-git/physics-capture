@@ -111,6 +111,8 @@ export const SetupPage = () => {
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [copied, setCopied] = useState<'url' | 'code' | 'session' | null>(null);
   const [autoDetectedHost, setAutoDetectedHost] = useState('');
+  const [existingExperiments, setExistingExperiments] = useState<string[]>([]);
+  const [selectedExistingExperiment, setSelectedExistingExperiment] = useState('');
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -125,6 +127,25 @@ export const SetupPage = () => {
     setBallConfig(0, { ballId: 0, mass_g: 50, uncertainty_g: 1 });
     setBallConfig(1, { ballId: 1, mass_g: 50, uncertainty_g: 1 });
   }, [createExperiment, experimentId, setBallConfig]);
+
+  useEffect(() => {
+    const loadExperiments = async () => {
+      try {
+        const response = await fetch('/api/experiments');
+        if (!response.ok) return;
+        const experiments = (await response.json()) as string[];
+        const sorted = [...experiments].sort((left, right) => right.localeCompare(left));
+        setExistingExperiments(sorted);
+        if (!selectedExistingExperiment && sorted.length > 0) {
+          setSelectedExistingExperiment(sorted[0]);
+        }
+      } catch {
+        // Non-blocking enhancement.
+      }
+    };
+
+    void loadExperiments();
+  }, []);
 
   useEffect(() => {
     if (!isLoopbackHostname(window.location.hostname)) return;
@@ -233,6 +254,42 @@ export const SetupPage = () => {
           </Button>
         </div>
       </header>
+
+      <section className="surface-panel p-5 glitch-in stagger-1">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[280px] flex-1 space-y-1">
+            <p className="eyebrow">Open Existing Experiment</p>
+            <select
+              className="w-full rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-3 py-2 text-sm text-slate-200"
+              value={selectedExistingExperiment}
+              onChange={(event) => setSelectedExistingExperiment(event.target.value)}
+            >
+              {existingExperiments.length === 0 ? (
+                <option value="">No experiments found</option>
+              ) : (
+                existingExperiments.map((experiment) => (
+                  <option key={experiment} value={experiment}>
+                    {experiment}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <Button
+            variant="alt"
+            disabled={!selectedExistingExperiment}
+            onClick={() => {
+              if (!selectedExistingExperiment) return;
+              createExperiment(selectedExistingExperiment);
+              setBallConfig(0, { ballId: 0, mass_g: 50, uncertainty_g: 1 });
+              setBallConfig(1, { ballId: 1, mass_g: 50, uncertainty_g: 1 });
+            }}
+            className="px-5 py-2 text-xs"
+          >
+            Open Experiment
+          </Button>
+        </div>
+      </section>
 
       {experimentId && (
         <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
