@@ -219,10 +219,23 @@ def test_full_pipeline_stereo_mode_synthetic(tmp_path):
             f,
         )
 
+    intrinsics_payload = {
+        "fx": fx,
+        "fy": fy,
+        "cx": cx,
+        "cy": cy,
+        "k1": 0.0,
+        "k2": 0.0,
+        "p1": 0.0,
+        "p2": 0.0,
+        "k3": 0.0,
+        "scale_px_per_mm": 1.0,
+        "scale_uncertainty_px_per_mm": 0.001,
+    }
     with open(calibration_dir / "cam0_intrinsics.json", "w") as f:
-        json.dump({"scale_px_per_mm": 1.0, "scale_uncertainty_px_per_mm": 0.001}, f)
+        json.dump(intrinsics_payload, f)
     with open(calibration_dir / "cam1_intrinsics.json", "w") as f:
-        json.dump({"scale_px_per_mm": 1.0, "scale_uncertainty_px_per_mm": 0.001}, f)
+        json.dump(intrinsics_payload, f)
     with open(calibration_dir / "stereo_extrinsics.json", "w") as f:
         json.dump(
             {

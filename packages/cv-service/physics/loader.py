@@ -38,6 +38,7 @@ def load_experiment_data(
     sync_path = results_dir / "sync.json"
     tracks_path = results_dir / "tracks.json"
     calib_path = calibration_dir / f"{camera_id_str}_intrinsics.json"
+    scale_path = results_dir / "scale.json"
     
     if not sync_path.exists():
         raise FileNotFoundError(f"Sync file not found: {sync_path}")
@@ -69,14 +70,31 @@ def load_experiment_data(
         with Image.open(frame_files[0]) as img:
             frame_width, frame_height = img.size
         
+    calib_data = {}
     if calib_path.exists():
         with open(calib_path, 'r') as f:
             calib_data = json.load(f)
-    else:
-        calib_data = {
-            "scale_px_per_mm": 1.0,
-            "scale_uncertainty_px_per_mm": 0.001,
-        }
+
+    scale_px_per_mm = None
+    scale_unc_px_per_mm = None
+    if scale_path.exists():
+        with open(scale_path, "r") as f:
+            scale_data = json.load(f)
+        scale_px_per_mm = scale_data.get("px_per_mm")
+        scale_unc_px_per_mm = scale_data.get("scale_uncertainty_px_per_mm")
+
+    if scale_px_per_mm is None:
+        scale_px_per_mm = calib_data.get("scale_px_per_mm")
+        scale_unc_px_per_mm = calib_data.get("scale_uncertainty_px_per_mm")
+
+    if scale_px_per_mm is None or float(scale_px_per_mm) <= 0:
+        logger.warning(
+            "No valid scale calibration found for %s; falling back to default 1.0 px/mm.",
+            experiment_dir,
+        )
+        scale_px_per_mm = 1.0
+    if scale_unc_px_per_mm is None:
+        scale_unc_px_per_mm = 0.001
 
     # 1. Extract timestamps for the relevant camera
     if camera_id_str not in sync_data["cameras"]:
@@ -88,8 +106,8 @@ def load_experiment_data(
     
     # 2. Extract scale calibration
     scale = ScaleCalibration(
-        scale_px_per_mm=calib_data["scale_px_per_mm"],
-        scale_uncertainty_px_per_mm=calib_data.get("scale_uncertainty_px_per_mm", 0.0)
+        scale_px_per_mm=float(scale_px_per_mm),
+        scale_uncertainty_px_per_mm=float(scale_unc_px_per_mm)
     )
 
     # 3. Process each ball
