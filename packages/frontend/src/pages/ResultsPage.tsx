@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -12,9 +11,11 @@ import {
 import { useResultsStore } from '../stores/resultsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { downloadBlob, exportCSV, exportJSON, exportPDF } from '../lib/export';
-import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button } from '../components/ui/Button';
+import { FrameScrubber } from '../components/FrameScrubber';
+import { ThreeDScene } from '../components/ThreeDScene';
 import type { PhysicsResult } from '../types';
+import { useTrackingStore } from '../stores/trackingStore';
 
 const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
 
@@ -27,8 +28,11 @@ export const ResultsPage = () => {
     useResultsStore();
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const autoRequestedForExperimentId = useRef<string | null>(null);
+  const currentFrame = useTrackingStore((state) => state.currentFrame);
+  const setFrame = useTrackingStore((state) => state.setFrame);
 
   const chartSeries = useMemo(
     () =>
@@ -91,6 +95,36 @@ export const ResultsPage = () => {
       handleComputePhysics();
     }
   }, [experimentId, physicsResult, status]);
+
+  const trajectoryFrameCount = useMemo(() => {
+    if (!physicsResult) return 0;
+    const maxByBall = physicsResult.balls.map(
+      (ball) => Math.max(...(ball.trajectory3d?.map((point) => point.frameIdx) ?? [0])) + 1,
+    );
+    return Math.max(0, ...maxByBall);
+  }, [physicsResult]);
+
+  const flaggedFrames = useMemo(() => {
+    if (!physicsResult) return [];
+    const flagged = new Set<number>();
+    physicsResult.balls.forEach((ball) =>
+      (ball.trajectory3d ?? []).forEach((point) => {
+        if (point.flagged) flagged.add(point.frameIdx);
+      }),
+    );
+    return [...flagged].sort((left, right) => left - right);
+  }, [physicsResult]);
+
+  useEffect(() => {
+    if (!isPlaying || trajectoryFrameCount <= 1) return;
+    const timer = window.setInterval(() => {
+      setFrame((previousFrame) => {
+        if (previousFrame >= trajectoryFrameCount - 1) return 0;
+        return previousFrame + 1;
+      });
+    }, 33);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, trajectoryFrameCount, setFrame]);
 
   const handleExportCsv = () => {
     if (!physicsResult) return;
@@ -238,6 +272,24 @@ export const ResultsPage = () => {
 
           <div ref={exportRef} className="grid gap-6 lg:grid-cols-[1fr_350px] items-start">
             <div className="space-y-6">
+              {physicsResult.reconstruction3d?.mode === 'STEREO_3D' && (
+                <section className="space-y-3">
+                  <ThreeDScene
+                    balls={physicsResult.balls}
+                    currentFrame={Math.min(currentFrame, Math.max(trajectoryFrameCount - 1, 0))}
+                    reconstruction3d={physicsResult.reconstruction3d}
+                  />
+                  <FrameScrubber
+                    currentFrame={Math.min(currentFrame, Math.max(trajectoryFrameCount - 1, 0))}
+                    frameCount={Math.max(trajectoryFrameCount, 1)}
+                    onFrameChange={setFrame}
+                    isPlaying={isPlaying}
+                    onPlayToggle={() => setIsPlaying((playing) => !playing)}
+                    flaggedFrames={flaggedFrames}
+                    variant="compact"
+                  />
+                </section>
+              )}
               <section className="surface-panel p-5 glitch-in stagger-3">
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="text-lg">Velocity Dynamics</h2>

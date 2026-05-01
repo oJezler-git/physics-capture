@@ -61,7 +61,6 @@ export const CalibrationPage = () => {
     loadProfile,
     setRulerScale,
     stereoExtrinsics,
-    intrinsics,
   } = useCalibrationStore();
 
   const [isBusy, setIsBusy] = useState(false);
