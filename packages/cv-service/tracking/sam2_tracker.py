@@ -153,26 +153,39 @@ class SAM2Tracker:
                 min_value=0,
             )
             use_chunking = max_frames_per_chunk > 0 and total_frames > max_frames_per_chunk
+            chunk_overlap = _env_int(
+                "SAM2_CHUNK_OVERLAP_FRAMES",
+                default=4 if use_chunking else 0,
+                min_value=0,
+            )
+            if use_chunking and chunk_overlap >= max_frames_per_chunk:
+                chunk_overlap = max(0, max_frames_per_chunk - 1)
             if use_chunking:
                 logger.info(
-                    "[SAM2] Using chunked tracking: total_frames=%d chunk_size=%d",
+                    "[SAM2] Using chunked tracking: total_frames=%d chunk_size=%d overlap=%d",
                     total_frames,
                     max_frames_per_chunk,
+                    chunk_overlap,
                 )
 
             chunk_last_valid: Dict[int, Dict[str, float]] = {}
             chunk_size = max_frames_per_chunk if use_chunking else total_frames
-            for chunk_start in range(0, total_frames, chunk_size):
+            chunk_step = max(1, chunk_size - chunk_overlap)
+            for chunk_start in range(0, total_frames, chunk_step):
                 chunk_end = min(chunk_start + chunk_size, total_frames)
                 chunk_files = selected_frame_files[chunk_start:chunk_end]
                 chunk_physical_indices = physical_indices[chunk_start:chunk_end]
+                emit_from_local_idx = 0 if chunk_start == 0 else min(chunk_overlap, len(chunk_files))
                 chunk_index_to_local = {
                     physical_idx: local_idx
                     for local_idx, physical_idx in enumerate(chunk_physical_indices)
                 }
                 use_isolated_dir = use_chunking or len(selected_frame_files) != len(frame_files)
                 with self._prepare_sam2_frames(chunk_files, isolate=use_isolated_dir) as sam2_frames_dir:
-                    inference_state = self._init_inference_state(str(sam2_frames_dir))
+                    inference_state = self._init_inference_state(
+                        str(sam2_frames_dir),
+                        chunk_frame_count=len(chunk_files),
+                    )
                     has_prompts = self._add_seed_prompts(
                         inference_state=inference_state,
                         seeds=seeds,
@@ -190,6 +203,9 @@ class SAM2Tracker:
                     for local_frame_idx, obj_ids, masks in self.predictor.propagate_in_video(
                         inference_state
                     ):
+                        local_idx = int(local_frame_idx)
+                        if local_idx < emit_from_local_idx:
+                            continue
                         frame_results = []
                         for i, obj_id in enumerate(obj_ids):
                             m_h, m_w = masks[i].shape[-2:]
@@ -218,7 +234,6 @@ class SAM2Tracker:
                                 }
                             )
 
-                        local_idx = int(local_frame_idx)
                         physical_idx = chunk_physical_indices[local_idx]
                         global_idx = chunk_start + local_idx
                         progress = global_idx / max(1, total_frames - 1)
@@ -351,10 +366,17 @@ class SAM2Tracker:
             )
         return len(grouped_seed_points) > 0
 
-    def _init_inference_state(self, video_path: str):
+    def _init_inference_state(self, video_path: str, chunk_frame_count: Optional[int] = None):
         use_cuda = "cuda" in str(self.device)
         # CPU-offloaded video frames avoid allocating full sequence on GPU at init_state.
-        offload_video_to_cpu = _env_flag("SAM2_OFFLOAD_VIDEO_TO_CPU", default=use_cuda)
+        offload_threshold = _env_int("SAM2_GPU_FRAME_CHUNK_THRESHOLD", default=160, min_value=1)
+        default_offload_video_to_cpu = use_cuda and (
+            chunk_frame_count is None or chunk_frame_count > offload_threshold
+        )
+        offload_video_to_cpu = _env_flag(
+            "SAM2_OFFLOAD_VIDEO_TO_CPU",
+            default=default_offload_video_to_cpu,
+        )
         offload_state_to_cpu = _env_flag("SAM2_OFFLOAD_STATE_TO_CPU", default=False)
         async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=False)
 
