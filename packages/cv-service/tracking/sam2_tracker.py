@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from PIL import Image
 
 import numpy as np
@@ -27,6 +27,26 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int, min_value: int = 0) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid integer for %s=%r. Using default=%d", name, raw, default)
+        return default
+    if value < min_value:
+        logger.warning(
+            "Value for %s=%d is below minimum %d. Clamping.",
+            name,
+            value,
+            min_value,
+        )
+        return min_value
+    return value
+
+
 class SAM2Tracker:
     def __init__(self, model_id: str = None):
         self.device = (
@@ -39,8 +59,8 @@ class SAM2Tracker:
         self._coord_cache: Dict[Tuple[int, int, str, str], Tuple[torch.Tensor, torch.Tensor]] = {}
 
         # Resolve model selection: param > Env > hardcoded default
-        config_file = os.getenv("SAM2_CONFIG_FILE", "").strip()
-        checkpoint_path = os.getenv("SAM2_CHECKPOINT_PATH", "").strip()
+        config_file = os.getenv("SAM2_CONFIG_FILE", "").strip() or None
+        checkpoint_path = os.getenv("SAM2_CHECKPOINT_PATH", "").strip() or None
         enable_postprocessing = _env_flag("SAM2_ENABLE_POSTPROCESSING", default=False)
         use_cuda = "cuda" in str(self.device)
 
@@ -48,87 +68,19 @@ class SAM2Tracker:
             model_id = os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
 
         enable_compile = _env_flag("SAM2_ENABLE_COMPILE", default=False)
-        enable_vos_optimized = _env_flag("SAM2_VOS_OPTIMIZED", default=use_cuda)
+        prefer_vos_optimized = _env_flag("SAM2_VOS_OPTIMIZED", default=use_cuda)
+
+        # Persist init options for runtime fallback/rebuilds.
+        self._model_id = model_id
+        self._config_file = config_file
+        self._checkpoint_path = checkpoint_path
+        self._enable_postprocessing = enable_postprocessing
+        self._enable_compile = enable_compile
+        self._prefer_vos_optimized = prefer_vos_optimized
+        self._applied_vos_optimized = False
 
         try:
-            if config_file:
-                ckpt = checkpoint_path or None
-                applied_vos_optimized = enable_vos_optimized
-                try:
-                    self.predictor = build_sam2_video_predictor(
-                        config_file=config_file,
-                        ckpt_path=ckpt,
-                        device=str(self.device),
-                        apply_postprocessing=enable_postprocessing,
-                        vos_optimized=enable_vos_optimized,
-                    )
-                except Exception as exc:
-                    if not enable_vos_optimized:
-                        raise
-                    logger.warning(
-                        "[SAM2] VOS optimized build failed; retrying without it: %s",
-                        exc,
-                    )
-                    applied_vos_optimized = False
-                    self.predictor = build_sam2_video_predictor(
-                        config_file=config_file,
-                        ckpt_path=ckpt,
-                        device=str(self.device),
-                        apply_postprocessing=enable_postprocessing,
-                        vos_optimized=False,
-                    )
-
-                # Optimized for modern GPUs (RTX 40 series)
-                if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
-                    try:
-                        logger.info("[SAM2] Found modern torch; compiling model for 40-series speedup...")
-                        self.predictor = torch.compile(self.predictor)
-                    except Exception as e:
-                        logger.warning(f"[SAM2] torch.compile failed (normal on some Windows setups): {e}")
-                logger.info(
-                    "Initialized SAM2 from config=%s checkpoint=%s vos_optimized=%s",
-                    config_file,
-                    checkpoint_path or "<none>",
-                    applied_vos_optimized,
-                )
-            else:
-                applied_vos_optimized = enable_vos_optimized
-                try:
-                    self.predictor = build_sam2_video_predictor_hf(
-                        model_id=model_id,
-                        device=str(self.device),
-                        apply_postprocessing=enable_postprocessing,
-                        vos_optimized=enable_vos_optimized,
-                    )
-                except Exception as exc:
-                    if not enable_vos_optimized:
-                        raise
-                    logger.warning(
-                        "[SAM2] VOS optimized HF build failed; retrying without it: %s",
-                        exc,
-                    )
-                    applied_vos_optimized = False
-                    self.predictor = build_sam2_video_predictor_hf(
-                        model_id=model_id,
-                        device=str(self.device),
-                        apply_postprocessing=enable_postprocessing,
-                        vos_optimized=False,
-                    )
-
-                # Boost for modern hardware
-                if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
-                    try:
-                        logger.info("[SAM2] Compiling HF model for maximum hardware utility...")
-                        self.predictor = torch.compile(self.predictor)
-                    except Exception as e:
-                        logger.warning(f"[SAM2] torch.compile fallback: {e}")
-
-                logger.info(
-                    "Initialized SAM2 from Hugging Face model_id=%s postprocessing=%s vos_optimized=%s",
-                    model_id,
-                    enable_postprocessing,
-                    applied_vos_optimized,
-                )
+            self._rebuild_predictor(disable_vos=not prefer_vos_optimized)
         except ModuleNotFoundError as exc:
             # Common setup miss: optional HF dependency for checkpoint download.
             if exc.name == "huggingface_hub":
@@ -167,7 +119,6 @@ class SAM2Tracker:
 
         physical_indices = [idx for idx, _ in frame_pairs]
         selected_frame_files = [path for _, path in frame_pairs]
-        index_to_local = {physical_idx: local_idx for local_idx, physical_idx in enumerate(physical_indices)}
 
         # Get image dimensions for coordinate normalization
         with Image.open(selected_frame_files[0]) as img:
@@ -184,7 +135,8 @@ class SAM2Tracker:
         )
 
         if self.predictor is None:
-            return self._fallback_track(selected_frame_files, seeds, physical_indices)
+            yield from self._fallback_track(selected_frame_files, seeds, physical_indices)
+            return
 
         # Apply inference mode and autocast for massive hardware acceleration.
         autocast_ctx = (
@@ -193,90 +145,218 @@ class SAM2Tracker:
             else nullcontext()
         )
         with torch.inference_mode(), autocast_ctx:
-            use_isolated_dir = len(selected_frame_files) != len(frame_files)
-            with self._prepare_sam2_frames(selected_frame_files, isolate=use_isolated_dir) as sam2_frames_dir:
-                inference_state = self._init_inference_state(str(sam2_frames_dir))
+            total_frames = len(selected_frame_files)
+            default_chunk = 128 if "cuda" in str(self.device) else 0
+            max_frames_per_chunk = _env_int(
+                "SAM2_MAX_FRAMES_PER_CHUNK",
+                default=default_chunk,
+                min_value=0,
+            )
+            use_chunking = max_frames_per_chunk > 0 and total_frames > max_frames_per_chunk
+            if use_chunking:
+                logger.info(
+                    "[SAM2] Using chunked tracking: total_frames=%d chunk_size=%d",
+                    total_frames,
+                    max_frames_per_chunk,
+                )
 
-                # Add initial seed points (batched per object+frame to avoid repeated inference calls).
-                grouped_seed_points: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
-                for seed in seeds:
-                    # Expecting normalized x, y (0-1) from frontend
-                    x_px = float(seed["x"]) * width
-                    y_px = float(seed["y"]) * height
-
-                    physical_seed_idx = int(seed.get("frame_idx", 0))
-                    frame_idx = index_to_local.get(physical_seed_idx)
-                    if frame_idx is None:
-                        continue
-
-                    obj_id = seed["ball_id"] + 1  # 1-indexed for SAM2
-                    grouped_seed_points.setdefault((obj_id, frame_idx), []).append((x_px, y_px))
-
-                for (obj_id, frame_idx), points_list in sorted(
-                    grouped_seed_points.items(),
-                    key=lambda item: (item[0][1], item[0][0]),
-                ):
-                    points = np.asarray(points_list, dtype=np.float32)
-                    labels = np.ones((len(points_list),), dtype=np.int32)
-                    self.predictor.add_new_points(
+            chunk_last_valid: Dict[int, Dict[str, float]] = {}
+            chunk_size = max_frames_per_chunk if use_chunking else total_frames
+            for chunk_start in range(0, total_frames, chunk_size):
+                chunk_end = min(chunk_start + chunk_size, total_frames)
+                chunk_files = selected_frame_files[chunk_start:chunk_end]
+                chunk_physical_indices = physical_indices[chunk_start:chunk_end]
+                chunk_index_to_local = {
+                    physical_idx: local_idx
+                    for local_idx, physical_idx in enumerate(chunk_physical_indices)
+                }
+                use_isolated_dir = use_chunking or len(selected_frame_files) != len(frame_files)
+                with self._prepare_sam2_frames(chunk_files, isolate=use_isolated_dir) as sam2_frames_dir:
+                    inference_state = self._init_inference_state(str(sam2_frames_dir))
+                    has_prompts = self._add_seed_prompts(
                         inference_state=inference_state,
-                        frame_idx=frame_idx,
-                        obj_id=obj_id,
-                        points=points,
-                        labels=labels,
+                        seeds=seeds,
+                        index_to_local=chunk_index_to_local,
+                        width=width,
+                        height=height,
+                        carry_positions=chunk_last_valid if chunk_start > 0 else None,
                     )
+                    if not has_prompts:
+                        raise RuntimeError(
+                            "No valid SAM2 seed prompts available for the selected frame range/chunk."
+                        )
 
-                # Propagate through video.
-                total_frames = len(selected_frame_files)
+                    local_last_valid = dict(chunk_last_valid)
+                    for local_frame_idx, obj_ids, masks in self.predictor.propagate_in_video(
+                        inference_state
+                    ):
+                        frame_results = []
+                        for i, obj_id in enumerate(obj_ids):
+                            m_h, m_w = masks[i].shape[-2:]
+                            centroid, area = self._get_centroid_and_area_gpu(masks[i])
+                            obj_key = int(obj_id)
 
-                # Keep track of last valid positions to "hold" during occlusions/jumps
-                last_valid = {} # obj_id -> {x, y}
-
-                for local_frame_idx, obj_ids, masks in self.predictor.propagate_in_video(inference_state):
-                    frame_results = []
-                    for i, obj_id in enumerate(obj_ids):
-                        # Get dimensions of the actual mask returned by SAM2
-                        m_h, m_w = masks[i].shape[-2:]
-                        centroid, area = self._get_centroid_and_area_gpu(masks[i])
-
-                        obj_key = int(obj_id)
-
-                        # If mask is present, update last valid and use high confidence
-                        if area > 10: # Minimum pixel threshold
-                            x_norm = centroid[0] / m_w
-                            y_norm = centroid[1] / m_h
-                            last_valid[obj_key] = {"x": x_norm, "y": y_norm}
-                            confidence = 1.0
-                        else:
-                            # Mask lost! Use last known position if available
-                            if obj_key in last_valid:
-                                x_norm = last_valid[obj_key]["x"]
-                                y_norm = last_valid[obj_key]["y"]
-                                confidence = 0.0 # Flag as lost but hold position
+                            if area > 10:
+                                x_norm = centroid[0] / m_w
+                                y_norm = centroid[1] / m_h
+                                local_last_valid[obj_key] = {"x": x_norm, "y": y_norm}
+                                confidence = 1.0
+                            elif obj_key in local_last_valid:
+                                x_norm = local_last_valid[obj_key]["x"]
+                                y_norm = local_last_valid[obj_key]["y"]
+                                confidence = 0.0
                             else:
-                                # Never found?
                                 x_norm, y_norm = 0.0, 0.0
                                 confidence = 0.0
 
-                        frame_results.append(
-                            {
-                                "ball_id": obj_key - 1,
-                                "x": x_norm,
-                                "y": y_norm,
-                                "confidence": confidence,
-                            }
-                        )
-                    # Yield streaming item: (frame_int, points, progress_pct)
-                    local_idx = int(local_frame_idx)
-                    physical_idx = physical_indices[local_idx]
-                    yield (physical_idx, frame_results, local_idx / max(1, total_frames - 1))
+                            frame_results.append(
+                                {
+                                    "ball_id": obj_key - 1,
+                                    "x": x_norm,
+                                    "y": y_norm,
+                                    "confidence": confidence,
+                                }
+                            )
+
+                        local_idx = int(local_frame_idx)
+                        physical_idx = chunk_physical_indices[local_idx]
+                        global_idx = chunk_start + local_idx
+                        progress = global_idx / max(1, total_frames - 1)
+                        yield (physical_idx, frame_results, progress)
+                    chunk_last_valid = local_last_valid
+
+    def _rebuild_predictor(self, disable_vos: bool = False, disable_compile: bool = False) -> None:
+        use_cuda = "cuda" in str(self.device)
+        vos_requested = self._prefer_vos_optimized and not disable_vos and use_cuda
+        # Triton on Windows is commonly unavailable; avoid VOS compile path unless explicitly forced.
+        if os.name == "nt" and "SAM2_VOS_OPTIMIZED" not in os.environ:
+            vos_requested = False
+
+        applied_vos = vos_requested
+        if self._config_file:
+            try:
+                self.predictor = build_sam2_video_predictor(
+                    config_file=self._config_file,
+                    ckpt_path=self._checkpoint_path,
+                    device=str(self.device),
+                    apply_postprocessing=self._enable_postprocessing,
+                    vos_optimized=vos_requested,
+                )
+            except Exception as exc:
+                if not vos_requested:
+                    raise
+                logger.warning("[SAM2] VOS optimized build failed; retrying without it: %s", exc)
+                applied_vos = False
+                self.predictor = build_sam2_video_predictor(
+                    config_file=self._config_file,
+                    ckpt_path=self._checkpoint_path,
+                    device=str(self.device),
+                    apply_postprocessing=self._enable_postprocessing,
+                    vos_optimized=False,
+                )
+            logger.info(
+                "Initialized SAM2 from config=%s checkpoint=%s postprocessing=%s vos_optimized=%s",
+                self._config_file,
+                self._checkpoint_path or "<none>",
+                self._enable_postprocessing,
+                applied_vos,
+            )
+        else:
+            try:
+                self.predictor = build_sam2_video_predictor_hf(
+                    model_id=self._model_id,
+                    device=str(self.device),
+                    apply_postprocessing=self._enable_postprocessing,
+                    vos_optimized=vos_requested,
+                )
+            except Exception as exc:
+                if not vos_requested:
+                    raise
+                logger.warning("[SAM2] VOS optimized HF build failed; retrying without it: %s", exc)
+                applied_vos = False
+                self.predictor = build_sam2_video_predictor_hf(
+                    model_id=self._model_id,
+                    device=str(self.device),
+                    apply_postprocessing=self._enable_postprocessing,
+                    vos_optimized=False,
+                )
+            logger.info(
+                "Initialized SAM2 from Hugging Face model_id=%s postprocessing=%s vos_optimized=%s",
+                self._model_id,
+                self._enable_postprocessing,
+                applied_vos,
+            )
+
+        # Optional generic compile path for non-VOS predictor builds.
+        if (
+            self._enable_compile
+            and not disable_compile
+            and hasattr(torch, "compile")
+            and use_cuda
+            and not applied_vos
+        ):
+            try:
+                logger.info("[SAM2] Compiling predictor with torch.compile...")
+                self.predictor = torch.compile(self.predictor)
+            except Exception as exc:
+                logger.warning("[SAM2] torch.compile failed; continuing eagerly: %s", exc)
+        self._applied_vos_optimized = applied_vos
+
+    def _add_seed_prompts(
+        self,
+        inference_state,
+        seeds: List[dict],
+        index_to_local: Dict[int, int],
+        width: int,
+        height: int,
+        carry_positions: Optional[Dict[int, Dict[str, float]]] = None,
+    ) -> bool:
+        grouped_seed_points: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+
+        # Original user-provided seeds.
+        for seed in seeds:
+            x_px = float(seed["x"]) * width
+            y_px = float(seed["y"]) * height
+
+            physical_seed_idx = int(seed.get("frame_idx", 0))
+            frame_idx = index_to_local.get(physical_seed_idx)
+            if frame_idx is None:
+                continue
+
+            obj_id = int(seed["ball_id"]) + 1  # 1-indexed for SAM2
+            grouped_seed_points.setdefault((obj_id, frame_idx), []).append((x_px, y_px))
+
+        # Carry prompts into new chunks so each object has context at local frame 0.
+        if carry_positions:
+            for obj_id, pos in carry_positions.items():
+                key = (int(obj_id), 0)
+                if key in grouped_seed_points:
+                    continue
+                grouped_seed_points[key] = [
+                    (float(pos["x"]) * width, float(pos["y"]) * height)
+                ]
+
+        for (obj_id, frame_idx), points_list in sorted(
+            grouped_seed_points.items(),
+            key=lambda item: (item[0][1], item[0][0]),
+        ):
+            points = np.asarray(points_list, dtype=np.float32)
+            labels = np.ones((len(points_list),), dtype=np.int32)
+            self.predictor.add_new_points(
+                inference_state=inference_state,
+                frame_idx=frame_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+            )
+        return len(grouped_seed_points) > 0
 
     def _init_inference_state(self, video_path: str):
         use_cuda = "cuda" in str(self.device)
         # CPU-offloaded video frames avoid allocating full sequence on GPU at init_state.
         offload_video_to_cpu = _env_flag("SAM2_OFFLOAD_VIDEO_TO_CPU", default=use_cuda)
         offload_state_to_cpu = _env_flag("SAM2_OFFLOAD_STATE_TO_CPU", default=False)
-        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=use_cuda)
+        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=False)
 
         try:
             return self.predictor.init_state(
@@ -286,12 +366,31 @@ class SAM2Tracker:
                 async_loading_frames=async_loading_frames,
             )
         except Exception as exc:
+            err_text = str(exc).lower()
+            is_inductor_failure = (
+                "backend='inductor'" in err_text
+                or "backendcompilerfailed" in err_text
+                or "triton" in err_text
+                or "torch._dynamo" in err_text
+            )
+            if is_inductor_failure and (self._applied_vos_optimized or self._enable_compile):
+                logger.warning(
+                    "[SAM2] Compile backend failure detected; rebuilding in eager mode."
+                )
+                self._rebuild_predictor(disable_vos=True, disable_compile=True)
+                return self.predictor.init_state(
+                    video_path=video_path,
+                    offload_video_to_cpu=offload_video_to_cpu,
+                    offload_state_to_cpu=offload_state_to_cpu,
+                    async_loading_frames=async_loading_frames,
+                )
+
             is_cuda_oom = (
                 use_cuda
                 and torch is not None
                 and (
                     isinstance(exc, torch.OutOfMemoryError)
-                    or "cuda out of memory" in str(exc).lower()
+                    or "cuda out of memory" in err_text
                 )
             )
             if not is_cuda_oom or offload_video_to_cpu:
