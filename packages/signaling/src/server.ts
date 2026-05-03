@@ -57,9 +57,6 @@ async function runSyncMarkerDecode(experimentId: string): Promise<void> {
     __dirname,
     "../../../.venv/Scripts/python.exe",
   );
-  const python =
-    process.env.PHYSICSCAPTURE_PYTHON_BIN ??
-    (existsSync(venvPython) ? venvPython : "python");
   const displayHz = process.env.SYNC_MARKER_DISPLAY_HZ ?? "60";
   const sampleStride = process.env.SYNC_MARKER_SAMPLE_STRIDE ?? "5";
 
@@ -83,31 +80,87 @@ async function runSyncMarkerDecode(experimentId: string): Promise<void> {
     "../../cv-service/sync/sync_marker_cli.py",
   );
 
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn(
-      python,
-      [
-        scriptPath,
-        "--experiments-dir",
-        EXPERIMENTS_DIR,
-        "--experiment-id",
-        experimentId,
-        "--camera-ids",
-        cameraIds.join(","),
-        "--display-hz",
-        displayHz,
-        "--sample-stride",
-        sampleStride,
-      ],
-      { stdio: "inherit" },
-    );
+  const cliArgs = [
+    scriptPath,
+    "--experiments-dir",
+    EXPERIMENTS_DIR,
+    "--experiment-id",
+    experimentId,
+    "--camera-ids",
+    cameraIds.join(","),
+    "--display-hz",
+    displayHz,
+    "--sample-stride",
+    sampleStride,
+  ];
+  const configuredPython = process.env.PHYSICSCAPTURE_PYTHON_BIN?.trim();
+  const pythonCandidates: { command: string; argsPrefix: string[] }[] = [];
+  if (configuredPython) {
+    pythonCandidates.push({ command: configuredPython, argsPrefix: [] });
+  } else {
+    if (existsSync(venvPython)) {
+      pythonCandidates.push({ command: venvPython, argsPrefix: [] });
+    }
+    pythonCandidates.push({ command: "python", argsPrefix: [] });
+    pythonCandidates.push({ command: "py", argsPrefix: ["-3"] });
+  }
 
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`sync marker decode exited with code ${code}`));
+  let lastError: Error | null = null;
+  for (const candidate of pythonCandidates) {
+    const result = await new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+      stderr: string;
+      spawnError?: NodeJS.ErrnoException;
+    }>((resolve) => {
+      const proc = spawn(
+        candidate.command,
+        [...candidate.argsPrefix, ...cliArgs],
+        {
+          stdio: ["ignore", "inherit", "pipe"],
+        },
+      );
+
+      let stderr = "";
+      proc.stderr.on("data", (chunk) => {
+        const text = chunk.toString();
+        stderr += text;
+        process.stderr.write(text);
+      });
+      proc.on("error", (err) => {
+        resolve({ code: null, signal: null, stderr, spawnError: err });
+      });
+      proc.on("close", (code, signal) => {
+        resolve({ code, signal, stderr });
+      });
     });
-  });
+
+    if (result.code === 0) return;
+
+    const isBrokenInterpreter =
+      /unable to create process/i.test(result.stderr) ||
+      result.spawnError?.code === "ENOENT" ||
+      result.spawnError?.code === "EACCES";
+    if (isBrokenInterpreter) {
+      lastError =
+        result.spawnError ??
+        new Error(
+          `sync marker decode failed to start with interpreter "${candidate.command}"`,
+        );
+      continue;
+    }
+
+    throw new Error(
+      `sync marker decode exited with code ${result.code ?? "null"}${result.signal ? ` (signal ${result.signal})` : ""}`,
+    );
+  }
+
+  throw (
+    lastError ??
+    new Error(
+      "sync marker decode could not be started with any Python interpreter",
+    )
+  );
 }
 
 const isPrivateIPv4 = (address: string) =>
