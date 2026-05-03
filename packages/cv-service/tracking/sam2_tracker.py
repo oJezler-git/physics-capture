@@ -41,54 +41,93 @@ class SAM2Tracker:
         # Resolve model selection: param > Env > hardcoded default
         config_file = os.getenv("SAM2_CONFIG_FILE", "").strip()
         checkpoint_path = os.getenv("SAM2_CHECKPOINT_PATH", "").strip()
-        enable_postprocessing = os.getenv("SAM2_ENABLE_POSTPROCESSING", "0").strip().lower() in {"1", "true", "yes", "on"}
-        
+        enable_postprocessing = _env_flag("SAM2_ENABLE_POSTPROCESSING", default=False)
+        use_cuda = "cuda" in str(self.device)
+
         if not model_id:
             model_id = os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
 
-        enable_compile = os.getenv("SAM2_ENABLE_COMPILE", "0").strip().lower() in {"1", "true", "yes", "on"}
+        enable_compile = _env_flag("SAM2_ENABLE_COMPILE", default=False)
+        enable_vos_optimized = _env_flag("SAM2_VOS_OPTIMIZED", default=use_cuda)
 
         try:
             if config_file:
                 ckpt = checkpoint_path or None
-                self.predictor = build_sam2_video_predictor(
-                    config_file=config_file,
-                    ckpt_path=ckpt,
-                    device=str(self.device),
-                    apply_postprocessing=enable_postprocessing,
-                )
-                
+                applied_vos_optimized = enable_vos_optimized
+                try:
+                    self.predictor = build_sam2_video_predictor(
+                        config_file=config_file,
+                        ckpt_path=ckpt,
+                        device=str(self.device),
+                        apply_postprocessing=enable_postprocessing,
+                        vos_optimized=enable_vos_optimized,
+                    )
+                except Exception as exc:
+                    if not enable_vos_optimized:
+                        raise
+                    logger.warning(
+                        "[SAM2] VOS optimized build failed; retrying without it: %s",
+                        exc,
+                    )
+                    applied_vos_optimized = False
+                    self.predictor = build_sam2_video_predictor(
+                        config_file=config_file,
+                        ckpt_path=ckpt,
+                        device=str(self.device),
+                        apply_postprocessing=enable_postprocessing,
+                        vos_optimized=False,
+                    )
+
                 # Optimized for modern GPUs (RTX 40 series)
                 if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
                     try:
                         logger.info("[SAM2] Found modern torch; compiling model for 40-series speedup...")
                         self.predictor = torch.compile(self.predictor)
                     except Exception as e:
-                        logger.warn(f"[SAM2] torch.compile failed (normal on some Windows setups): {e}")
+                        logger.warning(f"[SAM2] torch.compile failed (normal on some Windows setups): {e}")
                 logger.info(
-                    "Initialized SAM2 from config=%s checkpoint=%s",
+                    "Initialized SAM2 from config=%s checkpoint=%s vos_optimized=%s",
                     config_file,
                     checkpoint_path or "<none>",
+                    applied_vos_optimized,
                 )
             else:
-                self.predictor = build_sam2_video_predictor_hf(
-                    model_id=model_id, 
-                    device=str(self.device),
-                    apply_postprocessing=enable_postprocessing,
-                )
-                
+                applied_vos_optimized = enable_vos_optimized
+                try:
+                    self.predictor = build_sam2_video_predictor_hf(
+                        model_id=model_id,
+                        device=str(self.device),
+                        apply_postprocessing=enable_postprocessing,
+                        vos_optimized=enable_vos_optimized,
+                    )
+                except Exception as exc:
+                    if not enable_vos_optimized:
+                        raise
+                    logger.warning(
+                        "[SAM2] VOS optimized HF build failed; retrying without it: %s",
+                        exc,
+                    )
+                    applied_vos_optimized = False
+                    self.predictor = build_sam2_video_predictor_hf(
+                        model_id=model_id,
+                        device=str(self.device),
+                        apply_postprocessing=enable_postprocessing,
+                        vos_optimized=False,
+                    )
+
                 # Boost for modern hardware
                 if enable_compile and hasattr(torch, "compile") and "cuda" in str(self.device):
                     try:
                         logger.info("[SAM2] Compiling HF model for maximum hardware utility...")
                         self.predictor = torch.compile(self.predictor)
                     except Exception as e:
-                        logger.warn(f"[SAM2] torch.compile fallback: {e}")
-                
+                        logger.warning(f"[SAM2] torch.compile fallback: {e}")
+
                 logger.info(
-                    "Initialized SAM2 from Hugging Face model_id=%s postprocessing=%s",
+                    "Initialized SAM2 from Hugging Face model_id=%s postprocessing=%s vos_optimized=%s",
                     model_id,
                     enable_postprocessing,
+                    applied_vos_optimized,
                 )
         except ModuleNotFoundError as exc:
             # Common setup miss: optional HF dependency for checkpoint download.
@@ -237,7 +276,7 @@ class SAM2Tracker:
         # CPU-offloaded video frames avoid allocating full sequence on GPU at init_state.
         offload_video_to_cpu = _env_flag("SAM2_OFFLOAD_VIDEO_TO_CPU", default=use_cuda)
         offload_state_to_cpu = _env_flag("SAM2_OFFLOAD_STATE_TO_CPU", default=False)
-        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=False)
+        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=use_cuda)
 
         try:
             return self.predictor.init_state(
@@ -318,24 +357,69 @@ class SAM2Tracker:
         if not needs_conversion and not isolate:
             return _PassthroughFrameDir(frame_files[0].parent)
 
+        source_dir = frame_files[0].parent
+        if needs_conversion:
+            cache_dir = source_dir / ".sam2_jpg_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cached_frame_files = [self._get_or_create_cached_jpg(src, cache_dir) for src in frame_files]
+            if not isolate:
+                self._prune_png_cache(cache_dir, cached_frame_files)
+                return _PassthroughFrameDir(cache_dir)
+            frame_files = cached_frame_files
+
         temp_dir = tempfile.TemporaryDirectory(prefix="sam2_frames_")
         sam2_dir = Path(temp_dir.name)
 
         for src in frame_files:
-            if needs_conversion:
-                dst = sam2_dir / f"{src.stem}.jpg"
-                with Image.open(src) as img:
-                    # Keep conversion memory pressure lower than optimize=True.
-                    img.convert("RGB").save(dst, format="JPEG", quality=92, optimize=False)
-            else:
-                # Isolate a selected JPEG subset for SAM2 range-limited runs.
-                dst = sam2_dir / src.name
-                try:
-                    os.link(src, dst)
-                except Exception:
-                    shutil.copy2(src, dst)
+            dst = sam2_dir / src.name
+            self._link_or_copy(src, dst)
 
         return _TemporaryFrameDir(sam2_dir, temp_dir)
+
+    def _get_or_create_cached_jpg(self, src: Path, cache_dir: Path) -> Path:
+        is_jpeg = src.suffix.lower() in {".jpg", ".jpeg"}
+        dst_name = src.name if is_jpeg else f"{src.stem}.jpg"
+        dst = cache_dir / dst_name
+        src_stat = src.stat()
+        if dst.exists():
+            dst_stat = dst.stat()
+            if dst_stat.st_mtime_ns >= src_stat.st_mtime_ns and dst_stat.st_size > 0:
+                return dst
+
+        if is_jpeg:
+            if dst.exists():
+                dst.unlink()
+            self._link_or_copy(src, dst)
+            return dst
+
+        tmp_dst = dst.with_suffix(".jpg.tmp")
+        with Image.open(src) as img:
+            # Keep conversion memory pressure lower than optimize=True.
+            img.convert("RGB").save(tmp_dst, format="JPEG", quality=92, optimize=False)
+        tmp_dst.replace(dst)
+        os.utime(dst, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        return dst
+
+    @staticmethod
+    def _prune_png_cache(cache_dir: Path, expected_files: List[Path]) -> None:
+        expected_names = {path.name for path in expected_files}
+        for candidate in cache_dir.iterdir():
+            if not candidate.is_file():
+                continue
+            if candidate.suffix.lower() not in {".jpg", ".jpeg"}:
+                continue
+            if candidate.name not in expected_names:
+                try:
+                    candidate.unlink()
+                except OSError:
+                    logger.debug("[SAM2] Could not prune stale cache file: %s", candidate)
+
+    @staticmethod
+    def _link_or_copy(src: Path, dst: Path) -> None:
+        try:
+            os.link(src, dst)
+        except Exception:
+            shutil.copy2(src, dst)
 
     def _get_axis_cache(
         self,
