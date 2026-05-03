@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 from PIL import Image
 
 import numpy as np
@@ -20,6 +20,13 @@ except Exception:  # pragma: no cover - best-effort optional dependency
 logger = logging.getLogger(__name__)
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class SAM2Tracker:
     def __init__(self, model_id: str = None):
         self.device = (
@@ -29,6 +36,7 @@ class SAM2Tracker:
         )
         logger.info(f"[SAM2] Initializing on device: {self.device}")
         self.predictor = None
+        self._coord_cache: Dict[Tuple[int, int, str, str], Tuple[torch.Tensor, torch.Tensor]] = {}
 
         # Resolve model selection: param > Env > hardcoded default
         config_file = os.getenv("SAM2_CONFIG_FILE", "").strip()
@@ -148,9 +156,10 @@ class SAM2Tracker:
         with torch.inference_mode(), autocast_ctx:
             use_isolated_dir = len(selected_frame_files) != len(frame_files)
             with self._prepare_sam2_frames(selected_frame_files, isolate=use_isolated_dir) as sam2_frames_dir:
-                inference_state = self.predictor.init_state(video_path=str(sam2_frames_dir))
+                inference_state = self._init_inference_state(str(sam2_frames_dir))
 
-                # Add initial seed points.
+                # Add initial seed points (batched per object+frame to avoid repeated inference calls).
+                grouped_seed_points: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
                 for seed in seeds:
                     # Expecting normalized x, y (0-1) from frontend
                     x_px = float(seed["x"]) * width
@@ -160,10 +169,16 @@ class SAM2Tracker:
                     frame_idx = index_to_local.get(physical_seed_idx)
                     if frame_idx is None:
                         continue
-                    obj_id = seed["ball_id"] + 1 # 1-indexed for SAM2
 
-                    points = np.array([[x_px, y_px]], dtype=np.float32)
-                    labels = np.array([1], dtype=np.int32)
+                    obj_id = seed["ball_id"] + 1  # 1-indexed for SAM2
+                    grouped_seed_points.setdefault((obj_id, frame_idx), []).append((x_px, y_px))
+
+                for (obj_id, frame_idx), points_list in sorted(
+                    grouped_seed_points.items(),
+                    key=lambda item: (item[0][1], item[0][0]),
+                ):
+                    points = np.asarray(points_list, dtype=np.float32)
+                    labels = np.ones((len(points_list),), dtype=np.int32)
                     self.predictor.add_new_points(
                         inference_state=inference_state,
                         frame_idx=frame_idx,
@@ -216,6 +231,44 @@ class SAM2Tracker:
                     local_idx = int(local_frame_idx)
                     physical_idx = physical_indices[local_idx]
                     yield (physical_idx, frame_results, local_idx / max(1, total_frames - 1))
+
+    def _init_inference_state(self, video_path: str):
+        use_cuda = "cuda" in str(self.device)
+        # CPU-offloaded video frames avoid allocating full sequence on GPU at init_state.
+        offload_video_to_cpu = _env_flag("SAM2_OFFLOAD_VIDEO_TO_CPU", default=use_cuda)
+        offload_state_to_cpu = _env_flag("SAM2_OFFLOAD_STATE_TO_CPU", default=False)
+        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=False)
+
+        try:
+            return self.predictor.init_state(
+                video_path=video_path,
+                offload_video_to_cpu=offload_video_to_cpu,
+                offload_state_to_cpu=offload_state_to_cpu,
+                async_loading_frames=async_loading_frames,
+            )
+        except Exception as exc:
+            is_cuda_oom = (
+                use_cuda
+                and torch is not None
+                and (
+                    isinstance(exc, torch.OutOfMemoryError)
+                    or "cuda out of memory" in str(exc).lower()
+                )
+            )
+            if not is_cuda_oom or offload_video_to_cpu:
+                raise
+
+            logger.warning(
+                "[SAM2] CUDA OOM during init_state; retrying with offload_video_to_cpu=True."
+            )
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return self.predictor.init_state(
+                video_path=video_path,
+                offload_video_to_cpu=True,
+                offload_state_to_cpu=offload_state_to_cpu,
+                async_loading_frames=async_loading_frames,
+            )
 
     def _fallback_track(self, frame_files: List[Path], seeds: List[dict], physical_indices: List[int]):
         """
@@ -284,32 +337,49 @@ class SAM2Tracker:
 
         return _TemporaryFrameDir(sam2_dir, temp_dir)
 
+    def _get_axis_cache(
+        self,
+        height: int,
+        width: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        key = (height, width, str(device), str(dtype))
+        cached = self._coord_cache.get(key)
+        if cached is None:
+            cols = torch.arange(width, device=device, dtype=dtype)
+            rows = torch.arange(height, device=device, dtype=dtype)
+            cached = (rows, cols)
+            self._coord_cache[key] = cached
+        return cached
+
     def _get_centroid_and_area_gpu(self, mask: torch.Tensor) -> Tuple[Tuple[float, float], float]:
         """
         Calculate centroid and sum (area) on GPU.
         """
         if not isinstance(mask, torch.Tensor):
             return (0.0, 0.0), 0.0
-            
+
         # Squeeze to 2D: (H, W)
         m = mask.detach().squeeze()
-        if m.ndim > 2: m = m[0]
-        
+        if m.ndim > 2:
+            m = m[0]
+
         m = torch.clamp(m, min=0.0)
         total_weight = m.sum()
-        area = float(total_weight.cpu())
-        
-        if total_weight <= 1e-6:
+        area = float(total_weight.item())
+        if area <= 1e-6:
             return (0.0, 0.0), 0.0
-            
+
         height, width = m.shape
-        cols = torch.arange(width, device=m.device, dtype=m.dtype)
-        rows = torch.arange(height, device=m.device, dtype=m.dtype)
-        
+        rows, cols = self._get_axis_cache(height, width, m.device, m.dtype)
+
         cx = (m.sum(dim=0) * cols).sum() / total_weight
         cy = (m.sum(dim=1) * rows).sum() / total_weight
-        
-        return (float(cx.cpu()), float(cy.cpu())), area
+
+        centroid = torch.stack((cx, cy))
+        cx_val, cy_val = centroid.cpu().tolist()
+        return (float(cx_val), float(cy_val)), area
 
     def _get_centroid(self, mask: np.ndarray) -> Tuple[float, float]:
         """Fallback for non-torch masks"""
