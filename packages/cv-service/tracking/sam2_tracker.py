@@ -47,6 +47,66 @@ def _env_int(name: str, default: int, min_value: int = 0) -> int:
     return value
 
 
+def _env_choice(name: str, default: str, allowed: set[str]) -> str:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in allowed:
+        return raw
+    logger.warning("Invalid value for %s=%r. Allowed=%s. Using default=%s.", name, raw, sorted(allowed), default)
+    return default
+
+
+def _profile_defaults(profile: str, use_cuda: bool) -> Dict[str, object]:
+    base = {
+        "chunk_size": 128 if use_cuda else 0,
+        "chunk_overlap": 4 if use_cuda else 0,
+        "gpu_frame_chunk_threshold": 160,
+        "offload_video_to_cpu_default": None,
+        "offload_state_to_cpu_default": False,
+        "async_loading_frames_default": False,
+        "prefer_vos_optimized_default": use_cuda,
+        "enable_compile_default": False,
+    }
+
+    if profile == "safe":
+        base.update(
+            {
+                "chunk_size": 96 if use_cuda else 64,
+                "chunk_overlap": 8 if use_cuda else 4,
+                "gpu_frame_chunk_threshold": 96,
+                "offload_video_to_cpu_default": True if use_cuda else False,
+                "prefer_vos_optimized_default": False,
+                "enable_compile_default": False,
+            }
+        )
+    elif profile == "fast":
+        base.update(
+            {
+                "chunk_size": 192 if use_cuda else 0,
+                "chunk_overlap": 2 if use_cuda else 0,
+                "gpu_frame_chunk_threshold": 512,
+                "offload_video_to_cpu_default": False if use_cuda else False,
+                "async_loading_frames_default": use_cuda,
+                "prefer_vos_optimized_default": use_cuda,
+                "enable_compile_default": use_cuda,
+            }
+        )
+    elif profile == "accurate":
+        base.update(
+            {
+                "chunk_size": 160 if use_cuda else 0,
+                "chunk_overlap": 12 if use_cuda else 0,
+                "gpu_frame_chunk_threshold": 128,
+                "offload_video_to_cpu_default": None,
+                "prefer_vos_optimized_default": use_cuda,
+                "enable_compile_default": False,
+            }
+        )
+    # "balanced" uses base defaults.
+    return base
+
+
 class SAM2Tracker:
     def __init__(self, model_id: str = None):
         self.device = (
@@ -63,12 +123,25 @@ class SAM2Tracker:
         checkpoint_path = os.getenv("SAM2_CHECKPOINT_PATH", "").strip() or None
         enable_postprocessing = _env_flag("SAM2_ENABLE_POSTPROCESSING", default=False)
         use_cuda = "cuda" in str(self.device)
+        perf_profile = _env_choice(
+            "SAM2_PERF_PROFILE",
+            default="balanced",
+            allowed={"safe", "balanced", "fast", "accurate"},
+        )
+        profile_defaults = _profile_defaults(perf_profile, use_cuda)
+        logger.info("[SAM2] Performance profile=%s", perf_profile)
 
         if not model_id:
             model_id = os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
 
-        enable_compile = _env_flag("SAM2_ENABLE_COMPILE", default=False)
-        prefer_vos_optimized = _env_flag("SAM2_VOS_OPTIMIZED", default=use_cuda)
+        enable_compile = _env_flag(
+            "SAM2_ENABLE_COMPILE",
+            default=bool(profile_defaults["enable_compile_default"]),
+        )
+        prefer_vos_optimized = _env_flag(
+            "SAM2_VOS_OPTIMIZED",
+            default=bool(profile_defaults["prefer_vos_optimized_default"]),
+        )
 
         # Persist init options for runtime fallback/rebuilds.
         self._model_id = model_id
@@ -78,6 +151,8 @@ class SAM2Tracker:
         self._enable_compile = enable_compile
         self._prefer_vos_optimized = prefer_vos_optimized
         self._applied_vos_optimized = False
+        self._perf_profile = perf_profile
+        self._profile_defaults = profile_defaults
 
         try:
             self._rebuild_predictor(disable_vos=not prefer_vos_optimized)
@@ -146,7 +221,7 @@ class SAM2Tracker:
         )
         with torch.inference_mode(), autocast_ctx:
             total_frames = len(selected_frame_files)
-            default_chunk = 128 if "cuda" in str(self.device) else 0
+            default_chunk = int(self._profile_defaults["chunk_size"])
             max_frames_per_chunk = _env_int(
                 "SAM2_MAX_FRAMES_PER_CHUNK",
                 default=default_chunk,
@@ -155,7 +230,7 @@ class SAM2Tracker:
             use_chunking = max_frames_per_chunk > 0 and total_frames > max_frames_per_chunk
             chunk_overlap = _env_int(
                 "SAM2_CHUNK_OVERLAP_FRAMES",
-                default=4 if use_chunking else 0,
+                default=(int(self._profile_defaults["chunk_overlap"]) if use_chunking else 0),
                 min_value=0,
             )
             if use_chunking and chunk_overlap >= max_frames_per_chunk:
@@ -369,16 +444,30 @@ class SAM2Tracker:
     def _init_inference_state(self, video_path: str, chunk_frame_count: Optional[int] = None):
         use_cuda = "cuda" in str(self.device)
         # CPU-offloaded video frames avoid allocating full sequence on GPU at init_state.
-        offload_threshold = _env_int("SAM2_GPU_FRAME_CHUNK_THRESHOLD", default=160, min_value=1)
+        default_offload_threshold = int(self._profile_defaults["gpu_frame_chunk_threshold"])
+        offload_threshold = _env_int(
+            "SAM2_GPU_FRAME_CHUNK_THRESHOLD",
+            default=default_offload_threshold,
+            min_value=1,
+        )
         default_offload_video_to_cpu = use_cuda and (
             chunk_frame_count is None or chunk_frame_count > offload_threshold
         )
+        profile_offload_default = self._profile_defaults["offload_video_to_cpu_default"]
+        if profile_offload_default is not None:
+            default_offload_video_to_cpu = bool(profile_offload_default)
         offload_video_to_cpu = _env_flag(
             "SAM2_OFFLOAD_VIDEO_TO_CPU",
             default=default_offload_video_to_cpu,
         )
-        offload_state_to_cpu = _env_flag("SAM2_OFFLOAD_STATE_TO_CPU", default=False)
-        async_loading_frames = _env_flag("SAM2_ASYNC_LOADING_FRAMES", default=False)
+        offload_state_to_cpu = _env_flag(
+            "SAM2_OFFLOAD_STATE_TO_CPU",
+            default=bool(self._profile_defaults["offload_state_to_cpu_default"]),
+        )
+        async_loading_frames = _env_flag(
+            "SAM2_ASYNC_LOADING_FRAMES",
+            default=bool(self._profile_defaults["async_loading_frames_default"]),
+        )
 
         try:
             return self.predictor.init_state(
