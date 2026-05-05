@@ -25,6 +25,7 @@ const framePoint = (points: Point3D[] | undefined, frameIdx: number) =>
   points?.find((point) => point.frameIdx === frameIdx) ?? null;
 
 type CameraMode = 'off' | 'track' | 'follow';
+type ViewMode = 'perspective' | 'orthographic' | 'isometric' | 'dimetric' | 'oblique';
 
 const CameraFrameOverlay = ({
   url,
@@ -234,6 +235,7 @@ const SceneContent = ({
   cam1FrameUrl,
   showCameraOverlays,
   frameAspect,
+  viewMode,
 }: {
   mode: CameraMode;
   targetVec: THREE.Vector3 | null;
@@ -245,10 +247,58 @@ const SceneContent = ({
   cam1FrameUrl: string | null;
   showCameraOverlays: boolean;
   frameAspect: number;
+  viewMode: ViewMode;
 }) => {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const controlsRef = useRef<any>(null);
   const offset = useMemo(() => new THREE.Vector3(0.3, 0.4, 0.3), []);
+
+  useEffect(() => {
+    const target = controlsRef.current?.target ?? new THREE.Vector3(0, 0.2, 0.8);
+    const setPerspective = (pos: [number, number, number], fov = 45) => {
+      if (!(camera instanceof THREE.PerspectiveCamera)) return;
+      camera.fov = fov;
+      camera.position.set(...pos);
+      camera.lookAt(target);
+      camera.updateProjectionMatrix();
+      controlsRef.current?.update();
+    };
+
+    const setOrthographic = (pos: [number, number, number]) => {
+      if (!(camera instanceof THREE.OrthographicCamera)) return;
+      const frustumHeight = 2.2;
+      const aspect = size.width / Math.max(1, size.height);
+      camera.left = (-frustumHeight * aspect) / 2;
+      camera.right = (frustumHeight * aspect) / 2;
+      camera.top = frustumHeight / 2;
+      camera.bottom = -frustumHeight / 2;
+      camera.near = 0.01;
+      camera.far = 100;
+      camera.zoom = 1;
+      camera.position.set(...pos);
+      camera.lookAt(target);
+      camera.updateProjectionMatrix();
+      controlsRef.current?.update();
+    };
+
+    if (viewMode === 'perspective') setPerspective([1.2, 1.0, 1.5], 45);
+    if (viewMode === 'orthographic') setOrthographic([1.2, 1.0, 1.5]);
+    if (viewMode === 'isometric') {
+      const d = 1.6;
+      if (camera instanceof THREE.PerspectiveCamera) setPerspective([d, d, d], 38);
+      if (camera instanceof THREE.OrthographicCamera) setOrthographic([d, d, d]);
+    }
+    if (viewMode === 'dimetric') {
+      const d = 1.6;
+      if (camera instanceof THREE.PerspectiveCamera) setPerspective([d * 1.1, d * 0.8, d], 38);
+      if (camera instanceof THREE.OrthographicCamera) setOrthographic([d * 1.1, d * 0.8, d]);
+    }
+    if (viewMode === 'oblique') {
+      const d = 1.8;
+      if (camera instanceof THREE.PerspectiveCamera) setPerspective([d * 1.35, d * 0.55, d], 34);
+      if (camera instanceof THREE.OrthographicCamera) setOrthographic([d * 1.35, d * 0.55, d]);
+    }
+  }, [camera, size, viewMode]);
 
   useFrame((_, delta) => {
     if (!targetVec) return;
@@ -315,6 +365,7 @@ export const ThreeDScene = ({
 }: ThreeDSceneProps) => {
   const [cameraMode, setCameraMode] = useState<CameraMode>('off');
   const [showCameraOverlays, setShowCameraOverlays] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('perspective');
   const targetBall =
     followBallId !== null ? balls.find((b) => b.ballId === followBallId) : balls[0];
   const currentPos = targetBall ? framePoint(targetBall.trajectory3d, currentFrame) : null;
@@ -342,6 +393,21 @@ export const ThreeDScene = ({
         </h3>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => {
+              const modes: ViewMode[] = [
+                'perspective',
+                'orthographic',
+                'isometric',
+                'dimetric',
+                'oblique',
+              ];
+              setViewMode(modes[(modes.indexOf(viewMode) + 1) % modes.length]);
+            }}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded"
+          >
+            VIEW: {viewMode.toUpperCase()}
+          </button>
+          <button
             onClick={() => setShowCameraOverlays((prev) => !prev)}
             className="text-[10px] bg-slate-800 px-2 py-1 rounded"
           >
@@ -359,7 +425,11 @@ export const ThreeDScene = ({
         </div>
       </div>
       <div className="flex-1 overflow-hidden rounded-xl border border-[var(--line)] bg-[#0b1220]">
-        <Canvas shadows={{ type: 1 }} camera={{ position: [1.2, 1.0, 1.5], fov: 45 }}>
+        <Canvas
+          shadows={{ type: 1 }}
+          orthographic={viewMode !== 'perspective'}
+          camera={{ position: [1.2, 1.0, 1.5], fov: 45, zoom: 1 }}
+        >
           <SceneContent
             mode={cameraMode}
             targetVec={targetVec}
@@ -371,6 +441,7 @@ export const ThreeDScene = ({
             cam1FrameUrl={cam1FrameUrl}
             showCameraOverlays={showCameraOverlays}
             frameAspect={frameAspect}
+            viewMode={viewMode}
           />
         </Canvas>
       </div>
