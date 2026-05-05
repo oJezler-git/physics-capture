@@ -474,17 +474,28 @@ export const DebugPage = () => {
                       <h2 className="text-lg font-semibold uppercase tracking-wider text-slate-200">
                         Reconstruction Diagnostics
                       </h2>
-                      <span
-                        className={`rounded-full px-4 py-1 text-xs font-bold uppercase tracking-widest ${
-                          diagnostics.verdict === 'high'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : diagnostics.verdict === 'medium'
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-rose-500/20 text-rose-300'
-                        }`}
-                      >
-                        {diagnostics.verdict} · {(diagnostics.overallConfidence * 100).toFixed(0)}%
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => {
+                            navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+                          }}
+                          className="rounded-full px-3 py-1 text-[9px] font-bold uppercase tracking-wider bg-[var(--bg-panel)] border border-[var(--line)] hover:bg-[var(--accent)] hover:text-zinc-950 transition-colors"
+                        >
+                          Copy JSON
+                        </Button>
+                        <span
+                          className={`rounded-full px-4 py-1 text-xs font-bold uppercase tracking-widest ${
+                            diagnostics.verdict === 'high'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : diagnostics.verdict === 'medium'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : 'bg-rose-500/20 text-rose-300'
+                          }`}
+                        >
+                          {diagnostics.verdict} · {(diagnostics.overallConfidence * 100).toFixed(0)}
+                          %
+                        </span>
+                      </div>
                     </div>
                   </div>
 
