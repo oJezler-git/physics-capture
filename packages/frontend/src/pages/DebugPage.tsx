@@ -337,6 +337,11 @@ export const DebugPage = () => {
                   balls={physicsResult.balls}
                   currentFrame={safeFrame}
                   reconstruction3d={physicsResult.reconstruction3d}
+                  experimentId={selectedExp}
+                  frameFile={frameFile}
+                  frameAspect={
+                    dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 16 / 9
+                  }
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">

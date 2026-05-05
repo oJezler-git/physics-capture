@@ -1,4 +1,4 @@
-import { useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, Line, OrbitControls, Environment, ContactShadows, Text } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -11,6 +11,9 @@ interface ThreeDSceneProps {
   currentFrame: number;
   reconstruction3d?: Reconstruction3D;
   followBallId?: number | null;
+  experimentId?: string;
+  frameFile?: string | null;
+  frameAspect?: number;
 }
 
 const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
@@ -23,16 +26,74 @@ const framePoint = (points: Point3D[] | undefined, frameIdx: number) =>
 
 type CameraMode = 'off' | 'track' | 'follow';
 
+const CameraFrameOverlay = ({
+  url,
+  aspect,
+  opacity = 0.9,
+}: {
+  url: string | null;
+  aspect: number;
+  opacity?: number;
+}) => {
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!url) {
+      setTexture(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      url,
+      (nextTexture) => {
+        if (!active) return;
+        nextTexture.colorSpace = THREE.SRGBColorSpace;
+        setTexture(nextTexture);
+      },
+      undefined,
+      () => {
+        if (!active) return;
+        setTexture(null);
+      },
+    );
+
+    return () => {
+      active = false;
+    };
+  }, [url]);
+
+  if (!texture) return null;
+  const height = 0.16;
+  const width = height * aspect;
+
+  return (
+    <mesh position={[0, 0, CAMERA_FORWARD_Z]}>
+      <planeGeometry args={[width, height]} />
+      <meshBasicMaterial map={texture} transparent opacity={opacity} side={THREE.DoubleSide} />
+    </mesh>
+  );
+};
+
 const CameraRig = ({
   label,
   color,
   position,
   quaternion,
+  frameUrl,
+  frameAspect,
+  showFrameOverlay,
 }: {
   label: string;
   color: string;
   position: [number, number, number];
   quaternion: [number, number, number, number];
+  frameUrl?: string | null;
+  frameAspect?: number;
+  showFrameOverlay?: boolean;
 }) => {
   const frustumPoints = useMemo(() => {
     const near = new THREE.Vector3(0, 0, 0);
@@ -59,6 +120,12 @@ const CameraRig = ({
         <boxGeometry args={[0.06, 0.035, 0.02]} />
         <meshStandardMaterial color={color} metalness={0.4} roughness={0.3} />
       </mesh>
+      {showFrameOverlay && (
+        <CameraFrameOverlay
+          url={frameUrl ?? null}
+          aspect={frameAspect && frameAspect > 0 ? frameAspect : 16 / 9}
+        />
+      )}
       {frustumPoints.map((segment, idx) => (
         <Line key={`${label}-frustum-${idx}`} points={segment} color={color} lineWidth={1} />
       ))}
@@ -163,6 +230,10 @@ const SceneContent = ({
   currentFrame,
   phone1Position,
   phone1Quaternion,
+  cam0FrameUrl,
+  cam1FrameUrl,
+  showCameraOverlays,
+  frameAspect,
 }: {
   mode: CameraMode;
   targetVec: THREE.Vector3 | null;
@@ -170,6 +241,10 @@ const SceneContent = ({
   currentFrame: number;
   phone1Position: [number, number, number];
   phone1Quaternion: [number, number, number, number];
+  cam0FrameUrl: string | null;
+  cam1FrameUrl: string | null;
+  showCameraOverlays: boolean;
+  frameAspect: number;
 }) => {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
@@ -193,12 +268,23 @@ const SceneContent = ({
       <directionalLight position={[2, 3, 1]} intensity={0.8} castShadow />
       <Grid args={[10, 10]} cellColor="#203047" sectionColor="#304c6e" fadeDistance={12} />
       <ContactShadows resolution={1024} scale={10} blur={2} opacity={0.5} far={1} color="#000000" />
-      <CameraRig label="CAM 0" color="#e2e8f0" position={[0, 0, 0]} quaternion={[0, 0, 0, 1]} />
+      <CameraRig
+        label="CAM 0"
+        color="#e2e8f0"
+        position={[0, 0, 0]}
+        quaternion={[0, 0, 0, 1]}
+        frameUrl={cam0FrameUrl}
+        frameAspect={frameAspect}
+        showFrameOverlay={showCameraOverlays}
+      />
       <CameraRig
         label="CAM 1"
         color="#94a3b8"
         position={phone1Position}
         quaternion={phone1Quaternion}
+        frameUrl={cam1FrameUrl}
+        frameAspect={frameAspect}
+        showFrameOverlay={showCameraOverlays}
       />
       <Line points={[[0, 0, 0], phone1Position]} color="#64748b" lineWidth={1} dashed />
       {balls.map((ball) => (
@@ -223,8 +309,12 @@ export const ThreeDScene = ({
   currentFrame,
   reconstruction3d,
   followBallId = null,
+  experimentId,
+  frameFile,
+  frameAspect = 16 / 9,
 }: ThreeDSceneProps) => {
   const [cameraMode, setCameraMode] = useState<CameraMode>('off');
+  const [showCameraOverlays, setShowCameraOverlays] = useState(false);
   const targetBall =
     followBallId !== null ? balls.find((b) => b.ballId === followBallId) : balls[0];
   const currentPos = targetBall ? framePoint(targetBall.trajectory3d, currentFrame) : null;
@@ -239,21 +329,34 @@ export const ThreeDScene = ({
     [reconstruction3d?.stereoExtrinsics?.R, reconstruction3d?.stereoExtrinsics?.T],
   );
 
+  const cam0FrameUrl =
+    experimentId && frameFile ? `/api/experiments/${experimentId}/frames/0/${frameFile}` : null;
+  const cam1FrameUrl =
+    experimentId && frameFile ? `/api/experiments/${experimentId}/frames/1/${frameFile}` : null;
+
   return (
     <div className="surface-panel p-4 h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
           3D Reconstruction
         </h3>
-        <button
-          onClick={() => {
-            const modes: CameraMode[] = ['off', 'track', 'follow'];
-            setCameraMode(modes[(modes.indexOf(cameraMode) + 1) % modes.length]);
-          }}
-          className="text-[10px] bg-slate-800 px-2 py-1 rounded"
-        >
-          MODE: {cameraMode.toUpperCase()}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCameraOverlays((prev) => !prev)}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded"
+          >
+            OVERLAY: {showCameraOverlays ? 'ON' : 'OFF'}
+          </button>
+          <button
+            onClick={() => {
+              const modes: CameraMode[] = ['off', 'track', 'follow'];
+              setCameraMode(modes[(modes.indexOf(cameraMode) + 1) % modes.length]);
+            }}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded"
+          >
+            MODE: {cameraMode.toUpperCase()}
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-hidden rounded-xl border border-[var(--line)] bg-[#0b1220]">
         <Canvas shadows={{ type: 1 }} camera={{ position: [1.2, 1.0, 1.5], fov: 45 }}>
@@ -264,6 +367,10 @@ export const ThreeDScene = ({
             currentFrame={currentFrame}
             phone1Position={phonePose.position}
             phone1Quaternion={phonePose.quaternion}
+            cam0FrameUrl={cam0FrameUrl}
+            cam1FrameUrl={cam1FrameUrl}
+            showCameraOverlays={showCameraOverlays}
+            frameAspect={frameAspect}
           />
         </Canvas>
       </div>
