@@ -99,6 +99,18 @@ const buildFallbackDiagnostics = (result: PhysicsResult | null) => {
       triangulationFlaggedPct: null,
       maxLineDeviationM: null,
       gtRmseM: null,
+      gtRmseXm: null,
+      gtRmseYm: null,
+      gtRmseZm: null,
+      gtBiasXm: null,
+      gtBiasYm: null,
+      gtBiasZm: null,
+      gtWorstFrame: null,
+      gtWorstFrameErrorM: null,
+      reprojRmseCam0Px: null,
+      reprojRmseCam1Px: null,
+      reprojWorstFrame: null,
+      reprojWorstErrorPx: null,
     },
   };
 };
@@ -488,6 +500,27 @@ export const DebugPage = () => {
                       ))}
                     </div>
                   )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
+                      GT axis RMSE: x {diagnostics.metrics.gtRmseXm?.toFixed(4) ?? 'n/a'} m · y{' '}
+                      {diagnostics.metrics.gtRmseYm?.toFixed(4) ?? 'n/a'} m · z{' '}
+                      {diagnostics.metrics.gtRmseZm?.toFixed(4) ?? 'n/a'} m
+                    </div>
+                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
+                      GT bias: x {diagnostics.metrics.gtBiasXm?.toFixed(4) ?? 'n/a'} m · y{' '}
+                      {diagnostics.metrics.gtBiasYm?.toFixed(4) ?? 'n/a'} m · z{' '}
+                      {diagnostics.metrics.gtBiasZm?.toFixed(4) ?? 'n/a'} m
+                    </div>
+                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
+                      Worst GT frame: {diagnostics.metrics.gtWorstFrame ?? 'n/a'} ·{' '}
+                      {diagnostics.metrics.gtWorstFrameErrorM?.toFixed(4) ?? 'n/a'} m
+                    </div>
+                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
+                      Reproj RMSE: cam0 {diagnostics.metrics.reprojRmseCam0Px?.toFixed(3) ?? 'n/a'}{' '}
+                      px · cam1 {diagnostics.metrics.reprojRmseCam1Px?.toFixed(3) ?? 'n/a'} px
+                    </div>
+                  </div>
 
                   <div className="grid gap-3">
                     {diagnostics.checks.map((check) => (

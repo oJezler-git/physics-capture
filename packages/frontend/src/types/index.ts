@@ -177,6 +177,18 @@ export interface PhysicsResult {
       triangulationFlaggedPct: number | null;
       maxLineDeviationM: number | null;
       gtRmseM: number | null;
+      gtRmseXm: number | null;
+      gtRmseYm: number | null;
+      gtRmseZm: number | null;
+      gtBiasXm: number | null;
+      gtBiasYm: number | null;
+      gtBiasZm: number | null;
+      gtWorstFrame: number | null;
+      gtWorstFrameErrorM: number | null;
+      reprojRmseCam0Px: number | null;
+      reprojRmseCam1Px: number | null;
+      reprojWorstFrame: number | null;
+      reprojWorstErrorPx: number | null;
     };
   };
   syncStatus?: {
