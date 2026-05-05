@@ -4,6 +4,7 @@ import { Grid, Line, OrbitControls, Environment, ContactShadows, Text } from '@r
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { BallResult, Point3D, Reconstruction3D } from '../types';
+import { extrinsicsToCameraPose } from '../lib/cameraPose';
 
 interface ThreeDSceneProps {
   balls: BallResult[];
@@ -13,11 +14,68 @@ interface ThreeDSceneProps {
 }
 
 const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
+const CAMERA_FORWARD_Z = 0.18;
+const CAMERA_HALF_W = 0.08;
+const CAMERA_HALF_H = 0.05;
 
 const framePoint = (points: Point3D[] | undefined, frameIdx: number) =>
   points?.find((point) => point.frameIdx === frameIdx) ?? null;
 
 type CameraMode = 'off' | 'track' | 'follow';
+
+const CameraRig = ({
+  label,
+  color,
+  position,
+  quaternion,
+}: {
+  label: string;
+  color: string;
+  position: [number, number, number];
+  quaternion: [number, number, number, number];
+}) => {
+  const frustumPoints = useMemo(() => {
+    const near = new THREE.Vector3(0, 0, 0);
+    const p1 = new THREE.Vector3(-CAMERA_HALF_W, CAMERA_HALF_H, CAMERA_FORWARD_Z);
+    const p2 = new THREE.Vector3(CAMERA_HALF_W, CAMERA_HALF_H, CAMERA_FORWARD_Z);
+    const p3 = new THREE.Vector3(CAMERA_HALF_W, -CAMERA_HALF_H, CAMERA_FORWARD_Z);
+    const p4 = new THREE.Vector3(-CAMERA_HALF_W, -CAMERA_HALF_H, CAMERA_FORWARD_Z);
+    const edges: [number, number, number][][] = [
+      [near.toArray() as [number, number, number], p1.toArray() as [number, number, number]],
+      [near.toArray() as [number, number, number], p2.toArray() as [number, number, number]],
+      [near.toArray() as [number, number, number], p3.toArray() as [number, number, number]],
+      [near.toArray() as [number, number, number], p4.toArray() as [number, number, number]],
+      [p1.toArray() as [number, number, number], p2.toArray() as [number, number, number]],
+      [p2.toArray() as [number, number, number], p3.toArray() as [number, number, number]],
+      [p3.toArray() as [number, number, number], p4.toArray() as [number, number, number]],
+      [p4.toArray() as [number, number, number], p1.toArray() as [number, number, number]],
+    ];
+    return edges;
+  }, []);
+
+  return (
+    <group position={position} quaternion={quaternion}>
+      <mesh castShadow>
+        <boxGeometry args={[0.06, 0.035, 0.02]} />
+        <meshStandardMaterial color={color} metalness={0.4} roughness={0.3} />
+      </mesh>
+      {frustumPoints.map((segment, idx) => (
+        <Line key={`${label}-frustum-${idx}`} points={segment} color={color} lineWidth={1} />
+      ))}
+      <Text
+        position={[0, 0.06, 0]}
+        fontSize={0.03}
+        color={color}
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={0.004}
+        outlineColor="#000000"
+      >
+        {label}
+      </Text>
+    </group>
+  );
+};
 
 const TrailRenderer = ({ ball, currentFrame }: { ball: BallResult; currentFrame: number }) => {
   const trail = useMemo(
@@ -104,14 +162,14 @@ const SceneContent = ({
   balls,
   currentFrame,
   phone1Position,
-  phone1Rotation,
+  phone1Quaternion,
 }: {
   mode: CameraMode;
   targetVec: THREE.Vector3 | null;
   balls: BallResult[];
   currentFrame: number;
   phone1Position: [number, number, number];
-  phone1Rotation: [number, number, number];
+  phone1Quaternion: [number, number, number, number];
 }) => {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
@@ -135,19 +193,14 @@ const SceneContent = ({
       <directionalLight position={[2, 3, 1]} intensity={0.8} castShadow />
       <Grid args={[10, 10]} cellColor="#203047" sectionColor="#304c6e" fadeDistance={12} />
       <ContactShadows resolution={1024} scale={10} blur={2} opacity={0.5} far={1} color="#000000" />
-      <mesh position={[0, 0.04, 0]} castShadow>
-        <boxGeometry args={[0.07, 0.14, 0.01]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.2} />
-      </mesh>
-      <mesh
-        position={new THREE.Vector3(...phone1Position)}
-        rotation={new THREE.Euler(...phone1Rotation)}
-        castShadow
-      >
-        <boxGeometry args={[0.07, 0.14, 0.01]} />
-        <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.2} />
-      </mesh>
-      <Line points={[[0, 0.04, 0], phone1Position]} color="#64748b" lineWidth={1} dashed />
+      <CameraRig label="CAM 0" color="#e2e8f0" position={[0, 0, 0]} quaternion={[0, 0, 0, 1]} />
+      <CameraRig
+        label="CAM 1"
+        color="#94a3b8"
+        position={phone1Position}
+        quaternion={phone1Quaternion}
+      />
+      <Line points={[[0, 0, 0], phone1Position]} color="#64748b" lineWidth={1} dashed />
       {balls.map((ball) => (
         <TrailRenderer key={`ball-3d-${ball.ballId}`} ball={ball} currentFrame={currentFrame} />
       ))}
@@ -177,24 +230,14 @@ export const ThreeDScene = ({
   const currentPos = targetBall ? framePoint(targetBall.trajectory3d, currentFrame) : null;
   const targetVec = currentPos ? new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z) : null;
 
-  const phone1Position = useMemo(() => {
-    const t = reconstruction3d?.stereoExtrinsics?.T;
-    if (!t || t.length < 3) return [0.3, 0, 0] as [number, number, number];
-    return [Number(t[0]) / 1000, Number(t[1]) / 1000, Number(t[2]) / 1000] as [
-      number,
-      number,
-      number,
-    ];
-  }, [reconstruction3d?.stereoExtrinsics?.T]);
-
-  const phone1Rotation = useMemo(() => {
-    const rot = reconstruction3d?.stereoExtrinsics?.R;
-    if (!rot || rot.length < 3) return [0, 0, 0] as [number, number, number];
-    const yaw = Math.atan2(rot[1][0] ?? 0, rot[0][0] ?? 1);
-    const pitch = Math.atan2(-(rot[2][0] ?? 0), Math.hypot(rot[2][1] ?? 0, rot[2][2] ?? 1));
-    const roll = Math.atan2(rot[2][1] ?? 0, rot[2][2] ?? 1);
-    return [pitch, yaw, roll] as [number, number, number];
-  }, [reconstruction3d?.stereoExtrinsics?.R]);
+  const phonePose = useMemo(
+    () =>
+      extrinsicsToCameraPose(
+        reconstruction3d?.stereoExtrinsics?.R,
+        reconstruction3d?.stereoExtrinsics?.T,
+      ),
+    [reconstruction3d?.stereoExtrinsics?.R, reconstruction3d?.stereoExtrinsics?.T],
+  );
 
   return (
     <div className="surface-panel p-4 h-full flex flex-col">
@@ -219,8 +262,8 @@ export const ThreeDScene = ({
             targetVec={targetVec}
             balls={balls}
             currentFrame={currentFrame}
-            phone1Position={phone1Position}
-            phone1Rotation={phone1Rotation}
+            phone1Position={phonePose.position}
+            phone1Quaternion={phonePose.quaternion}
           />
         </Canvas>
       </div>
