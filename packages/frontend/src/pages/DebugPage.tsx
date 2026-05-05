@@ -3,13 +3,14 @@ import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
 import { FrameScrubber } from '../components/FrameScrubber';
 import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
 import { SyncDebugView } from '../components/SyncDebugView';
+import { ThreeDScene } from '../components/ThreeDScene';
 import { useResultsStore } from '../stores/resultsStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { Button } from '../components/ui/Button';
 import type { PhysicsResult } from '../types';
 
-type DebugMode = 'sam2' | 'sync';
+type DebugMode = 'sam2' | 'sync' | '3d';
 
 const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
   `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
@@ -249,6 +250,16 @@ export const DebugPage = () => {
             >
               Sync
             </Button>
+            <Button
+              onClick={() => setMode('3d')}
+              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
+                mode === '3d'
+                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
+                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
+              }`}
+            >
+              3D
+            </Button>
           </div>
 
           {mode === 'sam2' ? (
@@ -317,8 +328,22 @@ export const DebugPage = () => {
                 mode={seedMode}
               />
             </div>
-          ) : (
+          ) : mode === 'sync' ? (
             <SyncDebugView experimentId={selectedExp} currentFrame={safeFrame} />
+          ) : (
+            <div className="relative h-full w-full">
+              {physicsResult ? (
+                <ThreeDScene
+                  balls={physicsResult.balls}
+                  currentFrame={safeFrame}
+                  reconstruction3d={physicsResult.reconstruction3d}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
+                  -- Run Physics to see 3D Reconstruction --
+                </div>
+              )}
+            </div>
           )}
 
           {hasFrameMismatch && (
