@@ -154,6 +154,31 @@ export interface PhysicsResult {
   velocityTimeSeries: VelocityTimeSeries[];
   computedAt: number;
   reconstruction3d?: Reconstruction3D;
+  reconstructionDiagnostics?: {
+    overallConfidence: number;
+    verdict: 'high' | 'medium' | 'low';
+    issues: string[];
+    checks: Array<{
+      id: string;
+      label: string;
+      status: 'pass' | 'warn' | 'fail';
+      value?: string;
+      details?: string;
+    }>;
+    metrics: {
+      mode: 'SINGLE_CAMERA_PLANAR' | 'STEREO_3D';
+      baselineMm: number | null;
+      stereoReprojectionPx: number | null;
+      syncRmsMs: number | null;
+      syncIsMock: boolean;
+      avgTrackConfidence: number | null;
+      frameCoverageCam0: number | null;
+      frameCoverageCam1: number | null;
+      triangulationFlaggedPct: number | null;
+      maxLineDeviationM: number | null;
+      gtRmseM: number | null;
+    };
+  };
   syncStatus?: {
     isMock: boolean;
     trueFps?: number;

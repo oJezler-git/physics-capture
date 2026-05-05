@@ -13,6 +13,7 @@ import { status as GrpcStatus } from "@grpc/grpc-js";
 import { extractFrames } from "./ffmpeg.js";
 import { runCalibration, trackBalls, computePhysics } from "./grpc-client.js";
 import { buildTrajectoryByBall } from "./lib/reconstruction.js";
+import { buildReconstructionDiagnostics } from "./lib/reconstructionDiagnostics.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -717,6 +718,69 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       console.warn("[API] Failed to read stereo_extrinsics.json:", e);
     }
 
+    let tracksData: any = null;
+    try {
+      const tracksPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "results",
+        "tracks.json",
+      );
+      if (existsSync(tracksPath)) {
+        tracksData = JSON.parse(
+          await fs.promises.readFile(tracksPath, "utf-8"),
+        );
+      }
+    } catch (e) {
+      console.warn("[API] Failed to read tracks.json:", e);
+    }
+
+    let positions3dData: any = null;
+    try {
+      const positionsPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "results",
+        "positions_3d.json",
+      );
+      if (existsSync(positionsPath)) {
+        positions3dData = JSON.parse(
+          await fs.promises.readFile(positionsPath, "utf-8"),
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[API] Failed to read positions_3d.json for diagnostics:",
+        e,
+      );
+    }
+
+    let positions3dGtData: any = null;
+    try {
+      const positionsGtPath = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "results",
+        "positions_3d_gt.json",
+      );
+      if (existsSync(positionsGtPath)) {
+        positions3dGtData = JSON.parse(
+          await fs.promises.readFile(positionsGtPath, "utf-8"),
+        );
+      }
+    } catch (e) {
+      console.warn("[API] Failed to read positions_3d_gt.json:", e);
+    }
+
+    const reconstructionDiagnostics = buildReconstructionDiagnostics({
+      mode,
+      stereoExtrinsics,
+      syncStatus,
+      tracksData,
+      positions3d: positions3dData,
+      positions3dGt: positions3dGtData,
+    });
+
     const responsePayload = {
       experimentId,
       computedAt: Date.now(),
@@ -796,6 +860,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
         mode,
         stereoExtrinsics,
       },
+      reconstructionDiagnostics,
     };
 
     res.json(responsePayload);

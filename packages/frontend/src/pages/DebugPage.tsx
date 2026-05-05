@@ -17,6 +17,8 @@ const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =
 
 const DEFAULT_MASS_G = 50;
 const DEFAULT_MASS_UNCERTAINTY_G = 1;
+const percent = (value: number | null | undefined) =>
+  typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : 'n/a';
 
 export const DebugPage = () => {
   const [experiments, setExperiments] = useState<string[]>([]);
@@ -563,6 +565,98 @@ export const DebugPage = () => {
               </div>
             ) : physicsResult ? (
               <div className="space-y-4 rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-6 shadow-sm">
+                {physicsResult.reconstructionDiagnostics && (
+                  <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider font-medium text-slate-400">
+                        Reconstruction Diagnostics
+                      </span>
+                      <span
+                        className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                          physicsResult.reconstructionDiagnostics.verdict === 'high'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : physicsResult.reconstructionDiagnostics.verdict === 'medium'
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : 'bg-rose-500/20 text-rose-300'
+                        }`}
+                      >
+                        {physicsResult.reconstructionDiagnostics.verdict} ·{' '}
+                        {(physicsResult.reconstructionDiagnostics.overallConfidence * 100).toFixed(
+                          0,
+                        )}
+                        %
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-[10px] text-slate-300">
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Sync:{' '}
+                        {physicsResult.reconstructionDiagnostics.metrics.syncIsMock
+                          ? 'mock'
+                          : 'measured'}
+                      </div>
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Baseline:{' '}
+                        {physicsResult.reconstructionDiagnostics.metrics.baselineMm?.toFixed(1) ??
+                          'n/a'}{' '}
+                        mm
+                      </div>
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Track confidence:{' '}
+                        {physicsResult.reconstructionDiagnostics.metrics.avgTrackConfidence?.toFixed(
+                          3,
+                        ) ?? 'n/a'}
+                      </div>
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Triangulation flagged:{' '}
+                        {percent(
+                          physicsResult.reconstructionDiagnostics.metrics.triangulationFlaggedPct,
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Cam0 coverage:{' '}
+                        {percent(physicsResult.reconstructionDiagnostics.metrics.frameCoverageCam0)}
+                      </div>
+                      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+                        Cam1 coverage:{' '}
+                        {percent(physicsResult.reconstructionDiagnostics.metrics.frameCoverageCam1)}
+                      </div>
+                    </div>
+                    {physicsResult.reconstructionDiagnostics.issues.length > 0 && (
+                      <div className="space-y-1">
+                        {physicsResult.reconstructionDiagnostics.issues.map((issue, idx) => (
+                          <div
+                            key={`diag-issue-${idx}`}
+                            className="text-[11px] text-rose-300 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2"
+                          >
+                            {issue}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      {physicsResult.reconstructionDiagnostics.checks.map((check) => (
+                        <div
+                          key={check.id}
+                          className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--bg-panel)] px-2.5 py-2 text-[10px]"
+                        >
+                          <span className="text-slate-300">{check.label}</span>
+                          <span
+                            className={`font-mono ${
+                              check.status === 'pass'
+                                ? 'text-emerald-300'
+                                : check.status === 'warn'
+                                  ? 'text-amber-300'
+                                  : 'text-rose-300'
+                            }`}
+                          >
+                            {check.status.toUpperCase()}
+                            {check.value ? ` · ${check.value}` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
                     <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
