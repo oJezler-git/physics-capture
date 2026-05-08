@@ -451,6 +451,7 @@ export const DebugPage = () => {
                   frameAspect={
                     dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 16 / 9
                   }
+                  diagnostics={diagnostics}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
@@ -469,96 +470,17 @@ export const DebugPage = () => {
                 </div>
               ) : (
                 <div className="max-w-4xl mx-auto space-y-6">
-                  <div className="rounded-3xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-lg font-semibold uppercase tracking-wider text-slate-200">
-                        Reconstruction Diagnostics
-                      </h2>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          onClick={() => {
-                            navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
-                          }}
-                          className="rounded-full px-3 py-1 text-[9px] font-bold uppercase tracking-wider bg-[var(--bg-panel)] border border-[var(--line)] hover:bg-[var(--accent)] hover:text-zinc-950 transition-colors"
-                        >
-                          Copy JSON
-                        </Button>
-                        <span
-                          className={`rounded-full px-4 py-1 text-xs font-bold uppercase tracking-widest ${
-                            diagnostics.verdict === 'high'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : diagnostics.verdict === 'medium'
-                                ? 'bg-amber-500/20 text-amber-300'
-                                : 'bg-rose-500/20 text-rose-300'
-                          }`}
-                        >
-                          {diagnostics.verdict} · {(diagnostics.overallConfidence * 100).toFixed(0)}
-                          %
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {diagnostics.issues.length > 0 && (
-                    <div className="space-y-2">
-                      {diagnostics.issues.map((issue, idx) => (
-                        <div
-                          key={`diag-page-issue-${idx}`}
-                          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"
-                        >
-                          {issue}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
-                      GT axis RMSE: x {diagnostics.metrics.gtRmseXm?.toFixed(4) ?? 'n/a'} m · y{' '}
-                      {diagnostics.metrics.gtRmseYm?.toFixed(4) ?? 'n/a'} m · z{' '}
-                      {diagnostics.metrics.gtRmseZm?.toFixed(4) ?? 'n/a'} m
-                    </div>
-                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
-                      GT bias: x {diagnostics.metrics.gtBiasXm?.toFixed(4) ?? 'n/a'} m · y{' '}
-                      {diagnostics.metrics.gtBiasYm?.toFixed(4) ?? 'n/a'} m · z{' '}
-                      {diagnostics.metrics.gtBiasZm?.toFixed(4) ?? 'n/a'} m
-                    </div>
-                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
-                      Worst GT frame: {diagnostics.metrics.gtWorstFrame ?? 'n/a'} ·{' '}
-                      {diagnostics.metrics.gtWorstFrameErrorM?.toFixed(4) ?? 'n/a'} m
-                    </div>
-                    <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-xs text-slate-300">
-                      Reproj RMSE: cam0 {diagnostics.metrics.reprojRmseCam0Px?.toFixed(3) ?? 'n/a'}{' '}
-                      px · cam1 {diagnostics.metrics.reprojRmseCam1Px?.toFixed(3) ?? 'n/a'} px
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {diagnostics.checks.map((check) => (
-                      <div
-                        key={`diag-page-check-${check.id}`}
-                        className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="text-sm text-slate-200">{check.label}</p>
-                          {check.details && (
-                            <p className="text-xs text-slate-400 mt-1">{check.details}</p>
-                          )}
-                        </div>
-                        <span
-                          className={`text-xs font-mono uppercase tracking-wider ${
-                            check.status === 'pass'
-                              ? 'text-emerald-300'
-                              : check.status === 'warn'
-                                ? 'text-amber-300'
-                                : 'text-rose-300'
-                          }`}
-                        >
-                          {check.status}
-                          {check.value ? ` · ${check.value}` : ''}
-                        </span>
-                      </div>
-                    ))}
+                  {/* Replaced by integrated ThreeDScene analysis tab */}
+                  <div className="rounded-3xl border border-[var(--line)] bg-[var(--bg-panel)] p-6 text-center">
+                    <p className="text-slate-400 uppercase tracking-widest text-sm">
+                      Diagnostics integrated into 3D View
+                    </p>
+                    <Button
+                      onClick={() => setMode('3d')}
+                      className="mt-4 rounded-xl px-6 py-2 bg-[var(--accent)] text-zinc-950 font-bold uppercase tracking-widest text-xs"
+                    >
+                      Go to 3D View
+                    </Button>
                   </div>
                 </div>
               )}
