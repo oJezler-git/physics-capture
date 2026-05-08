@@ -10,7 +10,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { Button } from '../components/ui/Button';
 import type { PhysicsResult } from '../types';
 
-type DebugMode = 'sam2' | 'sync' | '3d' | 'diag';
+type DebugMode = 'sam2' | 'sync' | '3d';
 type SidebarTab = 'quick' | 'analysis';
 
 const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
@@ -18,8 +18,6 @@ const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =
 
 const DEFAULT_MASS_G = 50;
 const DEFAULT_MASS_UNCERTAINTY_G = 1;
-const percent = (value: number | null | undefined) =>
-  typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : 'n/a';
 
 const buildFallbackDiagnostics = (result: PhysicsResult | null) => {
   if (!result) return null;
@@ -359,16 +357,6 @@ export const DebugPage = () => {
             >
               3D
             </Button>
-            <Button
-              onClick={() => setMode('diag')}
-              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
-                mode === 'diag'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
-              }`}
-            >
-              DIAG
-            </Button>
           </div>
 
           {mode === 'sam2' ? (
@@ -459,33 +447,7 @@ export const DebugPage = () => {
                 </div>
               )}
             </div>
-          ) : (
-            <div className="h-full w-full p-8 overflow-auto">
-              {!diagnostics ? (
-                <div className="h-full rounded-3xl border border-dashed border-[var(--line)] bg-[var(--bg-panel)] grid place-items-center text-center text-slate-400 px-8">
-                  <div className="space-y-3">
-                    <p className="text-lg uppercase tracking-widest">No Diagnostics Yet</p>
-                    <p className="text-xs">Run Physics to generate reconstruction diagnostics.</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  {/* Replaced by integrated ThreeDScene analysis tab */}
-                  <div className="rounded-3xl border border-[var(--line)] bg-[var(--bg-panel)] p-6 text-center">
-                    <p className="text-slate-400 uppercase tracking-widest text-sm">
-                      Diagnostics integrated into 3D View
-                    </p>
-                    <Button
-                      onClick={() => setMode('3d')}
-                      className="mt-4 rounded-xl px-6 py-2 bg-[var(--accent)] text-zinc-950 font-bold uppercase tracking-widest text-xs"
-                    >
-                      Go to 3D View
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          ) : null}
 
           {hasFrameMismatch && (
             <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-amber-400 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-sm">
@@ -602,25 +564,6 @@ export const DebugPage = () => {
                   </div>
                 </div>
               </section>
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Shortcuts
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={() => setMode('3d')}
-                    className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] py-2.5 text-[10px]"
-                  >
-                    Go 3D
-                  </Button>
-                  <Button
-                    onClick={() => setMode('diag')}
-                    className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] py-2.5 text-[10px]"
-                  >
-                    Go Diag
-                  </Button>
-                </div>
-              </section>
             </>
           )}
           {sidebarTab === 'analysis' && (
@@ -733,118 +676,14 @@ export const DebugPage = () => {
                     {physicsError}
                   </div>
                 )}
-                {ballConfigs.length === 0 && (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-medium text-amber-200 shadow-sm">
-                    No session mass profile found. Physics will use a 50 g / 1 g fallback for the
-                    tracked balls.
-                  </div>
-                )}
                 {physicsStatus === 'computing' ? (
                   <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-5 text-xs font-medium text-sky-200 shadow-sm">
-                    Recomputing physics from the latest SAM2 tracks...
+                    Recomputing physics...
                   </div>
                 ) : physicsResult ? (
-                  <div className="space-y-4 rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-6 shadow-sm">
-                    {physicsResult.reconstructionDiagnostics && (
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] uppercase tracking-wider font-medium text-slate-400">
-                            Reconstruction Diagnostics
-                          </span>
-                          <span
-                            className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                              physicsResult.reconstructionDiagnostics.verdict === 'high'
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : physicsResult.reconstructionDiagnostics.verdict === 'medium'
-                                  ? 'bg-amber-500/20 text-amber-300'
-                                  : 'bg-rose-500/20 text-rose-300'
-                            }`}
-                          >
-                            {physicsResult.reconstructionDiagnostics.verdict} ·{' '}
-                            {(
-                              physicsResult.reconstructionDiagnostics.overallConfidence * 100
-                            ).toFixed(0)}
-                            %
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-[10px] text-slate-300">
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Sync:{' '}
-                            {physicsResult.reconstructionDiagnostics.metrics.syncIsMock
-                              ? 'mock'
-                              : 'measured'}
-                          </div>
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Baseline:{' '}
-                            {physicsResult.reconstructionDiagnostics.metrics.baselineMm?.toFixed(
-                              1,
-                            ) ?? 'n/a'}{' '}
-                            mm
-                          </div>
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Track confidence:{' '}
-                            {physicsResult.reconstructionDiagnostics.metrics.avgTrackConfidence?.toFixed(
-                              3,
-                            ) ?? 'n/a'}
-                          </div>
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Triangulation flagged:{' '}
-                            {percent(
-                              physicsResult.reconstructionDiagnostics.metrics
-                                .triangulationFlaggedPct,
-                            )}
-                          </div>
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Cam0 coverage:{' '}
-                            {percent(
-                              physicsResult.reconstructionDiagnostics.metrics.frameCoverageCam0,
-                            )}
-                          </div>
-                          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                            Cam1 coverage:{' '}
-                            {percent(
-                              physicsResult.reconstructionDiagnostics.metrics.frameCoverageCam1,
-                            )}
-                          </div>
-                        </div>
-                        {physicsResult.reconstructionDiagnostics.issues.length > 0 && (
-                          <div className="space-y-1">
-                            {physicsResult.reconstructionDiagnostics.issues.map((issue, idx) => (
-                              <div
-                                key={`diag-issue-${idx}`}
-                                className="text-[11px] text-rose-300 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2"
-                              >
-                                {issue}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="space-y-1">
-                          {physicsResult.reconstructionDiagnostics.checks.map((check) => (
-                            <div
-                              key={check.id}
-                              className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--bg-panel)] px-2.5 py-2 text-[10px]"
-                            >
-                              <span className="text-slate-300">{check.label}</span>
-                              <span
-                                className={`font-mono ${
-                                  check.status === 'pass'
-                                    ? 'text-emerald-300'
-                                    : check.status === 'warn'
-                                      ? 'text-amber-300'
-                                      : 'text-rose-300'
-                                }`}
-                              >
-                                {check.status.toUpperCase()}
-                                {check.value ? ` · ${check.value}` : ''}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-4">
                         <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                           Momentum
                         </span>
@@ -852,12 +691,12 @@ export const DebugPage = () => {
                           {formatWithUncertainty(
                             physicsResult.system.momentum_conserved_pct.value,
                             physicsResult.system.momentum_conserved_pct.uncertainty,
-                            2,
+                            1,
                           )}
                           %
                         </span>
                       </div>
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
+                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-4">
                         <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
                           Restitution
                         </span>
@@ -870,64 +709,26 @@ export const DebugPage = () => {
                         </span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
-                        <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
-                          KE Before
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-slate-100">
-                          {formatWithUncertainty(
-                            physicsResult.system.ke_before_total.value,
-                            physicsResult.system.ke_before_total.uncertainty,
-                            4,
-                          )}
-                        </span>
-                      </div>
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] p-4">
-                        <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
-                          KE After
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-slate-100">
-                          {formatWithUncertainty(
-                            physicsResult.system.ke_after_total.value,
-                            physicsResult.system.ke_after_total.uncertainty,
-                            4,
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
+
+                    <div className="space-y-2">
                       {physicsResult.balls.map((ball) => (
                         <div
                           key={`debug-physics-ball-${ball.ballId}`}
-                          className="rounded-2xl border border-[var(--line)] bg-[var(--bg-surface)] px-4 py-3 text-[11px] text-slate-300"
+                          className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2 text-[11px] text-slate-300 flex items-center justify-between"
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="font-medium uppercase tracking-wider text-slate-400">
-                              Ball {ball.ballId + 1}
-                            </span>
-                            <span className="font-mono text-slate-300">
-                              v{' '}
-                              {formatWithUncertainty(
-                                ball.v_before.value,
-                                ball.v_before.uncertainty,
-                                3,
-                              )}{' '}
-                              {'->'}{' '}
-                              {formatWithUncertainty(
-                                ball.v_after.value,
-                                ball.v_after.uncertainty,
-                                3,
-                              )}
-                            </span>
-                          </div>
+                          <span className="font-medium uppercase tracking-wider text-slate-400">
+                            Ball {ball.ballId + 1}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-300">
+                            {ball.v_before.value.toFixed(2)} → {ball.v_after.value.toFixed(2)} m/s
+                          </span>
                         </div>
                       ))}
                     </div>
                   </div>
                 ) : (
                   <div className="rounded-3xl border border-dashed border-[var(--line)] bg-[var(--bg-panel)] px-6 py-8 text-center text-[11px] font-medium tracking-wide text-slate-400">
-                    Run SAM2 tracking first, then physics will be computed from the saved tracks.
+                    Run SAM2 tracking first.
                   </div>
                 )}
               </section>

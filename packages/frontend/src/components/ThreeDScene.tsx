@@ -121,17 +121,27 @@ const DiagnosticsPanel = ({ diagnostics }: { diagnostics?: ReconstructionDiagnos
         <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400">
           Reconstruction Diagnostics
         </h2>
-        <span
-          className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${
-            diagnostics.verdict === 'high'
-              ? 'bg-emerald-500/20 text-emerald-300'
-              : diagnostics.verdict === 'medium'
-                ? 'bg-amber-500/20 text-amber-300'
-                : 'bg-rose-500/20 text-rose-300'
-          }`}
-        >
-          {diagnostics.verdict} · {(diagnostics.overallConfidence * 100).toFixed(0)}%
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+            }}
+            className="rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider bg-slate-800 border border-slate-700 text-slate-400 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors"
+          >
+            Copy JSON
+          </button>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${
+              diagnostics.verdict === 'high'
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : diagnostics.verdict === 'medium'
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : 'bg-rose-500/20 text-rose-300'
+            }`}
+          >
+            {diagnostics.verdict} · {(diagnostics.overallConfidence * 100).toFixed(0)}%
+          </span>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -506,7 +516,7 @@ export const ThreeDScene = ({
   const [cameraMode, setCameraMode] = useState<CameraMode>('off');
   const [showCameraOverlays, setShowCameraOverlays] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('perspective');
-  const [activeTab, setActiveTab] = useState<SceneTab>('visual');
+  const [showAnalysis, setShowAnalysis] = useState(false);
 
   const targetBall =
     followBallId !== null ? balls.find((b) => b.ballId === followBallId) : balls[0];
@@ -535,73 +545,55 @@ export const ThreeDScene = ({
   return (
     <div className="surface-panel p-4 h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-            3D Reconstruction
-          </h3>
-          <div className="flex items-center p-1 rounded-full bg-slate-900 border border-[var(--line)]">
-            <button
-              onClick={() => setActiveTab('visual')}
-              className={`px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest transition-colors ${
-                activeTab === 'visual'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              Visual
-            </button>
-            <button
-              onClick={() => setActiveTab('analysis')}
-              className={`px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest transition-colors ${
-                activeTab === 'analysis'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              Analysis
-            </button>
-          </div>
-        </div>
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+          3D Reconstruction
+        </h3>
         <div className="flex items-center gap-2">
-          {activeTab === 'visual' && (
-            <>
-              <button
-                onClick={() => {
-                  const modes: ViewMode[] = [
-                    'perspective',
-                    'orthographic',
-                    'isometric',
-                    'dimetric',
-                    'oblique',
-                  ];
-                  setViewMode(modes[(modes.indexOf(viewMode) + 1) % modes.length]);
-                }}
-                className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-              >
-                VIEW: {viewMode.toUpperCase()}
-              </button>
-              <button
-                onClick={() => setShowCameraOverlays((prev) => !prev)}
-                className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-              >
-                OVERLAY: {showCameraOverlays ? 'ON' : 'OFF'}
-              </button>
-              <button
-                onClick={() => {
-                  const modes: CameraMode[] = ['off', 'track', 'follow'];
-                  setCameraMode(modes[(modes.indexOf(cameraMode) + 1) % modes.length]);
-                }}
-                className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
-              >
-                MODE: {cameraMode.toUpperCase()}
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => setShowAnalysis((prev) => !prev)}
+            className={`text-[10px] px-2 py-1 rounded transition-colors ${
+              showAnalysis
+                ? 'bg-[var(--accent)] text-zinc-950 font-bold'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            ANALYSIS: {showAnalysis ? 'ON' : 'OFF'}
+          </button>
+          <button
+            onClick={() => {
+              const modes: ViewMode[] = [
+                'perspective',
+                'orthographic',
+                'isometric',
+                'dimetric',
+                'oblique',
+              ];
+              setViewMode(modes[(modes.indexOf(viewMode) + 1) % modes.length]);
+            }}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+          >
+            VIEW: {viewMode.toUpperCase()}
+          </button>
+          <button
+            onClick={() => setShowCameraOverlays((prev) => !prev)}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+          >
+            OVERLAY: {showCameraOverlays ? 'ON' : 'OFF'}
+          </button>
+          <button
+            onClick={() => {
+              const modes: CameraMode[] = ['off', 'track', 'follow'];
+              setCameraMode(modes[(modes.indexOf(cameraMode) + 1) % modes.length]);
+            }}
+            className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+          >
+            MODE: {cameraMode.toUpperCase()}
+          </button>
         </div>
       </div>
       <div className="flex-1 overflow-hidden rounded-xl border border-[var(--line)] bg-[#0b1220] flex">
         <div
-          className={`transition-all duration-300 ${activeTab === 'analysis' ? 'w-1/2' : 'w-full'} h-full border-r border-[var(--line)]`}
+          className={`transition-all duration-300 ${showAnalysis ? 'w-1/2' : 'w-full'} h-full border-r border-[var(--line)]`}
         >
           <Canvas
             shadows={{ type: 1 }}
@@ -623,7 +615,7 @@ export const ThreeDScene = ({
             />
           </Canvas>
         </div>
-        {activeTab === 'analysis' && (
+        {showAnalysis && (
           <div className="w-1/2 h-full bg-[#0b1220]">
             <DiagnosticsPanel diagnostics={diagnostics} />
           </div>
