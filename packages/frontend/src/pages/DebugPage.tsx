@@ -214,54 +214,57 @@ export const DebugPage = () => {
   return (
     <div className="flex min-h-[100dvh] w-full overflow-hidden bg-[var(--bg-base)] text-slate-100">
       <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
-        <div className="flex min-h-0 flex-col bg-black relative items-center justify-center">
-          <div className="absolute top-6 left-8 z-30 pointer-events-none opacity-40">
-            <h1 className="text-xl font-medium uppercase tracking-wider text-slate-400">
+        <div className="flex min-h-0 flex-col bg-black">
+          {/* Top Bar for Preview Area */}
+          <div className="z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg-surface)]/50 px-8 py-4 backdrop-blur-md">
+            <h1 className="text-lg font-medium uppercase tracking-wider text-slate-400">
               Debug Lab <span className="text-[var(--accent)]/50">//</span> {mode.toUpperCase()}
             </h1>
-          </div>
 
-          <div className="absolute top-6 right-8 z-30 flex gap-2">
-            {(['sam2', 'sync', '3d'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all border ${
-                  mode === m
-                    ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)] shadow-sm'
-                    : 'bg-[var(--bg-panel)] text-slate-400 border-[var(--line)] hover:text-slate-200'
-                }`}
-              >
-                {m.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          <DebugMainView
-            mode={mode}
-            dims={dims}
-            onDimsChange={setDims}
-            frameSrc={frameSrc}
-            onFrameImageStateChange={setFrameImageState}
-            frameImageState={frameImageState}
-            selectedExp={selectedExp}
-            isFrameMissing={isFrameMissing}
-            safeFrame={safeFrame}
-            tracks={tracks}
-            maxBalls={maxBalls}
-            seeds={seeds}
-            onAddSeed={(s) => addSeed(s, maxBalls)}
-            seedMode={seedMode}
-            physicsResult={physicsResult}
-            frameFile={frameFile}
-            diagnostics={diagnostics}
-          />
-
-          {hasFrameMismatch && (
-            <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-amber-400 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-sm">
-              Sparse Dataset: {frameCount - actualFileCount} missing
+            <div className="flex gap-2">
+              {(['sam2', 'sync', '3d'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`px-5 py-1.5 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all border ${
+                    mode === m
+                      ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)] shadow-sm'
+                      : 'bg-[var(--bg-panel)] text-slate-400 border-[var(--line)] hover:text-slate-200'
+                  }`}
+                >
+                  {m.toUpperCase()}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+
+          <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden">
+            <DebugMainView
+              mode={mode}
+              dims={dims}
+              onDimsChange={setDims}
+              frameSrc={frameSrc}
+              onFrameImageStateChange={setFrameImageState}
+              frameImageState={frameImageState}
+              selectedExp={selectedExp}
+              isFrameMissing={isFrameMissing}
+              safeFrame={safeFrame}
+              tracks={tracks}
+              maxBalls={maxBalls}
+              seeds={seeds}
+              onAddSeed={(s) => addSeed(s, maxBalls)}
+              seedMode={seedMode}
+              physicsResult={physicsResult}
+              frameFile={frameFile}
+              diagnostics={diagnostics}
+            />
+
+            {hasFrameMismatch && (
+              <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-amber-400 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-sm">
+                Sparse Dataset: {frameCount - actualFileCount} missing
+              </div>
+            )}
+          </div>
         </div>
 
         <aside className="custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] p-8 space-y-6">

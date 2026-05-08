@@ -53,7 +53,6 @@ const framePoint = (points: Point3D[] | undefined, frameIdx: number) =>
 
 type CameraMode = 'off' | 'track' | 'follow';
 type ViewMode = 'perspective' | 'orthographic' | 'isometric' | 'dimetric' | 'oblique';
-type SceneTab = 'visual' | 'analysis';
 
 const CameraFrameOverlay = ({
   url,
@@ -543,11 +542,8 @@ export const ThreeDScene = ({
   );
 
   return (
-    <div className="surface-panel p-4 h-full flex flex-col">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-          3D Reconstruction
-        </h3>
+    <div className="h-full flex flex-col p-4">
+      <div className="mb-2 flex items-center justify-end">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowAnalysis((prev) => !prev)}
