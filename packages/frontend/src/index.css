@@ -270,3 +270,63 @@
   background: var(--text-faint);
   border-radius: 10px;
 }
+
+/* Timeline Scrubber Styles */
+.timeline-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+}
+
+.timeline-slider:focus {
+  outline: none;
+}
+
+/* Thumb - The Playhead */
+.timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 24px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0;
+  box-shadow: 0 0 10px var(--accent);
+  transition: all 0.15s ease-in-out;
+}
+
+.timeline-slider:hover::-webkit-slider-thumb {
+  transform: scaleY(1.2);
+  width: 4px;
+}
+
+.timeline-slider::-moz-range-thumb {
+  height: 24px;
+  width: 2px;
+  background: var(--accent);
+  border: none;
+  border-radius: 0;
+  box-shadow: 0 0 10px var(--accent);
+  transition: all 0.15s ease-in-out;
+}
+
+.timeline-slider:hover::-moz-range-thumb {
+  transform: scaleY(1.2);
+  width: 4px;
+}
+
+/* Track - Already handled by custom divs in FrameScrubber, but keeping these clean */
+.timeline-slider::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 24px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.timeline-slider::-moz-range-track {
+  width: 100%;
+  height: 24px;
+  cursor: pointer;
+  background: transparent;
+}

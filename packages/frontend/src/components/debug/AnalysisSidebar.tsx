@@ -44,10 +44,7 @@ export const AnalysisSidebar = ({
 }: AnalysisSidebarProps) => {
   return (
     <>
-      <section className="space-y-6">
-        <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-          Playback
-        </h3>
+      <section>
         <FrameScrubber
           currentFrame={currentFrame}
           frameCount={frameCount}
@@ -56,11 +53,11 @@ export const AnalysisSidebar = ({
           onPlayToggle={onPlayToggle}
           playbackSpeed={playbackSpeed}
           onSpeedChange={onSpeedChange}
-          variant="compact"
+          variant="timeline"
         />
       </section>
 
-      <section className="space-y-6">
+      <section className="space-y-4">
         <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
           Seed Controls
         </h3>
