@@ -54,16 +54,28 @@ function App() {
       peerManager.cleanup();
     };
   }, []);
-
+  import { wsClient } from './lib/wsClient';
+  // ...
   function AppChrome() {
     const location = useLocation();
     const isPhoneRoute = location.pathname === '/phone';
+
+    const [isWsConnected, setIsWsConnected] = useState(wsClient.connected);
+
+    useEffect(() => {
+      const interval = setInterval(() => setIsWsConnected(wsClient.connected), 1000);
+      return () => clearInterval(interval);
+    }, []);
 
     const isFullBleed = location.pathname === '/debug' || location.pathname === '/tracking';
 
     return (
       <div className="relative min-h-[100dvh] overflow-hidden selection:bg-[#FF2A00]/25 selection:text-white">
-        {!isPhoneRoute && null}
+        {!isPhoneRoute && !isWsConnected && (
+          <div className="fixed left-0 right-0 top-0 z-[60] border-b border-rose-500/35 bg-rose-900/75 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-rose-100 backdrop-blur-xl">
+            Signaling offline. Start backend services to continue.
+          </div>
+        )}
         <ToastViewport />
 
         <main
