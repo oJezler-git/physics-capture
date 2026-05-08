@@ -19,6 +19,7 @@ export const DebugPage = () => {
   const [selectedExp, setSelectedExp] = useState<string>('');
   const [mode, setMode] = useState<DebugMode>('sam2');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('quick');
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [frameImageState, setFrameImageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle',
   );
@@ -213,29 +214,45 @@ export const DebugPage = () => {
 
   return (
     <div className="flex min-h-[100dvh] w-full overflow-hidden bg-[var(--bg-base)] text-slate-100">
-      <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
+      <div
+        className={`grid h-full w-full gap-0 transition-all duration-300 ease-in-out ${isSidebarVisible ? 'lg:grid-cols-[1fr_400px]' : 'lg:grid-cols-[1fr_0px]'}`}
+      >
         <div className="flex min-h-0 flex-col bg-black">
           {/* Top Bar for Preview Area */}
           <div className="z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg-surface)]/50 px-8 py-4 backdrop-blur-md">
-            <h1 className="text-lg font-medium uppercase tracking-wider text-slate-400">
-              Debug Lab <span className="text-[var(--accent)]/50">//</span> {mode.toUpperCase()}
-            </h1>
+            <div className="flex items-center gap-6">
+              <h1 className="text-lg font-medium uppercase tracking-wider text-slate-400">
+                Debug Lab <span className="text-[var(--accent)]/50">//</span> {mode.toUpperCase()}
+              </h1>
 
-            <div className="flex gap-2">
-              {(['sam2', 'sync', '3d'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={`px-5 py-1.5 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all border ${
-                    mode === m
-                      ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)] shadow-sm'
-                      : 'bg-[var(--bg-panel)] text-slate-400 border-[var(--line)] hover:text-slate-200'
-                  }`}
-                >
-                  {m.toUpperCase()}
-                </button>
-              ))}
+              <div className="flex gap-2">
+                {(['sam2', 'sync', '3d'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setMode(m)}
+                    className={`px-5 py-1.5 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all border ${
+                      mode === m
+                        ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)] shadow-sm'
+                        : 'bg-[var(--bg-panel)] text-slate-400 border-[var(--line)] hover:text-slate-200'
+                    }`}
+                  >
+                    {m.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <button
+              onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+              className={`group flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all hover:border-[var(--accent)] hover:text-[var(--accent)] ${!isSidebarVisible ? 'text-[var(--accent)] border-[var(--accent)] shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'text-slate-500'}`}
+            >
+              <span>{isSidebarVisible ? 'Hide Controls' : 'Show Controls'}</span>
+              <span
+                className={`transition-transform duration-300 ${isSidebarVisible ? '' : 'rotate-180'}`}
+              >
+                →
+              </span>
+            </button>
           </div>
 
           <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden">
@@ -267,67 +284,71 @@ export const DebugPage = () => {
           </div>
         </div>
 
-        <aside className="custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] p-8 space-y-6">
-          <section className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-            {(['quick', 'analysis'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setSidebarTab(tab)}
-                className={`flex-1 rounded-xl py-2 text-[10px] uppercase tracking-wider transition-colors ${
-                  sidebarTab === tab
-                    ? 'bg-[var(--accent)] text-zinc-950 font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </section>
+        <aside
+          className={`custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] transition-all duration-300 ease-in-out ${isSidebarVisible ? 'p-8 opacity-100' : 'p-0 opacity-0 pointer-events-none'}`}
+        >
+          <div className={`${isSidebarVisible ? 'block' : 'hidden'} space-y-6`}>
+            <section className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
+              {(['quick', 'analysis'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setSidebarTab(tab)}
+                  className={`flex-1 rounded-xl py-2 text-[10px] uppercase tracking-wider transition-colors ${
+                    sidebarTab === tab
+                      ? 'bg-[var(--accent)] text-zinc-950 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </section>
 
-          {sidebarTab === 'quick' ? (
-            <ExperimentSidebar
-              selectedExp={selectedExp}
-              onExpChange={(exp) => {
-                setSelectedExp(exp);
-                resetTracking();
-                setIsPlaying(false);
-              }}
-              experiments={experiments}
-              onRefreshExperiments={fetchExperiments}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              onClear={() => {
-                onTrackingComplete([]);
-                resetPhysics();
-                setPhysicsError(null);
-              }}
-              onRunTrack={handleRunTrack}
-              onRunPhysics={handleRunPhysics}
-              status={status}
-              physicsStatus={physicsStatus}
-              hasSeeds={seeds.length > 0}
-            />
-          ) : (
-            <AnalysisSidebar
-              currentFrame={currentFrame}
-              frameCount={frameCount}
-              onFrameChange={setFrame}
-              isPlaying={isPlaying}
-              onPlayToggle={() => setIsPlaying(!isPlaying)}
-              playbackSpeed={playbackSpeed}
-              onSpeedChange={setPlaybackSpeed}
-              seedMode={seedMode}
-              onSeedModeChange={setSeedMode}
-              seedsCount={seeds.filter((s) => s.frameIdx === safeFrame).length}
-              maxBalls={maxBalls}
-              dims={dims}
-              status={status}
-              progress={progress}
-              physicsResult={physicsResult}
-              physicsStatus={physicsStatus}
-              physicsError={physicsError}
-            />
-          )}
+            {sidebarTab === 'quick' ? (
+              <ExperimentSidebar
+                selectedExp={selectedExp}
+                onExpChange={(exp) => {
+                  setSelectedExp(exp);
+                  resetTracking();
+                  setIsPlaying(false);
+                }}
+                experiments={experiments}
+                onRefreshExperiments={fetchExperiments}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+                onClear={() => {
+                  onTrackingComplete([]);
+                  resetPhysics();
+                  setPhysicsError(null);
+                }}
+                onRunTrack={handleRunTrack}
+                onRunPhysics={handleRunPhysics}
+                status={status}
+                physicsStatus={physicsStatus}
+                hasSeeds={seeds.length > 0}
+              />
+            ) : (
+              <AnalysisSidebar
+                currentFrame={currentFrame}
+                frameCount={frameCount}
+                onFrameChange={setFrame}
+                isPlaying={isPlaying}
+                onPlayToggle={() => setIsPlaying(!isPlaying)}
+                playbackSpeed={playbackSpeed}
+                onSpeedChange={setPlaybackSpeed}
+                seedMode={seedMode}
+                onSeedModeChange={setSeedMode}
+                seedsCount={seeds.filter((s) => s.frameIdx === safeFrame).length}
+                maxBalls={maxBalls}
+                dims={dims}
+                status={status}
+                progress={progress}
+                physicsResult={physicsResult}
+                physicsStatus={physicsStatus}
+                physicsError={physicsError}
+              />
+            )}
+          </div>
         </aside>
       </div>
     </div>
