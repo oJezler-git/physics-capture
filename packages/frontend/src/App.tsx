@@ -54,29 +54,49 @@ function App() {
       peerManager.cleanup();
     };
   }, []);
-  import { wsClient } from './lib/wsClient';
-  // ...
+
   function AppChrome() {
     const location = useLocation();
     const isPhoneRoute = location.pathname === '/phone';
 
     const [isWsConnected, setIsWsConnected] = useState(wsClient.connected);
+    const [shouldShowOffline, setShouldShowOffline] = useState(false);
 
     useEffect(() => {
-      const interval = setInterval(() => setIsWsConnected(wsClient.connected), 1000);
-      return () => clearInterval(interval);
+      let timeoutId: ReturnType<typeof setTimeout>;
+
+      const interval = setInterval(() => {
+        const connected = wsClient.connected;
+        setIsWsConnected(connected);
+
+        if (!connected) {
+          if (!timeoutId) {
+            timeoutId = setTimeout(() => {
+              setShouldShowOffline(true);
+            }, 3000);
+          }
+        } else {
+          clearTimeout(timeoutId);
+          timeoutId = null as any;
+          setShouldShowOffline(false);
+        }
+      }, 500);
+
+      return () => {
+        clearInterval(interval);
+        clearTimeout(timeoutId);
+      };
     }, []);
 
     const isFullBleed = location.pathname === '/debug' || location.pathname === '/tracking';
 
     return (
       <div className="relative min-h-[100dvh] overflow-hidden selection:bg-[#FF2A00]/25 selection:text-white">
-        {!isPhoneRoute && !isWsConnected && (
-          <div className="fixed left-0 right-0 top-0 z-[60] border-b border-rose-500/35 bg-rose-900/75 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-rose-100 backdrop-blur-xl">
+        {!isPhoneRoute && shouldShowOffline && (
+          <div className="fixed left-0 right-0 top-0 z-[60] border-b border-rose-500/35 bg-rose-900/75 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-rose-100 backdrop-blur-xl animate-in slide-in-from-top-full duration-300">
             Signaling offline. Start backend services to continue.
           </div>
         )}
-        <ToastViewport />
 
         <main
           className={`relative z-10 w-full min-h-[100dvh] ${isFullBleed ? '' : 'mx-auto max-w-[1500px] px-4 pb-10 pt-8 sm:px-8 sm:pt-10'}`}
