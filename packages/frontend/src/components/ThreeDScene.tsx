@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, Line, OrbitControls, Environment, ContactShadows, Text } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { BallResult, Point3D, Reconstruction3D } from '../types';
 import { extrinsicsToCameraPose } from '../lib/cameraPose';
 
@@ -41,7 +42,12 @@ const CameraFrameOverlay = ({
   useEffect(() => {
     let active = true;
     if (!url) {
-      setTexture(null);
+      if (texture) {
+        // Use a microtask to avoid synchronous setState warning in effect
+        Promise.resolve().then(() => {
+          if (active) setTexture(null);
+        });
+      }
       return () => {
         active = false;
       };
@@ -65,7 +71,7 @@ const CameraFrameOverlay = ({
     return () => {
       active = false;
     };
-  }, [url]);
+  }, [url, texture]);
 
   if (!texture) return null;
   const height = 0.16;
@@ -250,16 +256,29 @@ const SceneContent = ({
   viewMode: ViewMode;
 }) => {
   const { camera, size } = useThree();
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<OrbitControlsImpl>(null);
   const offset = useMemo(() => new THREE.Vector3(0.3, 0.4, 0.3), []);
 
+  const lastViewMode = useRef(viewMode);
+  const lastCamera = useRef(camera);
+
+  /* eslint-disable react-hooks/immutability */
   useEffect(() => {
-    const target = controlsRef.current?.target ?? new THREE.Vector3(0, 0.2, 0.8);
+    const isNewMode = viewMode !== lastViewMode.current;
+    const isNewCamera = camera !== lastCamera.current;
+    const shouldResetView = isNewMode || isNewCamera;
+
+    const target = shouldResetView
+      ? new THREE.Vector3(0, 0.2, 0.8)
+      : (controlsRef.current?.target ?? new THREE.Vector3(0, 0.2, 0.8));
+
     const setPerspective = (pos: [number, number, number], fov = 45) => {
       if (!(camera instanceof THREE.PerspectiveCamera)) return;
       camera.fov = fov;
-      camera.position.set(...pos);
-      camera.lookAt(target);
+      if (shouldResetView) {
+        camera.position.set(...pos);
+        camera.lookAt(target);
+      }
       camera.updateProjectionMatrix();
       controlsRef.current?.update();
     };
@@ -275,12 +294,13 @@ const SceneContent = ({
       camera.near = 0.01;
       camera.far = 100;
       camera.zoom = 1;
-      camera.position.set(...pos);
-      camera.lookAt(target);
+      if (shouldResetView) {
+        camera.position.set(...pos);
+        camera.lookAt(target);
+      }
       camera.updateProjectionMatrix();
       controlsRef.current?.update();
     };
-
     if (viewMode === 'perspective') setPerspective([1.2, 1.0, 1.5], 45);
     if (viewMode === 'orthographic') setOrthographic([1.2, 1.0, 1.5]);
     if (viewMode === 'isometric') {
@@ -298,6 +318,10 @@ const SceneContent = ({
       if (camera instanceof THREE.PerspectiveCamera) setPerspective([d * 1.35, d * 0.55, d], 34);
       if (camera instanceof THREE.OrthographicCamera) setOrthographic([d * 1.35, d * 0.55, d]);
     }
+
+    lastViewMode.current = viewMode;
+    lastCamera.current = camera;
+    /* eslint-enable react-hooks/immutability */
   }, [camera, size, viewMode]);
 
   useFrame((_, delta) => {
@@ -385,6 +409,11 @@ export const ThreeDScene = ({
   const cam1FrameUrl =
     experimentId && frameFile ? `/api/experiments/${experimentId}/frames/1/${frameFile}` : null;
 
+  const cameraConfig = useMemo(
+    () => ({ position: [1.2, 1.0, 1.5] as [number, number, number], fov: 45, zoom: 1 }),
+    [],
+  );
+
   return (
     <div className="surface-panel p-4 h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between">
@@ -428,7 +457,7 @@ export const ThreeDScene = ({
         <Canvas
           shadows={{ type: 1 }}
           orthographic={viewMode !== 'perspective'}
-          camera={{ position: [1.2, 1.0, 1.5], fov: 45, zoom: 1 }}
+          camera={cameraConfig}
         >
           <SceneContent
             mode={cameraMode}
