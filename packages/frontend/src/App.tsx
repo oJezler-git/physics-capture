@@ -20,64 +20,6 @@ type GuardPhase = (typeof phaseOrder)[number];
 
 const routeForPhase = (phase: GuardPhase) => `/${phase}`;
 
-function ConnectionStatus() {
-  const [status, setStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>(
-    'disconnected',
-  );
-
-  useEffect(() => {
-    const checkStatus = () => {
-      const connected = wsClient.connected;
-      const attempts = wsClient.reconnectCount;
-
-      if (connected) setStatus('connected');
-      else if (attempts > 0) setStatus('reconnecting');
-      else setStatus('disconnected');
-    };
-
-    const interval = setInterval(checkStatus, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const tones = {
-    connected: {
-      dot: 'bg-[#D4FF00]',
-      ring: 'border-[#D4FF00]',
-      text: 'text-[#D4FF00]',
-      label: 'online',
-    },
-    reconnecting: {
-      dot: 'bg-amber-400',
-      ring: 'border-amber-400',
-      text: 'text-amber-400',
-      label: 'recovering',
-    },
-    disconnected: {
-      dot: 'bg-[#FF2A00]',
-      ring: 'border-[#FF2A00]',
-      text: 'text-[#FF2A00]',
-      label: 'offline',
-    },
-  };
-  const tone = tones[status];
-
-  return (
-    <>
-      {status === 'disconnected' && (
-        <div className="fixed left-0 right-0 top-0 z-[60] border-b border-rose-500/35 bg-rose-900/75 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-rose-100 backdrop-blur-xl">
-          Signaling offline. Start backend services to continue.
-        </div>
-      )}
-      <div
-        className={`fixed right-4 top-4 z-50 flex items-center gap-3 border-2 bg-black px-4 py-2 text-[12px] font-bold uppercase tracking-[0.1em] shadow-[4px_4px_0px_rgba(0,0,0,1)] ${tone.ring} ${tone.text}`}
-      >
-        <div className={`h-3 w-3 ${tone.dot}`} />
-        <span>{tone.label}</span>
-      </div>
-    </>
-  );
-}
-
 function PhaseGuard({ phase, children }: { phase: GuardPhase; children: ReactElement }) {
   const { phase: sessionPhase, experimentId } = useSessionStore();
   const { status: calibrationStatus, rulerScaleFactor } = useCalibrationStore();
@@ -121,7 +63,7 @@ function App() {
 
     return (
       <div className="relative min-h-[100dvh] overflow-hidden selection:bg-[#FF2A00]/25 selection:text-white">
-        {!isPhoneRoute && <ConnectionStatus />}
+        {!isPhoneRoute && null}
         <ToastViewport />
 
         <main
