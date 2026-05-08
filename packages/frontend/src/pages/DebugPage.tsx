@@ -1,117 +1,18 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { BallSeedPicker, type SeedMode } from '../components/BallSeedPicker';
-import { FrameScrubber } from '../components/FrameScrubber';
-import { TrajectoryCanvas } from '../components/TrajectoryCanvas';
-import { SyncDebugView } from '../components/SyncDebugView';
-import { ThreeDScene } from '../components/ThreeDScene';
 import { useResultsStore } from '../stores/resultsStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
-import { Button } from '../components/ui/Button';
+import { ExperimentSidebar } from '../components/debug/ExperimentSidebar';
+import { AnalysisSidebar } from '../components/debug/AnalysisSidebar';
+import { DebugMainView } from '../components/debug/DebugMainView';
+import { buildFallbackDiagnostics } from '../lib/diagnostics';
 import type { PhysicsResult } from '../types';
 
 type DebugMode = 'sam2' | 'sync' | '3d';
 type SidebarTab = 'quick' | 'analysis';
 
-const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
-  `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
-
 const DEFAULT_MASS_G = 50;
 const DEFAULT_MASS_UNCERTAINTY_G = 1;
-
-const buildFallbackDiagnostics = (result: PhysicsResult | null) => {
-  if (!result) return null;
-  if (result.reconstructionDiagnostics) return result.reconstructionDiagnostics;
-
-  const mode = result.reconstruction3d?.mode ?? 'SINGLE_CAMERA_PLANAR';
-  const isStereo = mode === 'STEREO_3D';
-  const extrinsics = result.reconstruction3d?.stereoExtrinsics as
-    | { baseline_mm?: number; reprojection_error_px?: number }
-    | undefined;
-  const baselineMm = typeof extrinsics?.baseline_mm === 'number' ? extrinsics.baseline_mm : null;
-  const reprojPx =
-    typeof extrinsics?.reprojection_error_px === 'number' ? extrinsics.reprojection_error_px : null;
-  const syncIsMock = Boolean(result.syncStatus?.isMock ?? true);
-
-  return {
-    overallConfidence: isStereo ? 0.55 : 0.35,
-    verdict: (isStereo ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-    issues: [
-      'Using fallback diagnostics because backend response is missing reconstructionDiagnostics.',
-      'Restart signaling server to enable full diagnostics scoring.',
-    ],
-    checks: [
-      {
-        id: 'payload-version',
-        label: 'Diagnostics payload',
-        status: 'warn' as const,
-        value: 'missing',
-        details:
-          'Backend response has no reconstructionDiagnostics yet. Showing compatibility fallback.',
-      },
-      {
-        id: 'stereo-mode',
-        label: 'Stereo mode enabled',
-        status: (isStereo ? 'pass' : 'fail') as 'pass' | 'warn' | 'fail',
-        value: mode,
-      },
-      {
-        id: 'sync-source',
-        label: 'Sync source',
-        status: (syncIsMock ? 'warn' : 'pass') as 'pass' | 'warn' | 'fail',
-        value: syncIsMock ? 'mock' : 'measured',
-      },
-      ...(baselineMm === null
-        ? []
-        : [
-            {
-              id: 'baseline',
-              label: 'Stereo baseline',
-              status: (baselineMm < 60 ? 'warn' : 'pass') as 'pass' | 'warn' | 'fail',
-              value: `${baselineMm.toFixed(1)} mm`,
-            },
-          ]),
-      ...(reprojPx === null
-        ? []
-        : [
-            {
-              id: 'reprojection',
-              label: 'Stereo reprojection error',
-              status: (reprojPx > 1.2 ? 'fail' : reprojPx > 0.6 ? 'warn' : 'pass') as
-                | 'pass'
-                | 'warn'
-                | 'fail',
-              value: `${reprojPx.toFixed(3)} px`,
-            },
-          ]),
-    ],
-    metrics: {
-      mode,
-      baselineMm,
-      stereoReprojectionPx: reprojPx,
-      syncRmsMs: result.syncStatus?.rmsMs ?? null,
-      syncIsMock,
-      avgTrackConfidence: null,
-      frameCoverageCam0: null,
-      frameCoverageCam1: null,
-      triangulationFlaggedPct: null,
-      maxLineDeviationM: null,
-      gtRmseM: null,
-      gtRmseXm: null,
-      gtRmseYm: null,
-      gtRmseZm: null,
-      gtBiasXm: null,
-      gtBiasYm: null,
-      gtBiasZm: null,
-      gtWorstFrame: null,
-      gtWorstFrameErrorM: null,
-      reprojRmseCam0Px: null,
-      reprojRmseCam1Px: null,
-      reprojWorstFrame: null,
-      reprojWorstErrorPx: null,
-    },
-  };
-};
 
 export const DebugPage = () => {
   const [experiments, setExperiments] = useState<string[]>([]);
@@ -125,12 +26,11 @@ export const DebugPage = () => {
   const [selectedModel, setSelectedModel] = useState<string>('facebook/sam2-hiera-tiny');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [seedMode, setSeedMode] = useState<SeedMode>('click');
+  const [seedMode, setSeedMode] = useState<'click' | 'bbox'>('click');
   const [physicsError, setPhysicsError] = useState<string | null>(null);
 
   const {
     seeds,
-    addSeed,
     tracks,
     onTrackingComplete,
     currentFrame,
@@ -143,19 +43,20 @@ export const DebugPage = () => {
     setStatus,
     progress,
     reset: resetTracking,
+    addSeed,
   } = useTrackingStore();
+
   const {
     physicsResult,
     status: physicsStatus,
     requestPhysics,
+    reset: resetPhysics,
     onPhysicsResult,
     onPhysicsFailed,
-    reset: resetPhysics,
   } = useResultsStore();
 
   const { ballConfigs } = useSessionStore();
 
-  // Load experiments list
   const fetchExperiments = useCallback(async () => {
     try {
       const res = await fetch('/api/experiments');
@@ -171,7 +72,6 @@ export const DebugPage = () => {
     fetchExperiments();
   }, [fetchExperiments]);
 
-  // Adjust frame count when experiment is selected
   useEffect(() => {
     resetPhysics();
     setPhysicsError(null);
@@ -196,7 +96,6 @@ export const DebugPage = () => {
     loadMeta();
   }, [selectedExp, resetPhysics, setFrameCount, setFrameMap]);
 
-  // Playback engine
   useEffect(() => {
     if (!isPlaying) return;
     const interval = setInterval(
@@ -208,7 +107,6 @@ export const DebugPage = () => {
     return () => clearInterval(interval);
   }, [isPlaying, playbackSpeed, frameCount, setFrame]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -234,9 +132,11 @@ export const DebugPage = () => {
   const isFrameMissing = selectedExp && !frameFile;
   const actualFileCount = frameMap.filter(Boolean).length;
   const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
+
   const fallbackBallIds = Array.from(
     new Set([...tracks.map((track) => track.ballId), ...seeds.map((seed) => seed.ballId)]),
   ).sort((a, b) => a - b);
+
   const physicsMassConfigs =
     ballConfigs.length > 0
       ? ballConfigs
@@ -251,6 +151,7 @@ export const DebugPage = () => {
             mass_g: DEFAULT_MASS_G,
             uncertainty_g: DEFAULT_MASS_UNCERTAINTY_G,
           }));
+
   const diagnostics = useMemo(() => buildFallbackDiagnostics(physicsResult), [physicsResult]);
 
   const handleRunTrack = async () => {
@@ -266,7 +167,7 @@ export const DebugPage = () => {
           experiment_id: selectedExp,
           seeds: seeds.map((s) => ({ ...s, ball_id: s.ballId, camera_id: 0 })),
           model_id: selectedModel,
-          clientId: 'pc', // Using 'pc' so it routes back to our store
+          clientId: 'pc',
         }),
       });
       if (!response.ok) throw new Error('Tracking failed');
@@ -281,10 +182,8 @@ export const DebugPage = () => {
 
   const handleRunPhysics = async () => {
     if (!selectedExp) return;
-
     requestPhysics();
     setPhysicsError(null);
-
     try {
       const response = await fetch(`/api/experiments/${selectedExp}/physics`, {
         method: 'POST',
@@ -295,12 +194,10 @@ export const DebugPage = () => {
       if (!response.ok) {
         let errorMessage = `Physics request failed (${response.status})`;
         try {
-          const payload = (await response.json()) as { error?: unknown };
-          if (typeof payload?.error === 'string' && payload.error.trim()) {
-            errorMessage = payload.error;
-          }
+          const payload = await response.json();
+          if (payload.error) errorMessage = payload.error;
         } catch {
-          // Ignore non-JSON bodies.
+          /* ignore */
         }
         throw new Error(errorMessage);
       }
@@ -317,9 +214,7 @@ export const DebugPage = () => {
   return (
     <div className="flex min-h-[100dvh] w-full overflow-hidden bg-[var(--bg-base)] text-slate-100">
       <div className="grid h-full w-full gap-0 lg:grid-cols-[1fr_400px]">
-        {/* Left Side: Massive Preview */}
         <div className="flex min-h-0 flex-col bg-black relative items-center justify-center">
-          {/* Subtle overlay header */}
           <div className="absolute top-6 left-8 z-30 pointer-events-none opacity-40">
             <h1 className="text-xl font-medium uppercase tracking-wider text-slate-400">
               Debug Lab <span className="text-[var(--accent)]/50">//</span> {mode.toUpperCase()}
@@ -327,127 +222,40 @@ export const DebugPage = () => {
           </div>
 
           <div className="absolute top-6 right-8 z-30 flex gap-2">
-            <Button
-              onClick={() => setMode('sam2')}
-              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
-                mode === 'sam2'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
-              }`}
-            >
-              SAM2
-            </Button>
-            <Button
-              onClick={() => setMode('sync')}
-              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
-                mode === 'sync'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
-              }`}
-            >
-              Sync
-            </Button>
-            <Button
-              onClick={() => setMode('3d')}
-              className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${
-                mode === '3d'
-                  ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                  : 'bg-[var(--bg-panel)] text-slate-400 border border-[var(--line)] hover:text-slate-200'
-              }`}
-            >
-              3D
-            </Button>
+            {(['sam2', 'sync', '3d'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`px-5 py-2 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all border ${
+                  mode === m
+                    ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)] shadow-sm'
+                    : 'bg-[var(--bg-panel)] text-slate-400 border-[var(--line)] hover:text-slate-200'
+                }`}
+              >
+                {m.toUpperCase()}
+              </button>
+            ))}
           </div>
 
-          {mode === 'sam2' ? (
-            <div
-              className="relative bg-black shadow-2xl overflow-hidden"
-              style={{
-                aspectRatio: `${dims.width} / ${dims.height}`,
-                maxHeight: '100%',
-                maxWidth: '100%',
-              }}
-            >
-              {frameSrc && (
-                <img
-                  src={frameSrc}
-                  className="h-full w-full object-contain block"
-                  onLoad={(e) => {
-                    setDims({
-                      width: e.currentTarget.naturalWidth,
-                      height: e.currentTarget.naturalHeight,
-                    });
-                    setFrameImageState('ready');
-                  }}
-                  onError={() => setFrameImageState('error')}
-                />
-              )}
-              {!selectedExp && (
-                <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
-                  -- No Experiment Selected --
-                </div>
-              )}
-              {frameImageState === 'error' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500 font-bold uppercase tracking-tighter">
-                  [ ERROR: FRAME NOT FOUND ]
-                </div>
-              )}
-
-              {isFrameMissing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-panel)]/80 text-[var(--accent)] backdrop-blur-md">
-                  <div className="text-center rounded-3xl border border-[var(--accent)] p-10 bg-[var(--bg-surface)] shadow-sm">
-                    <p className="text-5xl mb-5">⚠️</p>
-                    <p className="font-medium uppercase tracking-widest text-lg">Omitted Frame</p>
-                    <p className="text-[11px] opacity-60 mt-3 font-mono">
-                      PHYSICAL_IDX: {safeFrame}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <TrajectoryCanvas
-                width={dims.width}
-                height={dims.height}
-                tracks={tracks}
-                currentFrame={safeFrame}
-                cameraId="0"
-              />
-
-              <BallSeedPicker
-                cameraId="0"
-                currentFrame={safeFrame}
-                seedFrameIdx={safeFrame}
-                maxBalls={maxBalls}
-                frameWidth={dims.width}
-                frameHeight={dims.height}
-                seeds={seeds}
-                onAddSeed={(s) => addSeed(s, maxBalls)}
-                mode={seedMode}
-              />
-            </div>
-          ) : mode === 'sync' ? (
-            <SyncDebugView experimentId={selectedExp} currentFrame={safeFrame} />
-          ) : mode === '3d' ? (
-            <div className="relative h-full w-full">
-              {physicsResult ? (
-                <ThreeDScene
-                  balls={physicsResult.balls}
-                  currentFrame={safeFrame}
-                  reconstruction3d={physicsResult.reconstruction3d}
-                  experimentId={selectedExp}
-                  frameFile={frameFile}
-                  frameAspect={
-                    dims.width > 0 && dims.height > 0 ? dims.width / dims.height : 16 / 9
-                  }
-                  diagnostics={diagnostics}
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-slate-600 font-mono tracking-widest uppercase text-xs">
-                  -- Run Physics to see 3D Reconstruction --
-                </div>
-              )}
-            </div>
-          ) : null}
+          <DebugMainView
+            mode={mode}
+            dims={dims}
+            onDimsChange={setDims}
+            frameSrc={frameSrc}
+            onFrameImageStateChange={setFrameImageState}
+            frameImageState={frameImageState}
+            selectedExp={selectedExp}
+            isFrameMissing={isFrameMissing}
+            safeFrame={safeFrame}
+            tracks={tracks}
+            maxBalls={maxBalls}
+            seeds={seeds}
+            onAddSeed={(s) => addSeed(s, maxBalls)}
+            seedMode={seedMode}
+            physicsResult={physicsResult}
+            frameFile={frameFile}
+            diagnostics={diagnostics}
+          />
 
           {hasFrameMismatch && (
             <div className="absolute bottom-8 left-8 z-30 rounded-full border border-amber-500/30 bg-amber-500/10 px-5 py-2 text-[10px] font-medium uppercase tracking-widest text-amber-400 backdrop-blur-md opacity-40 hover:opacity-100 transition-opacity shadow-sm">
@@ -456,283 +264,66 @@ export const DebugPage = () => {
           )}
         </div>
 
-        {/* Right Side: All Controls */}
         <aside className="custom-scrollbar overflow-y-auto border-l border-[var(--line)] bg-[var(--bg-surface)] p-8 space-y-6">
           <section className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-            <Button
-              onClick={() => setSidebarTab('quick')}
-              className={`flex-1 rounded-xl py-2 text-[10px] uppercase tracking-wider ${
-                sidebarTab === 'quick'
-                  ? 'bg-[var(--accent)] text-zinc-950'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Quick
-            </Button>
-            <Button
-              onClick={() => setSidebarTab('analysis')}
-              className={`flex-1 rounded-xl py-2 text-[10px] uppercase tracking-wider ${
-                sidebarTab === 'analysis'
-                  ? 'bg-[var(--accent)] text-zinc-950'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Analysis
-            </Button>
+            {(['quick', 'analysis'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSidebarTab(tab)}
+                className={`flex-1 rounded-xl py-2 text-[10px] uppercase tracking-wider transition-colors ${
+                  sidebarTab === tab
+                    ? 'bg-[var(--accent)] text-zinc-950 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
           </section>
-          {sidebarTab === 'quick' && (
-            <>
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Experiment
-                </h3>
 
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
-                      Experiment
-                    </label>
-                    <div className="flex gap-2">
-                      <select
-                        className="flex-1 rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2.5 text-[11px] font-mono outline-none focus:border-[var(--accent)] transition-colors"
-                        value={selectedExp}
-                        onChange={(e) => {
-                          setSelectedExp(e.target.value);
-                          resetTracking();
-                          setIsPlaying(false);
-                        }}
-                      >
-                        <option value="">Select Experiment</option>
-                        {experiments.map((e) => (
-                          <option key={e} value={e}>
-                            {e}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        onClick={fetchExperiments}
-                        className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 hover:text-[var(--accent)] transition-colors"
-                      >
-                        🔄
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
-                      SAM2 Model
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2.5 text-[11px] font-mono outline-none focus:border-[var(--accent)] transition-colors"
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                    >
-                      <option value="facebook/sam2-hiera-tiny">Tiny (Fastest)</option>
-                      <option value="facebook/sam2-hiera-small">Small</option>
-                      <option value="facebook/sam2-hiera-base-plus">Base+</option>
-                      <option value="facebook/sam2-hiera-large">Large (Best)</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <Button
-                      onClick={() => {
-                        onTrackingComplete([]);
-                        resetPhysics();
-                        setPhysicsError(null);
-                      }}
-                      className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] py-2.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
-                    >
-                      Clear
-                    </Button>
-                    <Button
-                      variant="main"
-                      onClick={handleRunTrack}
-                      disabled={status === 'tracking' || !selectedExp || seeds.length === 0}
-                      className="py-2.5 text-[10px]"
-                    >
-                      {status === 'tracking' ? 'Processing...' : 'Run SAM2 + Physics'}
-                    </Button>
-                    <Button
-                      variant="alt"
-                      onClick={handleRunPhysics}
-                      disabled={physicsStatus === 'computing' || !selectedExp}
-                      className="py-2.5 text-[10px]"
-                    >
-                      {physicsStatus === 'computing' ? 'Testing Physics...' : 'Run Physics'}
-                    </Button>
-                  </div>
-                </div>
-              </section>
-            </>
-          )}
-          {sidebarTab === 'analysis' && (
-            <>
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Playback
-                </h3>
-
-                <FrameScrubber
-                  currentFrame={currentFrame}
-                  frameCount={frameCount}
-                  onFrameChange={setFrame}
-                  isPlaying={isPlaying}
-                  onPlayToggle={() => setIsPlaying(!isPlaying)}
-                  playbackSpeed={playbackSpeed}
-                  onSpeedChange={setPlaybackSpeed}
-                  variant="compact"
-                />
-              </section>
-
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Seed Controls
-                </h3>
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-2">
-                    <Button
-                      type="button"
-                      onClick={() => setSeedMode('click')}
-                      className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
-                        seedMode === 'click'
-                          ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      Tap
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => setSeedMode('bbox')}
-                      className={`flex-1 rounded-xl py-2.5 text-[10px] font-medium uppercase tracking-wider transition ${
-                        seedMode === 'bbox'
-                          ? 'bg-[var(--accent)] text-zinc-950 shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      Box
-                    </Button>
-                  </div>
-
-                  <div className="rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                        Seeds Placed
-                      </span>
-                      <span className="rounded-md bg-[var(--accent)]/10 border border-[var(--accent)]/50 px-2.5 py-1 font-mono text-[11px] text-[var(--accent)] font-medium">
-                        {seeds.filter((s) => s.frameIdx === safeFrame).length} / {maxBalls}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Monitor
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
-                    <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">
-                      Res
-                    </span>
-                    <span className="text-lg font-medium text-slate-200 mt-1">
-                      {dims.width}x{dims.height}
-                    </span>
-                  </div>
-                  <div className="rounded-[2rem] bg-[var(--bg-panel)] p-5 border border-[var(--line)]">
-                    <span className="block text-[10px] text-slate-400 font-medium tracking-wider uppercase">
-                      Status
-                    </span>
-                    <span className="text-[10px] font-medium tracking-wider uppercase text-[var(--accent)] truncate mt-1.5 block">
-                      {status}
-                    </span>
-                  </div>
-                </div>
-                {status === 'tracking' && (
-                  <div className="mt-4 space-y-3">
-                    <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
-                      <span>Analyzing Video</span>
-                      <span className="font-mono">{Math.round(progress * 100)}%</span>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full border border-[var(--line)] bg-[var(--bg-base)]">
-                      <div
-                        className="h-full bg-[var(--accent)] transition-all duration-300"
-                        style={{ width: `${progress * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <section className="space-y-6">
-                <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                  Physics
-                </h3>
-                {physicsError && (
-                  <div className="rounded-xl border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-xs font-medium text-[var(--accent)] shadow-sm">
-                    <span className="font-bold opacity-70 mr-2">ERROR:</span>
-                    {physicsError}
-                  </div>
-                )}
-                {physicsStatus === 'computing' ? (
-                  <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-5 text-xs font-medium text-sky-200 shadow-sm">
-                    Recomputing physics...
-                  </div>
-                ) : physicsResult ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-4">
-                        <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
-                          Momentum
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-slate-100">
-                          {formatWithUncertainty(
-                            physicsResult.system.momentum_conserved_pct.value,
-                            physicsResult.system.momentum_conserved_pct.uncertainty,
-                            1,
-                          )}
-                          %
-                        </span>
-                      </div>
-                      <div className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-4">
-                        <span className="block text-[10px] uppercase tracking-wider font-medium text-slate-400">
-                          Restitution
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-slate-100">
-                          {formatWithUncertainty(
-                            physicsResult.system.coeff_of_restitution.value,
-                            physicsResult.system.coeff_of_restitution.uncertainty,
-                            3,
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      {physicsResult.balls.map((ball) => (
-                        <div
-                          key={`debug-physics-ball-${ball.ballId}`}
-                          className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-2 text-[11px] text-slate-300 flex items-center justify-between"
-                        >
-                          <span className="font-medium uppercase tracking-wider text-slate-400">
-                            Ball {ball.ballId + 1}
-                          </span>
-                          <span className="font-mono text-[10px] text-slate-300">
-                            {ball.v_before.value.toFixed(2)} → {ball.v_after.value.toFixed(2)} m/s
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-3xl border border-dashed border-[var(--line)] bg-[var(--bg-panel)] px-6 py-8 text-center text-[11px] font-medium tracking-wide text-slate-400">
-                    Run SAM2 tracking first.
-                  </div>
-                )}
-              </section>
-            </>
+          {sidebarTab === 'quick' ? (
+            <ExperimentSidebar
+              selectedExp={selectedExp}
+              onExpChange={(exp) => {
+                setSelectedExp(exp);
+                resetTracking();
+                setIsPlaying(false);
+              }}
+              experiments={experiments}
+              onRefreshExperiments={fetchExperiments}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              onClear={() => {
+                onTrackingComplete([]);
+                resetPhysics();
+                setPhysicsError(null);
+              }}
+              onRunTrack={handleRunTrack}
+              onRunPhysics={handleRunPhysics}
+              status={status}
+              physicsStatus={physicsStatus}
+              hasSeeds={seeds.length > 0}
+            />
+          ) : (
+            <AnalysisSidebar
+              currentFrame={currentFrame}
+              frameCount={frameCount}
+              onFrameChange={setFrame}
+              isPlaying={isPlaying}
+              onPlayToggle={() => setIsPlaying(!isPlaying)}
+              playbackSpeed={playbackSpeed}
+              onSpeedChange={setPlaybackSpeed}
+              seedMode={seedMode}
+              onSeedModeChange={setSeedMode}
+              seedsCount={seeds.filter((s) => s.frameIdx === safeFrame).length}
+              maxBalls={maxBalls}
+              dims={dims}
+              status={status}
+              progress={progress}
+              physicsResult={physicsResult}
+              physicsStatus={physicsStatus}
+              physicsError={physicsError}
+            />
           )}
         </aside>
       </div>
