@@ -73,6 +73,19 @@ interface PositionsLike {
   frames?: PositionsFrame[];
 }
 
+interface CameraIntrinsicsLike {
+  camera_id?: number;
+  fx?: number;
+  fy?: number;
+  cx?: number;
+  cy?: number;
+  k1?: number;
+  k2?: number;
+  p1?: number;
+  p2?: number;
+  k3?: number;
+}
+
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const toFiniteNumber = (value: unknown): number | null => {
   const n = Number(value);
@@ -262,10 +275,41 @@ const projectPoint = (
   return { u: r0 / r2, v: r1 / r2 };
 };
 
+const distortPoint = (
+  point: { u: number; v: number },
+  intrinsics: CameraIntrinsicsLike | null | undefined,
+): { u: number; v: number } => {
+  if (!intrinsics) return point;
+  const fx = toFiniteNumber(intrinsics.fx);
+  const fy = toFiniteNumber(intrinsics.fy);
+  const cx = toFiniteNumber(intrinsics.cx);
+  const cy = toFiniteNumber(intrinsics.cy);
+  if (fx === null || fy === null || cx === null || cy === null) return point;
+  const k1 = toFiniteNumber(intrinsics.k1) ?? 0;
+  const k2 = toFiniteNumber(intrinsics.k2) ?? 0;
+  const p1 = toFiniteNumber(intrinsics.p1) ?? 0;
+  const p2 = toFiniteNumber(intrinsics.p2) ?? 0;
+  const k3 = toFiniteNumber(intrinsics.k3) ?? 0;
+
+  const x = (point.u - cx) / fx;
+  const y = (point.v - cy) / fy;
+  const r2 = x * x + y * y;
+  const r4 = r2 * r2;
+  const r6 = r4 * r2;
+  const radial = 1 + k1 * r2 + k2 * r4 + k3 * r6;
+  const xDist = x * radial + 2 * p1 * x * y + p2 * (r2 + 2 * x * x);
+  const yDist = y * radial + p1 * (r2 + 2 * y * y) + 2 * p2 * x * y;
+  return {
+    u: xDist * fx + cx,
+    v: yDist * fy + cy,
+  };
+};
+
 const computeReprojectionMetrics = (
   positions3d: PositionsLike | null,
   stereoExtrinsics: any,
   tracksData: { balls?: TrackBall[] } | null,
+  intrinsicsByCamera: Map<number, CameraIntrinsicsLike>,
 ) => {
   const P0 = stereoExtrinsics?.P0;
   const P1 = stereoExtrinsics?.P1;
@@ -316,8 +360,14 @@ const computeReprojectionMetrics = (
         const x = ball.x_m * xyzScale;
         const y = ball.y_m * xyzScale;
         const z = ball.z_m * xyzScale;
-        const p0 = projectPoint(P0, x, y, z);
-        const p1 = projectPoint(P1, x, y, z);
+        const p0Base = projectPoint(P0, x, y, z);
+        const p1Base = projectPoint(P1, x, y, z);
+        const p0 = p0Base
+          ? distortPoint(p0Base, intrinsicsByCamera.get(0) ?? null)
+          : null;
+        const p1 = p1Base
+          ? distortPoint(p1Base, intrinsicsByCamera.get(1) ?? null)
+          : null;
         const t0 = trackLookup.get(`0:${ball.ball_id}:${frame.frame}`);
         const t1 = trackLookup.get(`1:${ball.ball_id}:${frame.frame}`);
         if (p0 && t0) {
@@ -381,6 +431,7 @@ export const buildReconstructionDiagnostics = ({
   tracksData,
   positions3d,
   positions3dGt,
+  intrinsics,
 }: {
   mode: "SINGLE_CAMERA_PLANAR" | "STEREO_3D";
   stereoExtrinsics: any;
@@ -388,6 +439,7 @@ export const buildReconstructionDiagnostics = ({
   tracksData: { balls?: TrackBall[] } | null;
   positions3d: PositionsLike | null;
   positions3dGt: PositionsLike | null;
+  intrinsics?: CameraIntrinsicsLike[] | null;
 }): ReconstructionDiagnostics => {
   const checks: ReconstructionDiagnosticCheck[] = [];
   const issues: string[] = [];
@@ -433,10 +485,17 @@ export const buildReconstructionDiagnostics = ({
   const maxLineDeviationM = computeMaxLineDeviation(positions3d);
   const gtRmseM = computeGtRmse(positions3d, positions3dGt);
   const gtAxis = computeGtAxisMetrics(positions3d, positions3dGt);
+  const intrinsicsByCamera = new Map<number, CameraIntrinsicsLike>();
+  for (const i of intrinsics ?? []) {
+    const id = toFiniteNumber(i?.camera_id);
+    if (id === null) continue;
+    intrinsicsByCamera.set(id, i);
+  }
   const reproj = computeReprojectionMetrics(
     positions3d,
     stereoExtrinsics,
     tracksData,
+    intrinsicsByCamera,
   );
 
   if (mode !== "STEREO_3D") {

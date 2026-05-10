@@ -158,4 +158,82 @@ describe("buildReconstructionDiagnostics", () => {
     expect(diagnostics.metrics.reprojRmseCam0Px!).toBeLessThan(0.5);
     expect(diagnostics.metrics.reprojRmseCam1Px!).toBeLessThan(0.5);
   });
+
+  it("accounts for lens distortion when computing reprojection residual", () => {
+    const point = { x: 0.2, y: 0.25, z: 1.5 };
+    const P0 = [
+      [980, 0, 960, 0],
+      [0, 980, 540, 0],
+      [0, 0, 1, 0],
+    ];
+    const K = {
+      camera_id: 0,
+      fx: 980,
+      fy: 980,
+      cx: 960,
+      cy: 540,
+      k1: -0.08,
+      k2: 0.02,
+      p1: 0.001,
+      p2: -0.001,
+      k3: 0,
+    };
+    const u = 980 * (point.x / point.z) + 960;
+    const v = 980 * (point.y / point.z) + 540;
+    const x = (u - K.cx) / K.fx;
+    const y = (v - K.cy) / K.fy;
+    const r2 = x * x + y * y;
+    const r4 = r2 * r2;
+    const radial = 1 + K.k1 * r2 + K.k2 * r4;
+    const xd = x * radial + 2 * K.p1 * x * y + K.p2 * (r2 + 2 * x * x);
+    const yd = y * radial + K.p1 * (r2 + 2 * y * y) + 2 * K.p2 * x * y;
+    const ud = xd * K.fx + K.cx;
+    const vd = yd * K.fy + K.cy;
+
+    const diagnostics = buildReconstructionDiagnostics({
+      mode: "STEREO_3D",
+      stereoExtrinsics: {
+        baseline_mm: 120,
+        reprojection_error_px: 0,
+        P0,
+        P1: P0,
+      },
+      syncStatus: { isMock: false, rmsMs: 0.7 },
+      tracksData: {
+        balls: [
+          {
+            ball_id: 0,
+            camera_id: 0,
+            frames: [{ frame_idx: 0, x_px: ud, y_px: vd, confidence: 1 }],
+          },
+          {
+            ball_id: 0,
+            camera_id: 1,
+            frames: [{ frame_idx: 0, x_px: ud, y_px: vd, confidence: 1 }],
+          },
+        ],
+      },
+      positions3d: {
+        frames: [
+          {
+            frame: 0,
+            balls: [
+              {
+                ball_id: 0,
+                x_m: point.x,
+                y_m: point.y,
+                z_m: point.z,
+                flagged: false,
+              },
+            ],
+          },
+        ],
+      },
+      positions3dGt: null,
+      intrinsics: [K, { ...K, camera_id: 1 }],
+    });
+
+    expect(diagnostics.metrics.reprojRmseCam0Px!).toBeLessThan(0.01);
+    expect(diagnostics.metrics.reprojRmseCam1Px!).toBeLessThan(0.01);
+  });
 });

@@ -735,6 +735,26 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       console.warn("[API] Failed to read tracks.json:", e);
     }
 
+    let intrinsicsData: any[] = [];
+    try {
+      const calibDir = path.join(EXPERIMENTS_DIR, experimentId, "calibration");
+      for (const cameraId of [0, 1]) {
+        const intrinsicsPath = path.join(
+          calibDir,
+          `cam${cameraId}_intrinsics.json`,
+        );
+        if (!existsSync(intrinsicsPath)) continue;
+        intrinsicsData.push(
+          JSON.parse(await fs.promises.readFile(intrinsicsPath, "utf-8")),
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[API] Failed to read camera intrinsics for diagnostics:",
+        e,
+      );
+    }
+
     let positions3dData: any = null;
     try {
       const positionsPath = path.join(
@@ -779,6 +799,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       tracksData,
       positions3d: positions3dData,
       positions3dGt: positions3dGtData,
+      intrinsics: intrinsicsData,
     });
 
     const responsePayload = {
