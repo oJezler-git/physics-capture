@@ -33,8 +33,9 @@ BOARD_ROWS = 6   # inner corners along the short axis
 BOARD_SIZE = (BOARD_COLS, BOARD_ROWS)
 
 # Physical size of one checkerboard square in mm.
-# Adjust this to match your printed board.
-SQUARE_SIZE_MM = 25.0  # 25mm = 1 inch squares
+# The Blender synthetic generator uses the same CALIBRATION_SQUARE_SIZE_MM
+# default so stereo translation scale matches the rendered board.
+SQUARE_SIZE_MM = float(os.getenv("CALIBRATION_SQUARE_SIZE_MM", "40.0"))
 
 # Sub-pixel corner refinement window (half-size in pixels).
 SUBPIX_WINDOW = (11, 11)

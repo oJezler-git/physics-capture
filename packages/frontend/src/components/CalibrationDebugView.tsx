@@ -30,9 +30,13 @@ export const CalibrationDebugView = ({
 
   const [cam0DebugFiles, setCam0DebugFiles] = useState<string[]>([]);
   const [cam1DebugFiles, setCam1DebugFiles] = useState<string[]>([]);
+  const [stereoDebugFiles, setStereoDebugFiles] = useState<string[]>([]);
 
   useEffect(() => {
-    const loadDebugFiles = async (cameraId: 'cam0' | 'cam1', setter: (files: string[]) => void) => {
+    const loadDebugFiles = async (
+      cameraId: 'cam0' | 'cam1' | 'stereo',
+      setter: (files: string[]) => void,
+    ) => {
       if (!experimentId) {
         setter([]);
         return;
@@ -48,6 +52,7 @@ export const CalibrationDebugView = ({
     };
     loadDebugFiles('cam0', setCam0DebugFiles);
     loadDebugFiles('cam1', setCam1DebugFiles);
+    loadDebugFiles('stereo', setStereoDebugFiles);
   }, [experimentId, status, progress]);
 
   return (
@@ -142,6 +147,7 @@ export const CalibrationDebugView = ({
             </p>
             <DebugStrip experimentId={experimentId} cameraId="cam0" files={cam0DebugFiles} />
             <DebugStrip experimentId={experimentId} cameraId="cam1" files={cam1DebugFiles} />
+            <DebugStrip experimentId={experimentId} cameraId="stereo" files={stereoDebugFiles} />
           </section>
         </div>
       </div>
@@ -162,7 +168,7 @@ const DebugStrip = ({
   files,
 }: {
   experimentId: string;
-  cameraId: 'cam0' | 'cam1';
+  cameraId: 'cam0' | 'cam1' | 'stereo';
   files: string[];
 }) => {
   const latest = files.slice(-4).reverse();

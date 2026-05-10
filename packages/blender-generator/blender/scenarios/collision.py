@@ -12,8 +12,8 @@ class CollisionScenario(BaseScenario):
         board = bpy.context.active_object
         board.name = "CalibrationBoard"
         # Match CV expectation exactly: 9x6 inner corners => 10x7 squares.
-        # Keep each square physically square (25 mm) so the board is not warped.
-        square_size_m = 0.040
+        # Square size is shared with CV through CALIBRATION_SQUARE_SIZE_MM.
+        square_size_m = self.config.CHECKER_SQUARE_SIZE_M
         board_width_m = 10 * square_size_m
         board_height_m = 7 * square_size_m
         board.scale = (board_width_m, board_height_m, 1.0)

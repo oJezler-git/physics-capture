@@ -25,6 +25,12 @@ class Config:
     TOTAL_FRAMES = int(os.getenv("BLENDER_TOTAL_FRAMES", "100"))
     FPS = 30
     BASELINE_M = 0.12 # 12cm baseline
+    CHECKER_SQUARE_SIZE_M = float(
+        os.getenv(
+            "BLENDER_CHECKER_SQUARE_SIZE_M",
+            str(float(os.getenv("CALIBRATION_SQUARE_SIZE_MM", "40.0")) / 1000.0),
+        )
+    )
     BALL_RADIUS = 0.033 # 66mm diameter
     EXP_ID = "synthetic-stereo-01"
     EXP_DIR = ""

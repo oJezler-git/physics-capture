@@ -327,8 +327,8 @@ app.get(
       if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
         return res.status(400).json({ error: "Invalid experiment id" });
       }
-      if (!/^cam\d+$/.test(cameraId)) {
-        return res.status(400).json({ error: "Invalid camera id" });
+      if (!/^(cam\d+|stereo)$/.test(cameraId)) {
+        return res.status(400).json({ error: "Invalid debug channel" });
       }
 
       const debugDir = path.join(
@@ -350,11 +350,9 @@ app.get(
       res.json({ files });
     } catch (err: any) {
       console.error("Calibration debug list error:", err);
-      res
-        .status(500)
-        .json({
-          error: err.message ?? "Failed to list calibration debug images",
-        });
+      res.status(500).json({
+        error: err.message ?? "Failed to list calibration debug images",
+      });
     }
   },
 );
@@ -367,8 +365,8 @@ app.get(
       if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
         return res.status(400).json({ error: "Invalid experiment id" });
       }
-      if (!/^cam\d+$/.test(cameraId)) {
-        return res.status(400).json({ error: "Invalid camera id" });
+      if (!/^(cam\d+|stereo)$/.test(cameraId)) {
+        return res.status(400).json({ error: "Invalid debug channel" });
       }
       if (!/^[a-zA-Z0-9._-]+$/.test(fileName)) {
         return res.status(400).json({ error: "Invalid file name" });
@@ -402,11 +400,9 @@ app.get(
       res.sendFile(filePath);
     } catch (err: any) {
       console.error("Calibration debug image error:", err);
-      res
-        .status(500)
-        .json({
-          error: err.message ?? "Failed to fetch calibration debug image",
-        });
+      res.status(500).json({
+        error: err.message ?? "Failed to fetch calibration debug image",
+      });
     }
   },
 );
