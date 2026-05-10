@@ -7,8 +7,9 @@ class Config:
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
         self.EXP_DIR = os.path.join(project_root, "experiments", self.EXP_ID)
         self.FPS = 30.0
-        self.SECONDS = 8
-        self.TOTAL_FRAMES = int(self.FPS * self.SECONDS)
+        # Temporary calibration-focused cap to keep iteration fast.
+        self.TOTAL_FRAMES = int(os.getenv("BLENDER_TOTAL_FRAMES", "100"))
+        self.SECONDS = self.TOTAL_FRAMES / self.FPS
         self.RESOLUTION_X = 1280
         self.RESOLUTION_Y = 720
         self.BASELINE_M = 0.28

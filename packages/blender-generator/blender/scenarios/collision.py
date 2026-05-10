@@ -11,18 +11,18 @@ class CollisionScenario(BaseScenario):
         bpy.ops.mesh.primitive_plane_add(size=1.0)
         board = bpy.context.active_object
         board.name = "CalibrationBoard"
-        # Match CV expectation exactly: 8x6 inner corners => 9x7 squares.
+        # Match CV expectation exactly: 9x6 inner corners => 10x7 squares.
         # Keep each square physically square (25 mm) so the board is not warped.
-        square_size_m = 0.025
-        board_width_m = 9 * square_size_m
+        square_size_m = 0.040
+        board_width_m = 10 * square_size_m
         board_height_m = 7 * square_size_m
         board.scale = (board_width_m, board_height_m, 1.0)
         board.data.materials.append(mat_checker)
         
         # Stable in-FOV calibration sweep (less extreme than previous spiral).
         x_vals = [-0.22, 0.0, 0.22]
-        y_vals = [0.45, 0.75, 1.05]
-        z_vals = [0.18, 0.30, 0.42]
+        y_vals = [0.30, 0.55, 0.80]
+        z_vals = [0.22, 0.34, 0.46]
         frame = 1
         for y in y_vals:
             for z in z_vals:

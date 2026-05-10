@@ -12,7 +12,7 @@ from calibration.intrinsic import (
 )
 from calibration.stereo import stereo_calibrate, StereoResult
 
-def create_synthetic_checkerboard(width=1280, height=720, board_size=(8, 6), square_size=60):
+def create_synthetic_checkerboard(width=1280, height=720, board_size=(9, 6), square_size=60):
     """
     Creates a synthetic image of a checkerboard.
     """
@@ -62,7 +62,7 @@ def temp_experiment_dir(tmp_path):
         # Slightly vary the pts2 for each frame
         width, height = 1280, 720
         offset = i * 5
-        pts1 = np.float32([[0,0], [9*60,0], [0,7*60], [9*60,7*60]])
+        pts1 = np.float32([[0,0], [10*60,0], [0,7*60], [10*60,7*60]])
         pts2 = np.float32([
             [100 + offset, 100], 
             [width-200, 150 + offset], 
@@ -72,9 +72,9 @@ def temp_experiment_dir(tmp_path):
         M = cv2.getPerspectiveTransform(pts1, pts2)
         
         # Create a basic pattern
-        pattern = np.zeros((7*60, 9*60), dtype=np.uint8)
+        pattern = np.zeros((7*60, 10*60), dtype=np.uint8)
         for r in range(7):
-            for c in range(9):
+            for c in range(10):
                 if (r + c) % 2 == 0:
                     pattern[r*60:(r+1)*60, c*60:(c+1)*60] = 255
                     

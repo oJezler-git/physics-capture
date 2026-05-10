@@ -4,6 +4,7 @@ import grpc
 import sys
 import os
 import socket
+import time
 from concurrent import futures
 from pathlib import Path
 import queue
@@ -117,19 +118,40 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
             )
 
         # --- Stage 2: Intrinsic calibration per camera ---
-        yield physics_pb2.CalibrationStatus(
-            camera_id=camera_ids[0],
-            stage=physics_pb2.CalibrationStage.CALIBRATING_INTRINSICS,
-            progress=0.5,
-            message="Computing intrinsic parameters...",
-        )
-        await asyncio.sleep(0)
-
         worst_reproj = 0.0
         intrinsic_ok = True
         for camera_id in camera_ids:
             observations = corners_per_camera.get(camera_id, [])
-            result = calibrate_camera_from_corners(observations)
+            start_msg = f"Camera {camera_id}: solving intrinsics ({len(observations)} frames)..."
+            yield physics_pb2.CalibrationStatus(
+                camera_id=camera_id,
+                stage=physics_pb2.CalibrationStage.CALIBRATING_INTRINSICS,
+                progress=0.5,
+                message=start_msg,
+            )
+            await asyncio.sleep(0)
+
+            start_ts = time.perf_counter()
+            task = asyncio.create_task(
+                asyncio.to_thread(calibrate_camera_from_corners, observations)
+            )
+            while not task.done():
+                await asyncio.sleep(2.0)
+                if task.done():
+                    break
+                elapsed = time.perf_counter() - start_ts
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_id,
+                    stage=physics_pb2.CalibrationStage.CALIBRATING_INTRINSICS,
+                    progress=0.5,
+                    message=(
+                        f"Camera {camera_id}: intrinsics solve still running "
+                        f"({elapsed:.1f}s elapsed)"
+                    ),
+                )
+                await asyncio.sleep(0)
+            result = await task
+            logger.info("%s completed in %.2fs", start_msg, time.perf_counter() - start_ts)
             if result is None:
                 yield physics_pb2.CalibrationStatus(
                     camera_id=camera_id,
@@ -162,15 +184,33 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
 
         # --- Stage 3: Stereo calibration (only if two cameras) ---
         if len(camera_ids) >= 2:
+            start_msg = "Stereo: scanning paired frames and solving extrinsics..."
             yield physics_pb2.CalibrationStatus(
                 camera_id=camera_ids[0],
                 stage=physics_pb2.CalibrationStage.CALIBRATING_STEREO,
                 progress=0.75,
-                message="Running stereo calibration...",
+                message=start_msg,
             )
             await asyncio.sleep(0)
 
-            stereo_result = stereo_calibrate(experiment_dir, camera_ids=camera_ids[:2])
+            start_ts = time.perf_counter()
+            task = asyncio.create_task(
+                asyncio.to_thread(stereo_calibrate, experiment_dir, camera_ids[:2])
+            )
+            while not task.done():
+                await asyncio.sleep(2.0)
+                if task.done():
+                    break
+                elapsed = time.perf_counter() - start_ts
+                yield physics_pb2.CalibrationStatus(
+                    camera_id=camera_ids[0],
+                    stage=physics_pb2.CalibrationStage.CALIBRATING_STEREO,
+                    progress=0.75,
+                    message=f"Stereo calibration still running ({elapsed:.1f}s elapsed)",
+                )
+                await asyncio.sleep(0)
+            stereo_result = await task
+            logger.info("%s completed in %.2fs", start_msg, time.perf_counter() - start_ts)
             if stereo_result is not None:
                 import numpy as np
                 save_stereo_extrinsics(

@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Minimum simultaneous observations required for stereo calibration.
 MIN_STEREO_FRAMES = 8
+EARLY_STOP_MISS_STREAK = 12  # sampled frames; with stride=5 this is ~60 source frames.
 
 
 class StereoResult(NamedTuple):
@@ -76,9 +77,24 @@ def _find_simultaneous_corners(
     img_points_1: list[np.ndarray] = []
     image_size_0 = image_size_1 = None
 
-    for i in range(0, n, 5):  # stride=5 to sample diverse views
+    stride = 5
+    sampled_total = max(1, (n + stride - 1) // stride)
+    start_ts = cv2.getTickCount()
+    miss_streak = 0
+    found_any = False
+
+    for sample_idx, i in enumerate(range(0, n, stride)):  # stride=5 to sample diverse views
         bgr0 = cv2.imread(str(files0[i]))
         bgr1 = cv2.imread(str(files1[i]))
+        if sample_idx % 25 == 0:
+            elapsed_s = (cv2.getTickCount() - start_ts) / cv2.getTickFrequency()
+            logger.info(
+                "Stereo corner scan progress: %d/%d sampled, paired=%d, elapsed=%.1fs",
+                sample_idx + 1,
+                sampled_total,
+                len(obj_points),
+                elapsed_s,
+            )
         if bgr0 is None or bgr1 is None:
             continue
 
@@ -112,19 +128,35 @@ def _find_simultaneous_corners(
                 )
 
         if not (found0 and found1):
+            miss_streak += 1
+            if found_any and miss_streak >= EARLY_STOP_MISS_STREAK:
+                logger.info(
+                    "Stereo corner scan early-stop: miss streak=%d after paired detections; ending scan.",
+                    miss_streak,
+                )
+                break
             continue  # Board not visible in both cameras in this frame.
 
+        found_any = True
+        miss_streak = 0
         cv2.cornerSubPix(gray0, corners0, SUBPIX_WINDOW, SUBPIX_ZERO_ZONE, SUBPIX_CRITERIA)
         cv2.cornerSubPix(gray1, corners1, SUBPIX_WINDOW, SUBPIX_ZERO_ZONE, SUBPIX_CRITERIA)
 
         obj_points.append(objp)
         img_points_0.append(corners0)
         img_points_1.append(corners1)
-
         h0, w0 = gray0.shape[:2]
         h1, w1 = gray1.shape[:2]
         image_size_0 = (w0, h0)
         image_size_1 = (w1, h1)
+
+    elapsed_s = (cv2.getTickCount() - start_ts) / cv2.getTickFrequency()
+    logger.info(
+        "Stereo corner scan complete: sampled=%d paired=%d elapsed=%.1fs",
+        sampled_total,
+        len(obj_points),
+        elapsed_s,
+    )
 
     return obj_points, img_points_0, img_points_1, image_size_0, image_size_1
 

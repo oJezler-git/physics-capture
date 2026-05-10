@@ -319,6 +319,98 @@ app.get("/api/experiments/:experimentId/metadata", (req, res) => {
   });
 });
 
+app.get(
+  "/api/experiments/:experimentId/calibration-debug/:cameraId",
+  async (req, res) => {
+    try {
+      const { experimentId, cameraId } = req.params;
+      if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
+        return res.status(400).json({ error: "Invalid experiment id" });
+      }
+      if (!/^cam\d+$/.test(cameraId)) {
+        return res.status(400).json({ error: "Invalid camera id" });
+      }
+
+      const debugDir = path.join(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "calibration",
+        "debug",
+        cameraId,
+      );
+      if (!existsSync(debugDir)) {
+        return res.json({ files: [] });
+      }
+
+      const files = (await fs.promises.readdir(debugDir))
+        .filter((f) => /\.(jpg|jpeg|png)$/i.test(f))
+        .sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+        );
+      res.json({ files });
+    } catch (err: any) {
+      console.error("Calibration debug list error:", err);
+      res
+        .status(500)
+        .json({
+          error: err.message ?? "Failed to list calibration debug images",
+        });
+    }
+  },
+);
+
+app.get(
+  "/api/experiments/:experimentId/calibration-debug/:cameraId/:fileName",
+  async (req, res) => {
+    try {
+      const { experimentId, cameraId, fileName } = req.params;
+      if (!/^[a-zA-Z0-9_-]+$/.test(experimentId)) {
+        return res.status(400).json({ error: "Invalid experiment id" });
+      }
+      if (!/^cam\d+$/.test(cameraId)) {
+        return res.status(400).json({ error: "Invalid camera id" });
+      }
+      if (!/^[a-zA-Z0-9._-]+$/.test(fileName)) {
+        return res.status(400).json({ error: "Invalid file name" });
+      }
+
+      const filePath = path.resolve(
+        EXPERIMENTS_DIR,
+        experimentId,
+        "calibration",
+        "debug",
+        cameraId,
+        fileName,
+      );
+      const relative = path.relative(
+        path.resolve(
+          EXPERIMENTS_DIR,
+          experimentId,
+          "calibration",
+          "debug",
+          cameraId,
+        ),
+        filePath,
+      );
+      if (
+        relative.startsWith("..") ||
+        path.isAbsolute(relative) ||
+        !existsSync(filePath)
+      ) {
+        return res.status(404).json({ error: "Debug image not found" });
+      }
+      res.sendFile(filePath);
+    } catch (err: any) {
+      console.error("Calibration debug image error:", err);
+      res
+        .status(500)
+        .json({
+          error: err.message ?? "Failed to fetch calibration debug image",
+        });
+    }
+  },
+);
+
 app.get("/api/network/host-hint", async (req, res) => {
   try {
     const candidates = getPrivateIPv4Candidates();

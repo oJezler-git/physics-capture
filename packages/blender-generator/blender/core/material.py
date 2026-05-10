@@ -70,13 +70,13 @@ def create_checkerboard_material():
     bsdf = nodes["Principled BSDF"]
     bsdf.inputs['Roughness'].default_value = 1.0 # Fully matte
 
-    # OpenCV calibrator expects 8x6 inner corners => 9x7 checker squares.
-    cols, rows = 9, 7
+    # OpenCV calibrator expects 9x6 inner corners => 10x7 checker squares.
+    cols, rows = 10, 7
     px_per_cell = 64
     width, height = cols * px_per_cell, rows * px_per_cell
-    img = bpy.data.images.get("CalibrationBoard_9x7")
+    img = bpy.data.images.get("CalibrationBoard_10x7")
     if img is None:
-      img = bpy.data.images.new("CalibrationBoard_9x7", width=width, height=height, alpha=False)
+      img = bpy.data.images.new("CalibrationBoard_10x7", width=width, height=height, alpha=False)
       img.use_fake_user = True
       pixels = []
       for y in range(height):

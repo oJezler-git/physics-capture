@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCalibrationStore } from '../stores/calibrationStore';
 
 interface CalibrationDebugViewProps {
@@ -27,6 +27,28 @@ export const CalibrationDebugView = ({
     if (!calibrationStage) return 'idle';
     return calibrationStage.replace(/_/g, ' ').toLowerCase();
   }, [calibrationStage]);
+
+  const [cam0DebugFiles, setCam0DebugFiles] = useState<string[]>([]);
+  const [cam1DebugFiles, setCam1DebugFiles] = useState<string[]>([]);
+
+  useEffect(() => {
+    const loadDebugFiles = async (cameraId: 'cam0' | 'cam1', setter: (files: string[]) => void) => {
+      if (!experimentId) {
+        setter([]);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/experiments/${experimentId}/calibration-debug/${cameraId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = (await res.json()) as { files?: string[] };
+        setter(payload.files ?? []);
+      } catch {
+        setter([]);
+      }
+    };
+    loadDebugFiles('cam0', setCam0DebugFiles);
+    loadDebugFiles('cam1', setCam1DebugFiles);
+  }, [experimentId, status, progress]);
 
   return (
     <div className="flex h-full w-full flex-col gap-6 bg-slate-900/50 p-6 overflow-hidden">
@@ -110,6 +132,17 @@ export const CalibrationDebugView = ({
               {error}
             </div>
           )}
+
+          <section className="space-y-2">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+              Checkerboard Debug
+            </h4>
+            <p className="text-[10px] text-slate-400">
+              Overlays from CV detection. Verify corners are on the board, not on scene artifacts.
+            </p>
+            <DebugStrip experimentId={experimentId} cameraId="cam0" files={cam0DebugFiles} />
+            <DebugStrip experimentId={experimentId} cameraId="cam1" files={cam1DebugFiles} />
+          </section>
         </div>
       </div>
     </div>
@@ -122,3 +155,34 @@ const Metric = ({ label, value }: { label: string; value: string }) => (
     <p className="text-[11px] font-mono text-slate-200">{value}</p>
   </div>
 );
+
+const DebugStrip = ({
+  experimentId,
+  cameraId,
+  files,
+}: {
+  experimentId: string;
+  cameraId: 'cam0' | 'cam1';
+  files: string[];
+}) => {
+  const latest = files.slice(-4).reverse();
+  return (
+    <div className="rounded-xl border border-slate-800 bg-black/40 p-2">
+      <p className="mb-2 text-[9px] uppercase tracking-wider text-slate-500">{cameraId}</p>
+      {latest.length === 0 ? (
+        <p className="text-[10px] text-slate-600">No debug overlays yet</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {latest.map((f) => (
+            <img
+              key={`${cameraId}-${f}`}
+              src={`/api/experiments/${experimentId}/calibration-debug/${cameraId}/${f}`}
+              className="h-20 w-full rounded border border-slate-800 object-cover"
+              title={f}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};

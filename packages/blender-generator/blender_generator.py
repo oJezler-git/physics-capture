@@ -22,7 +22,7 @@ def _remove_if_exists(path):
 class Config:
     RESOLUTION_X = 1920
     RESOLUTION_Y = 1080
-    TOTAL_FRAMES = 300
+    TOTAL_FRAMES = int(os.getenv("BLENDER_TOTAL_FRAMES", "100"))
     FPS = 30
     BASELINE_M = 0.12 # 12cm baseline
     BALL_RADIUS = 0.033 # 66mm diameter

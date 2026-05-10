@@ -4,7 +4,7 @@ calibration/intrinsic.py
 Production-quality single-camera intrinsic calibration using OpenCV.
 
 Reads extracted PNG/JPEG frames from an experiment's frames directory,
-detects 9x7 checkerboard corners with sub-pixel refinement, and runs
+detects checkerboard corners with sub-pixel refinement, and runs
 cv2.calibrateCamera to recover the camera matrix K and distortion
 coefficients D.
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Generator, NamedTuple
 
@@ -25,8 +26,9 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Inner corner count of the calibration board (cols, rows).
-# A standard 9x7 board has 8x6 inner corners.
-BOARD_COLS = 8   # inner corners along the long axis
+# We intentionally use odd/even counts (9x6) to avoid 180-degree corner-order ambiguity
+# that can occur with even/even checkerboards.
+BOARD_COLS = 9   # inner corners along the long axis
 BOARD_ROWS = 6   # inner corners along the short axis
 BOARD_SIZE = (BOARD_COLS, BOARD_ROWS)
 
@@ -54,6 +56,15 @@ FRAME_STRIDE_DEFAULT = 5
 TARGET_CALIBRATION_SECONDS = 30.0
 ESTIMATED_MS_PER_FRAME = 35.0
 MAX_FRAME_STRIDE = 60
+INTRINSIC_OUTLIER_MULTIPLIER = 2.5
+MIN_INTRINSIC_INLIERS = 20
+MAX_CALIBRATION_VIEWS = 32
+DEBUG_FOUND_OVERLAYS_LIMIT = 20
+DEBUG_REJECTED_OVERLAYS_LIMIT = 20
+MIN_BOARD_AREA_RATIO = float(os.getenv("CALIBRATION_MIN_BOARD_AREA_RATIO", "0.0025"))
+MIN_NEIGHBOR_STEP_PX = 6.0
+MAX_STEP_ANISOTROPY = 3.0
+MAX_SCAN_FRAMES = int(os.getenv("CALIBRATION_MAX_SCAN_FRAMES", "100"))
 
 
 class IntrinsicResult(NamedTuple):
@@ -68,6 +79,23 @@ class CornerObservation(NamedTuple):
     frame_idx: int
     image_points: np.ndarray   # shape (N, 1, 2) float32
     image_size: tuple[int, int]
+
+
+def _view_reprojection_errors(
+    obj_points: list[np.ndarray],
+    img_points: list[np.ndarray],
+    rvecs: list[np.ndarray],
+    tvecs: list[np.ndarray],
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+) -> list[float]:
+    """Compute per-view RMS reprojection error in pixels."""
+    view_errors: list[float] = []
+    for objp, imgp, rvec, tvec in zip(obj_points, img_points, rvecs, tvecs):
+        projected, _ = cv2.projectPoints(objp, rvec, tvec, camera_matrix, dist_coeffs)
+        err = cv2.norm(imgp, projected, cv2.NORM_L2) / max(1, len(projected))
+        view_errors.append(float(err))
+    return view_errors
 
 
 def _object_points() -> np.ndarray:
@@ -88,7 +116,58 @@ def _sorted_frame_files(frames_dir: Path) -> list[Path]:
         + list(frames_dir.glob("*.jpg"))
         + list(frames_dir.glob("*.jpeg"))
     )
-    return sorted(candidates, key=lambda p: p.name)
+    files = sorted(candidates, key=lambda p: p.name)
+    if MAX_SCAN_FRAMES > 0:
+        files = files[:MAX_SCAN_FRAMES]
+    return files
+
+
+def _check_corner_sanity(
+    corners: np.ndarray,
+    image_size: tuple[int, int],
+) -> tuple[bool, str, float]:
+    """
+    Reject detections that are too small or geometrically implausible.
+    Returns (ok, reason, area_ratio).
+    """
+    w, h = image_size
+    pts = corners.reshape(-1, 2)
+    min_xy = pts.min(axis=0)
+    max_xy = pts.max(axis=0)
+    bbox_w = float(max_xy[0] - min_xy[0])
+    bbox_h = float(max_xy[1] - min_xy[1])
+    area_ratio = (bbox_w * bbox_h) / max(1.0, float(w * h))
+    if area_ratio < MIN_BOARD_AREA_RATIO:
+        return False, f"tiny board area ({area_ratio * 100.0:.2f}%)", area_ratio
+
+    grid = corners.reshape(BOARD_ROWS, BOARD_COLS, 2)
+    dx = np.linalg.norm(grid[:, 1:, :] - grid[:, :-1, :], axis=2).reshape(-1)
+    dy = np.linalg.norm(grid[1:, :, :] - grid[:-1, :, :], axis=2).reshape(-1)
+    med_dx = float(np.median(dx)) if dx.size else 0.0
+    med_dy = float(np.median(dy)) if dy.size else 0.0
+    if med_dx < MIN_NEIGHBOR_STEP_PX or med_dy < MIN_NEIGHBOR_STEP_PX:
+        return (
+            False,
+            f"corner spacing too small (dx={med_dx:.1f}px, dy={med_dy:.1f}px)",
+            area_ratio,
+        )
+    ratio = max(med_dx, med_dy) / max(1e-6, min(med_dx, med_dy))
+    if ratio > MAX_STEP_ANISOTROPY:
+        return (
+            False,
+            f"checker anisotropy too high (step ratio={ratio:.2f})",
+            area_ratio,
+        )
+    return True, "ok", area_ratio
+
+
+def _calibration_debug_dir(frames_dir: Path) -> Path:
+    """Map frames/.../camN to calibration/debug/camN."""
+    exp_dir = frames_dir.parent.parent
+    cam_name = frames_dir.name
+    out_dir = exp_dir / "calibration" / "debug" / cam_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
 
 
 def choose_frame_stride(
@@ -146,7 +225,13 @@ def detect_corners_in_dir(
     sampled = frame_files[::stride]
 
     found_count = 0
+    rejected_count = 0
+    found_frame_indices: list[int] = []
+    debug_dir = _calibration_debug_dir(frames_dir)
+    saved_found = 0
+    saved_rejected = 0
     for i, path in enumerate(sampled):
+        frame_idx = i * stride
         bgr = cv2.imread(str(path))
         if bgr is None:
             logger.debug("Could not read frame %s", path.name)
@@ -166,6 +251,7 @@ def detect_corners_in_dir(
                 | cv2.CALIB_CB_FAST_CHECK
             ),
         )
+        used_sb = False
         # Fallback for synthetic/low-texture cases where classic detector misses.
         if not found and hasattr(cv2, "findChessboardCornersSB"):
             found, corners = cv2.findChessboardCornersSB(
@@ -173,29 +259,96 @@ def detect_corners_in_dir(
                 BOARD_SIZE,
                 flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY,
             )
+            used_sb = found
 
         if not found:
             yield i, len(sampled), None
             continue
 
-        # Sub-pixel refinement for accuracy.
-        cv2.cornerSubPix(gray, corners, SUBPIX_WINDOW, SUBPIX_ZERO_ZONE, SUBPIX_CRITERIA)
+        sanity_ok, sanity_reason, area_ratio = _check_corner_sanity(corners, (w, h))
+        if not sanity_ok:
+            rejected_count += 1
+            if saved_rejected < DEBUG_REJECTED_OVERLAYS_LIMIT:
+                rejected_vis = bgr.copy()
+                cv2.drawChessboardCorners(rejected_vis, BOARD_SIZE, corners, True)
+                cv2.putText(
+                    rejected_vis,
+                    f"REJECTED: {sanity_reason}",
+                    (20, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.imwrite(
+                    str(debug_dir / f"rejected_frame_{frame_idx:06d}.jpg"),
+                    rejected_vis,
+                )
+                saved_rejected += 1
+            logger.info(
+                "Rejected checkerboard candidate in %s frame=%d: %s",
+                frames_dir,
+                frame_idx,
+                sanity_reason,
+            )
+            yield i, len(sampled), None
+            continue
+
+        # SB detector already returns sub-pixel corners; refining again can drift on
+        # small/blurred boards. Keep cornerSubPix only for classic detector results.
+        if not used_sb:
+            cv2.cornerSubPix(gray, corners, SUBPIX_WINDOW, SUBPIX_ZERO_ZONE, SUBPIX_CRITERIA)
         found_count += 1
+        found_frame_indices.append(frame_idx)
+        if saved_found < DEBUG_FOUND_OVERLAYS_LIMIT:
+            found_vis = bgr.copy()
+            cv2.drawChessboardCorners(found_vis, BOARD_SIZE, corners, True)
+            cv2.putText(
+                found_vis,
+                f"FOUND: area={area_ratio * 100.0:.2f}%",
+                (20, 36),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.imwrite(str(debug_dir / f"found_frame_{frame_idx:06d}.jpg"), found_vis)
+            saved_found += 1
 
         obs = CornerObservation(
-            frame_idx=i,
+            frame_idx=frame_idx,
             image_points=corners,
             image_size=(w, h),
         )
         yield i, len(sampled), obs
+    active_span_frames = 0
+    active_coverage_pct = 0.0
+    if found_frame_indices:
+        first_idx = min(found_frame_indices)
+        last_idx = max(found_frame_indices)
+        active_span_frames = (last_idx - first_idx) + 1
+        active_coverage_pct = 100.0 * found_count / max(1, active_span_frames)
+        logger.info(
+            "Corner active window for %s: first=%d last=%d span=%d found=%d (%.1f%% within active window)",
+            frames_dir,
+            first_idx,
+            last_idx,
+            active_span_frames,
+            found_count,
+            active_coverage_pct,
+        )
     logger.info(
-        "Corner detection summary for %s: sampled=%d stride=%d found=%d (%.1f%%)",
+        "Corner detection summary for %s: sampled=%d stride=%d found=%d rejected=%d (%.1f%%)",
         frames_dir,
         len(sampled),
         stride,
         found_count,
+        rejected_count,
         (100.0 * found_count / max(1, len(sampled))),
     )
+    logger.info("Saved calibration debug overlays to %s", debug_dir)
 
 
 def calibrate_camera_from_corners(
@@ -214,25 +367,70 @@ def calibrate_camera_from_corners(
         )
         return None
 
+    if len(observations) > MAX_CALIBRATION_VIEWS:
+        original_count = len(observations)
+        sample_idx = np.linspace(0, original_count - 1, MAX_CALIBRATION_VIEWS, dtype=int)
+        observations = [observations[int(i)] for i in sample_idx]
+        logger.info(
+            "Intrinsic view downsample: using %d/%d frames for solve",
+            len(observations),
+            original_count,
+        )
+
     objp = _object_points()
     obj_points = [objp for _ in observations]
     img_points = [obs.image_points for obs in observations]
     image_size = observations[0].image_size  # (w, h)
 
+    base_flags = cv2.CALIB_ZERO_TANGENT_DIST | cv2.CALIB_FIX_K3
+    init_K = cv2.initCameraMatrix2D(obj_points, img_points, image_size)
+    init_D = np.zeros((5, 1), dtype=np.float64)
     rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
         obj_points,
         img_points,
         image_size,
-        None,
-        None,
-        flags=cv2.CALIB_RATIONAL_MODEL,  # more accurate for wide-angle phone lenses
+        init_K,
+        init_D,
+        flags=base_flags | cv2.CALIB_USE_INTRINSIC_GUESS,
+        criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 1e-4),
     )
 
+    view_errors = _view_reprojection_errors(
+        obj_points, img_points, rvecs, tvecs, camera_matrix, dist_coeffs
+    )
+    median_err = float(np.median(view_errors)) if view_errors else float(rms)
+    outlier_cutoff = max(1.0, median_err * INTRINSIC_OUTLIER_MULTIPLIER)
+    inlier_idx = [i for i, e in enumerate(view_errors) if e <= outlier_cutoff]
+    if len(inlier_idx) >= MIN_INTRINSIC_INLIERS and len(inlier_idx) < len(observations):
+        inlier_obj = [obj_points[i] for i in inlier_idx]
+        inlier_img = [img_points[i] for i in inlier_idx]
+        logger.info(
+            "Intrinsic outlier rejection: kept=%d/%d views (cutoff=%.3fpx, median=%.3fpx)",
+            len(inlier_idx),
+            len(observations),
+            outlier_cutoff,
+            median_err,
+        )
+        rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
+            inlier_obj,
+            inlier_img,
+            image_size,
+            camera_matrix,
+            dist_coeffs,
+            flags=base_flags | cv2.CALIB_USE_INTRINSIC_GUESS,
+            criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 1e-4),
+        )
+        obj_points = inlier_obj
+
     logger.info(
-        "Intrinsic calibration complete: RMS=%.4fpx, frames=%d, image_size=%s",
+        "Intrinsic calibration complete: RMS=%.4fpx, frames=%d, image_size=%s, fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f",
         rms,
-        len(observations),
+        len(obj_points),
         image_size,
+        camera_matrix[0, 0],
+        camera_matrix[1, 1],
+        camera_matrix[0, 2],
+        camera_matrix[1, 2],
     )
 
     return IntrinsicResult(
