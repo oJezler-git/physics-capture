@@ -14,6 +14,11 @@ from blender.sync import create_sync_marker, get_sync_handler
 from blender.physics import bake_physics
 from blender.export import extract_and_write_data
 
+
+def _remove_if_exists(path):
+    if os.path.exists(path):
+        os.remove(path)
+
 class Config:
     RESOLUTION_X = 1920
     RESOLUTION_Y = 1080
@@ -33,6 +38,11 @@ def main():
     parser.add_argument('--debug-frame', type=int, default=1, help='Frame index for debug')
     parser.add_argument('--debug-sequence', action='store_true', help='Render snapshots every 20 frames')
     parser.add_argument('--experiment-id', type=str, default="synthetic-stereo-01", help='Experiment ID')
+    parser.add_argument(
+        '--blind-pipeline',
+        action='store_true',
+        help='Do not export helper artifacts (tracks/intrinsics/extrinsics/sync/scale); keep only GT for evaluation.',
+    )
     
     # Check if we are running from blender
     if "--" in sys.argv:
@@ -45,6 +55,21 @@ def main():
     config.EXP_DIR = os.path.join(os.getcwd(), "packages", "experiments", config.EXP_ID)
     os.makedirs(config.EXP_DIR, exist_ok=True)
     print(f"Directories created at: {config.EXP_DIR}")
+
+    if args.blind_pipeline:
+        # Ensure no previously generated helper artifacts leak into blind runs.
+        calib_dir = os.path.join(config.EXP_DIR, "calibration")
+        results_dir = os.path.join(config.EXP_DIR, "results")
+        for p in [
+            os.path.join(calib_dir, "cam0_intrinsics.json"),
+            os.path.join(calib_dir, "cam1_intrinsics.json"),
+            os.path.join(calib_dir, "stereo_extrinsics.json"),
+            os.path.join(results_dir, "tracks.json"),
+            os.path.join(results_dir, "sync.json"),
+            os.path.join(results_dir, "scale.json"),
+            os.path.join(results_dir, "positions_3d.json"),
+        ]:
+            _remove_if_exists(p)
 
     clear_scene()
     
@@ -65,7 +90,15 @@ def main():
     bake_physics(balls)
     
     # 5. Data Extraction
-    extract_and_write_data(config, cam0, cam1, balls)
+    # Blind mode keeps GT but withholds helper artifacts so the core pipeline
+    # must infer calibration/sync/tracks from rendered data.
+    extract_and_write_data(
+        config,
+        cam0,
+        cam1,
+        balls,
+        include_pipeline_assistance=not args.blind_pipeline,
+    )
     
     # 6. Render Path
     scene = bpy.context.scene

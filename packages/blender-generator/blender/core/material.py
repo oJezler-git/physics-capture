@@ -69,11 +69,35 @@ def create_checkerboard_material():
     
     bsdf = nodes["Principled BSDF"]
     bsdf.inputs['Roughness'].default_value = 1.0 # Fully matte
-    
-    checker = nodes.new("ShaderNodeTexChecker")
-    checker.inputs["Scale"].default_value = 10.0 # 10x10 pattern
-    checker.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
-    checker.inputs["Color2"].default_value = (0.0, 0.0, 0.0, 1.0)
-    
-    links.new(checker.outputs["Color"], bsdf.inputs["Base Color"])
+
+    # OpenCV calibrator expects 8x6 inner corners => 9x7 checker squares.
+    cols, rows = 9, 7
+    px_per_cell = 64
+    width, height = cols * px_per_cell, rows * px_per_cell
+    img = bpy.data.images.get("CalibrationBoard_9x7")
+    if img is None:
+      img = bpy.data.images.new("CalibrationBoard_9x7", width=width, height=height, alpha=False)
+      img.use_fake_user = True
+      pixels = []
+      for y in range(height):
+        cy = y // px_per_cell
+        for x in range(width):
+          cx = x // px_per_cell
+          white = 1.0 if (cx + cy) % 2 == 0 else 0.0
+          pixels.extend((white, white, white, 1.0))
+      img.pixels.foreach_set(pixels)
+      img.update()
+
+    tex = nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    tex.interpolation = 'Closest'
+
+    tex_coord = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    # Keep one clean board over the plane UV (no tiling).
+    mapping.inputs["Scale"].default_value = (1.0, 1.0, 1.0)
+
+    links.new(tex_coord.outputs["UV"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
+    links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     return mat

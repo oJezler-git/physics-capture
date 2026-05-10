@@ -16,8 +16,8 @@ def setup_compositor(scene):
     file_output.name = "MultiOutput"
     file_output.format.file_format = 'JPEG'
     file_output.format.quality = 95
-    # The node starts with one default slot. Just rename its prefix.
-    file_output.file_slots[0].path = "frame_"
+    # Keep numeric-only filenames (e.g. 000001.jpg) for downstream SAM2 loaders.
+    file_output.file_slots[0].path = ""
     
     tree.links.new(render_layers.outputs['Image'], file_output.inputs[0])
     

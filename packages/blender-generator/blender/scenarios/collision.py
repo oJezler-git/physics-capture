@@ -11,26 +11,32 @@ class CollisionScenario(BaseScenario):
         bpy.ops.mesh.primitive_plane_add(size=1.0)
         board = bpy.context.active_object
         board.name = "CalibrationBoard"
-        board.scale = (0.4, 0.3, 1.0) # Slightly smaller for better fit
+        # Match CV expectation exactly: 8x6 inner corners => 9x7 squares.
+        # Keep each square physically square (25 mm) so the board is not warped.
+        square_size_m = 0.025
+        board_width_m = 9 * square_size_m
+        board_height_m = 7 * square_size_m
+        board.scale = (board_width_m, board_height_m, 1.0)
         board.data.materials.append(mat_checker)
         
-        # Path: Spiraling from very close to cameras, staying within FOV
-        for f in range(1, 101, 4):
-            t = f / 100.0
-            # Move from very close (y=-0.1) to mid-field (y=1.2)
-            board.location.y = -0.1 + 1.3 * t
-            # Horizontal sweep (wider closer to camera)
-            board.location.x = 0.8 * math.sin(t * math.pi * 3) * (1 - 0.3 * t)
-            # Vertical sweep: stay between 0.15 (table) and 0.7 (top of FOV)
-            board.location.z = 0.25 + 0.2 * (1 - t) + 0.15 * math.cos(t * math.pi * 5)
-            
-            # Rotation (Zhang's method needs aggressive tilts)
-            board.rotation_euler.x = math.radians(90 + 25 * math.cos(t * math.pi * 4))
-            board.rotation_euler.y = math.radians(30 * math.sin(t * math.pi * 3))
-            board.rotation_euler.z = math.radians(15 * math.sin(t * math.pi * 2))
-            
-            board.keyframe_insert(data_path="location", frame=f)
-            board.keyframe_insert(data_path="rotation_euler", frame=f)
+        # Stable in-FOV calibration sweep (less extreme than previous spiral).
+        x_vals = [-0.22, 0.0, 0.22]
+        y_vals = [0.45, 0.75, 1.05]
+        z_vals = [0.18, 0.30, 0.42]
+        frame = 1
+        for y in y_vals:
+            for z in z_vals:
+                for x in x_vals:
+                    board.location.x = x
+                    board.location.y = y
+                    board.location.z = z
+                    # Moderate pose variation for Zhang calibration, while keeping visibility.
+                    board.rotation_euler.x = math.radians(90 + 12 * math.sin(frame * 0.2))
+                    board.rotation_euler.y = math.radians(10 * math.cos(frame * 0.15))
+                    board.rotation_euler.z = math.radians(8 * math.sin(frame * 0.1))
+                    board.keyframe_insert(data_path="location", frame=frame)
+                    board.keyframe_insert(data_path="rotation_euler", frame=frame)
+                    frame += 3
 
         # Move it out of the way after frame 100
         board.location.y = 10.0 

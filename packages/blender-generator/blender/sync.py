@@ -21,7 +21,7 @@ def create_sync_marker():
     # Tilted up like a tablet on a stand
     marker.location = (0.4, 1.2, 0.25)
     marker.rotation_euler = (math.radians(75), 0, math.radians(-15))
-    marker.scale = (0.2, 0.1, 1.0) 
+    marker.scale = (1.2, 0.6, 1.0)
     
     mat = bpy.data.materials.new("SyncMarkerMat")
     mat.use_nodes = True
