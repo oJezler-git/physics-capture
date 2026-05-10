@@ -87,12 +87,29 @@ def _find_simultaneous_corners(
 
         found0, corners0 = cv2.findChessboardCorners(
             gray0, BOARD_SIZE,
-            flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+            flags=(
+                cv2.CALIB_CB_ADAPTIVE_THRESH
+                | cv2.CALIB_CB_NORMALIZE_IMAGE
+                | cv2.CALIB_CB_FAST_CHECK
+            ),
         )
         found1, corners1 = cv2.findChessboardCorners(
             gray1, BOARD_SIZE,
-            flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+            flags=(
+                cv2.CALIB_CB_ADAPTIVE_THRESH
+                | cv2.CALIB_CB_NORMALIZE_IMAGE
+                | cv2.CALIB_CB_FAST_CHECK
+            ),
         )
+        if hasattr(cv2, "findChessboardCornersSB"):
+            if not found0:
+                found0, corners0 = cv2.findChessboardCornersSB(
+                    gray0, BOARD_SIZE, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
+                )
+            if not found1:
+                found1, corners1 = cv2.findChessboardCornersSB(
+                    gray1, BOARD_SIZE, flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
+                )
 
         if not (found0 and found1):
             continue  # Board not visible in both cameras in this frame.
@@ -147,6 +164,11 @@ def stereo_calibrate(
     logger.info("Scanning frames for simultaneous checkerboard observations...")
     obj_points, img_pts0, img_pts1, img_size0, img_size1 = (
         _find_simultaneous_corners(frames_dir0, frames_dir1)
+    )
+    logger.info(
+        "Stereo simultaneous corners: %d paired frames (min required=%d)",
+        len(obj_points),
+        MIN_STEREO_FRAMES,
     )
 
     if len(obj_points) < MIN_STEREO_FRAMES:

@@ -145,6 +145,7 @@ def detect_corners_in_dir(
 
     sampled = frame_files[::stride]
 
+    found_count = 0
     for i, path in enumerate(sampled):
         bgr = cv2.imread(str(path))
         if bgr is None:
@@ -159,8 +160,19 @@ def detect_corners_in_dir(
         found, corners = cv2.findChessboardCorners(
             gray,
             BOARD_SIZE,
-            flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE,
+            flags=(
+                cv2.CALIB_CB_ADAPTIVE_THRESH
+                | cv2.CALIB_CB_NORMALIZE_IMAGE
+                | cv2.CALIB_CB_FAST_CHECK
+            ),
         )
+        # Fallback for synthetic/low-texture cases where classic detector misses.
+        if not found and hasattr(cv2, "findChessboardCornersSB"):
+            found, corners = cv2.findChessboardCornersSB(
+                gray,
+                BOARD_SIZE,
+                flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY,
+            )
 
         if not found:
             yield i, len(sampled), None
@@ -168,6 +180,7 @@ def detect_corners_in_dir(
 
         # Sub-pixel refinement for accuracy.
         cv2.cornerSubPix(gray, corners, SUBPIX_WINDOW, SUBPIX_ZERO_ZONE, SUBPIX_CRITERIA)
+        found_count += 1
 
         obs = CornerObservation(
             frame_idx=i,
@@ -175,6 +188,14 @@ def detect_corners_in_dir(
             image_size=(w, h),
         )
         yield i, len(sampled), obs
+    logger.info(
+        "Corner detection summary for %s: sampled=%d stride=%d found=%d (%.1f%%)",
+        frames_dir,
+        len(sampled),
+        stride,
+        found_count,
+        (100.0 * found_count / max(1, len(sampled))),
+    )
 
 
 def calibrate_camera_from_corners(
