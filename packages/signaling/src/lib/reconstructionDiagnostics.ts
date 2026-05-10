@@ -276,28 +276,17 @@ const computeGtDepthFit = (
       gtByKey.set(`${frame.frame}:${ball.ball_id}`, ball.z_m);
     }
   }
-  let n = 0;
-  let sumX = 0;
-  let sumY = 0;
-  let sumXX = 0;
-  let sumXY = 0;
-  let sseRaw = 0;
-  const pairs: Array<{ z: number; zGt: number }> = [];
+  const pairsByBall = new Map<number, Array<{ z: number; zGt: number }>>();
   for (const frame of positions3d.frames) {
     for (const ball of frame.balls ?? []) {
       const zGt = gtByKey.get(`${frame.frame}:${ball.ball_id}`);
       if (zGt === undefined) continue;
-      const z = ball.z_m;
-      pairs.push({ z, zGt });
-      sumX += z;
-      sumY += zGt;
-      sumXX += z * z;
-      sumXY += z * zGt;
-      sseRaw += (z - zGt) * (z - zGt);
-      n += 1;
+      if (!pairsByBall.has(ball.ball_id)) pairsByBall.set(ball.ball_id, []);
+      pairsByBall.get(ball.ball_id)?.push({ z: ball.z_m, zGt });
     }
   }
-  if (n < 2) {
+  const allPairs = [...pairsByBall.values()].flat();
+  if (allPairs.length < 2) {
     return {
       scale: null,
       offsetM: null,
@@ -305,8 +294,31 @@ const computeGtDepthFit = (
       improvementPct: null,
     } as const;
   }
-  const denom = n * sumXX - sumX * sumX;
-  if (Math.abs(denom) < 1e-12) {
+
+  // Fit slope in a centered per-ball space to avoid inter-ball intercept bias
+  // collapsing the global slope toward zero.
+  let nCentered = 0;
+  let sumXXCentered = 0;
+  let sumXYCentered = 0;
+  const meanByBall = new Map<number, { zMean: number; zGtMean: number }>();
+  for (const [ballId, pairs] of pairsByBall.entries()) {
+    if (pairs.length < 2) continue;
+    const zMean = pairs.reduce((acc, p) => acc + p.z, 0) / pairs.length;
+    const zGtMean = pairs.reduce((acc, p) => acc + p.zGt, 0) / pairs.length;
+    meanByBall.set(ballId, { zMean, zGtMean });
+  }
+  for (const [ballId, pairs] of pairsByBall.entries()) {
+    const means = meanByBall.get(ballId);
+    if (!means) continue;
+    for (const pair of pairs) {
+      const x = pair.z - means.zMean;
+      const y = pair.zGt - means.zGtMean;
+      sumXXCentered += x * x;
+      sumXYCentered += x * y;
+      nCentered += 1;
+    }
+  }
+  if (nCentered < 2 || Math.abs(sumXXCentered) < 1e-12) {
     return {
       scale: null,
       offsetM: null,
@@ -314,17 +326,44 @@ const computeGtDepthFit = (
       improvementPct: null,
     } as const;
   }
-  const scale = (n * sumXY - sumX * sumY) / denom;
-  const offsetM = (sumY - scale * sumX) / n;
+  const scale = sumXYCentered / sumXXCentered;
+
+  // Offset computed on full data after slope is fixed.
+  const offsetM =
+    allPairs.reduce((acc, p) => acc + (p.zGt - scale * p.z), 0) /
+    allPairs.length;
+  const zMeanAll = allPairs.reduce((acc, p) => acc + p.z, 0) / allPairs.length;
+  const zGtMeanAll =
+    allPairs.reduce((acc, p) => acc + p.zGt, 0) / allPairs.length;
+  let cov = 0;
+  let varX = 0;
+  let varY = 0;
+  let sseRaw = 0;
   let sseFit = 0;
-  for (const pair of pairs) {
+  for (const pair of allPairs) {
+    const dx = pair.z - zMeanAll;
+    const dy = pair.zGt - zGtMeanAll;
+    cov += dx * dy;
+    varX += dx * dx;
+    varY += dy * dy;
+    sseRaw += (pair.z - pair.zGt) * (pair.z - pair.zGt);
     const zFit = scale * pair.z + offsetM;
     sseFit += (zFit - pair.zGt) * (zFit - pair.zGt);
   }
-  const rmseRaw = Math.sqrt(sseRaw / n);
-  const rmseZFitM = Math.sqrt(sseFit / n);
+  const rmseRaw = Math.sqrt(sseRaw / allPairs.length);
+  const rmseZFitM = Math.sqrt(sseFit / allPairs.length);
   const improvementPct =
     rmseRaw > 1e-12 ? Math.max(0, (1 - rmseZFitM / rmseRaw) * 100) : 0;
+  const corr = varX > 1e-12 && varY > 1e-12 ? cov / Math.sqrt(varX * varY) : 0;
+  // Reliability guard for pathological fits.
+  if (!Number.isFinite(scale) || Math.abs(corr) < 0.2) {
+    return {
+      scale: null,
+      offsetM: null,
+      rmseZFitM: null,
+      improvementPct: null,
+    } as const;
+  }
   return {
     scale,
     offsetM,

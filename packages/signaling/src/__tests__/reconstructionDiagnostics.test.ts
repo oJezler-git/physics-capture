@@ -278,4 +278,48 @@ describe("buildReconstructionDiagnostics", () => {
       diagnostics.checks.some((check) => check.id === "gt-depth-fit"),
     ).toBe(true);
   });
+
+  it("avoids degenerate near-zero depth scale in multi-ball pooled tracks", () => {
+    const frames = Array.from({ length: 30 }, (_, frame) => frame);
+    const diagnostics = buildReconstructionDiagnostics({
+      mode: "STEREO_3D",
+      stereoExtrinsics: { baseline_mm: 120, reprojection_error_px: 0 },
+      syncStatus: { isMock: false, rmsMs: 0.7 },
+      tracksData: { balls: [] },
+      positions3d: {
+        frames: frames.map((frame) => ({
+          frame,
+          balls: [
+            {
+              ball_id: 0,
+              x_m: 0.1,
+              y_m: 0.2,
+              z_m: 1.45 + frame * 0.0004,
+              flagged: false,
+            },
+            {
+              ball_id: 1,
+              x_m: 0.3,
+              y_m: 0.2,
+              z_m: 1.39 - frame * 0.00035,
+              flagged: false,
+            },
+          ],
+        })),
+      },
+      positions3dGt: {
+        frames: frames.map((frame) => ({
+          frame,
+          balls: [
+            { ball_id: 0, x_m: 0.1, y_m: 0.2, z_m: 1.48 + frame * 0.00039 },
+            { ball_id: 1, x_m: 0.3, y_m: 0.2, z_m: 1.42 - frame * 0.00034 },
+          ],
+        })),
+      },
+    });
+
+    expect(diagnostics.metrics.gtDepthFitScale).not.toBeNull();
+    expect(diagnostics.metrics.gtDepthFitScale!).toBeGreaterThan(0.8);
+    expect(diagnostics.metrics.gtDepthFitScale!).toBeLessThan(1.2);
+  });
 });
