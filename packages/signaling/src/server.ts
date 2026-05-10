@@ -628,7 +628,69 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
       "calibration",
       "stereo_extrinsics.json",
     );
+    const resultsDir = path.join(experimentDir, "results");
+    const syncPath = path.join(resultsDir, "sync.json");
+    const tracksPath = path.join(resultsDir, "tracks.json");
     const mode = existsSync(stereoPath) ? "STEREO_3D" : "SINGLE_CAMERA_PLANAR";
+
+    if (!existsSync(syncPath)) {
+      try {
+        await runSyncMarkerDecode(experimentId);
+      } catch (err) {
+        console.warn("[sync] On-demand Sync Marker decode failed:", err);
+      }
+    }
+
+    if (!existsSync(syncPath)) {
+      try {
+        const cam0Dir = path.join(experimentDir, "frames", "cam0");
+        const frameFiles = existsSync(cam0Dir)
+          ? (await fs.promises.readdir(cam0Dir)).filter((f) =>
+              /\.(jpg|jpeg|png)$/i.test(f),
+            )
+          : [];
+        const frameCount = Math.max(1, frameFiles.length);
+        const timestamps = Array.from(
+          { length: frameCount },
+          (_, i) => i * (1000 / 30),
+        );
+        const mockSync = {
+          schema_version: "1.0",
+          experiment_id: experimentId,
+          is_mock: true,
+          cameras: {
+            cam0: {
+              frame_count: frameCount,
+              true_fps: 30.0,
+              phase_offset_ms: 0.0,
+              fit_residual_rms_ms: 0.0,
+              timestamps_ms: timestamps,
+            },
+            cam1: {
+              frame_count: frameCount,
+              true_fps: 30.0,
+              phase_offset_ms: 0.0,
+              fit_residual_rms_ms: 0.0,
+              timestamps_ms: timestamps,
+            },
+          },
+        };
+        await fs.promises.mkdir(resultsDir, { recursive: true });
+        await fs.promises.writeFile(
+          syncPath,
+          JSON.stringify(mockSync, null, 2),
+        );
+      } catch (err) {
+        console.warn("[sync] Failed to create fallback sync.json:", err);
+      }
+    }
+
+    if (!existsSync(tracksPath)) {
+      return res.status(400).json({
+        error:
+          "Tracks file not found. In blind-pipeline mode, run tracking first (Debug -> SAM2 -> Run Track) before Physics.",
+      });
+    }
 
     const grpcResult = await computePhysics({
       experiment_id: experimentId,
@@ -650,12 +712,6 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     // Read sync metadata to communicate accuracy to the frontend
     let syncStatus = { isMock: true, trueFps: 30, rmsMs: 0 };
     try {
-      const syncPath = path.join(
-        EXPERIMENTS_DIR,
-        experimentId,
-        "results",
-        "sync.json",
-      );
       if (existsSync(syncPath)) {
         const syncData = JSON.parse(
           await fs.promises.readFile(syncPath, "utf-8"),
@@ -720,12 +776,6 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
 
     let tracksData: any = null;
     try {
-      const tracksPath = path.join(
-        EXPERIMENTS_DIR,
-        experimentId,
-        "results",
-        "tracks.json",
-      );
       if (existsSync(tracksPath)) {
         tracksData = JSON.parse(
           await fs.promises.readFile(tracksPath, "utf-8"),
@@ -1034,6 +1084,30 @@ app.post("/api/track", async (req, res) => {
     console.log(
       `[Track] Starting tracking for experiment=${experiment_id}, seed_count=${seeds.length}, range=${start_frame_idx ?? 0}-${end_frame_idx ?? "end"}`,
     );
+
+    // SAM2's JPG loader expects numeric stems (e.g. 000001.jpg).
+    // Normalize legacy blender names (frame_000001.jpg) in-place.
+    const normalizeFrameNames = async (cameraId: number) => {
+      const framesDir = path.join(
+        EXPERIMENTS_DIR,
+        experiment_id,
+        "frames",
+        `cam${cameraId}`,
+      );
+      if (!existsSync(framesDir)) return;
+      const files = await fs.promises.readdir(framesDir);
+      for (const file of files) {
+        const match = file.match(/^frame_(\d+)\.(jpg|jpeg|png)$/i);
+        if (!match) continue;
+        const nextName = `${match[1]}.${match[2].toLowerCase()}`;
+        const src = path.join(framesDir, file);
+        const dst = path.join(framesDir, nextName);
+        if (existsSync(dst)) continue;
+        await fs.promises.rename(src, dst);
+      }
+    };
+    await normalizeFrameNames(0);
+    await normalizeFrameNames(1);
 
     const trackMap = new Map<
       string,
