@@ -236,4 +236,46 @@ describe("buildReconstructionDiagnostics", () => {
     expect(diagnostics.metrics.reprojRmseCam0Px!).toBeLessThan(0.01);
     expect(diagnostics.metrics.reprojRmseCam1Px!).toBeLessThan(0.01);
   });
+
+  it("surfaces depth scale/offset bias via GT depth fit metric", () => {
+    const points = Array.from({ length: 20 }, (_, i) => ({
+      frame: i,
+      zGt: 1.0 + i * 0.01,
+    }));
+    const diagnostics = buildReconstructionDiagnostics({
+      mode: "STEREO_3D",
+      stereoExtrinsics: { baseline_mm: 120, reprojection_error_px: 0 },
+      syncStatus: { isMock: false, rmsMs: 0.7 },
+      tracksData: { balls: [] },
+      positions3d: {
+        frames: points.map((p) => ({
+          frame: p.frame,
+          balls: [
+            {
+              ball_id: 0,
+              x_m: 0.1,
+              y_m: 0.2,
+              z_m: (p.zGt - 0.02) / 0.97, // biased estimate
+              flagged: false,
+            },
+          ],
+        })),
+      },
+      positions3dGt: {
+        frames: points.map((p) => ({
+          frame: p.frame,
+          balls: [{ ball_id: 0, x_m: 0.1, y_m: 0.2, z_m: p.zGt }],
+        })),
+      },
+    });
+
+    expect(diagnostics.metrics.gtDepthFitScale).not.toBeNull();
+    expect(diagnostics.metrics.gtDepthFitOffsetM).not.toBeNull();
+    expect(diagnostics.metrics.gtDepthFitRmseZm).not.toBeNull();
+    expect(diagnostics.metrics.gtDepthFitImprovementPct).not.toBeNull();
+    expect(diagnostics.metrics.gtDepthFitImprovementPct!).toBeGreaterThan(95);
+    expect(
+      diagnostics.checks.some((check) => check.id === "gt-depth-fit"),
+    ).toBe(true);
+  });
 });

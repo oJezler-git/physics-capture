@@ -33,6 +33,10 @@ export interface ReconstructionDiagnostics {
     gtBiasZm: number | null;
     gtWorstFrame: number | null;
     gtWorstFrameErrorM: number | null;
+    gtDepthFitScale: number | null;
+    gtDepthFitOffsetM: number | null;
+    gtDepthFitRmseZm: number | null;
+    gtDepthFitImprovementPct: number | null;
     reprojRmseCam0Px: number | null;
     reprojRmseCam1Px: number | null;
     reprojWorstFrame: number | null;
@@ -251,6 +255,81 @@ const computeGtAxisMetrics = (
     biasZ: sumZ / n,
     worstFrame,
     worstFrameError: worstError >= 0 ? worstError : null,
+  } as const;
+};
+
+const computeGtDepthFit = (
+  positions3d: PositionsLike | null,
+  positions3dGt: PositionsLike | null,
+) => {
+  if (!positions3d?.frames?.length || !positions3dGt?.frames?.length) {
+    return {
+      scale: null,
+      offsetM: null,
+      rmseZFitM: null,
+      improvementPct: null,
+    } as const;
+  }
+  const gtByKey = new Map<string, number>();
+  for (const frame of positions3dGt.frames) {
+    for (const ball of frame.balls ?? []) {
+      gtByKey.set(`${frame.frame}:${ball.ball_id}`, ball.z_m);
+    }
+  }
+  let n = 0;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  let sseRaw = 0;
+  const pairs: Array<{ z: number; zGt: number }> = [];
+  for (const frame of positions3d.frames) {
+    for (const ball of frame.balls ?? []) {
+      const zGt = gtByKey.get(`${frame.frame}:${ball.ball_id}`);
+      if (zGt === undefined) continue;
+      const z = ball.z_m;
+      pairs.push({ z, zGt });
+      sumX += z;
+      sumY += zGt;
+      sumXX += z * z;
+      sumXY += z * zGt;
+      sseRaw += (z - zGt) * (z - zGt);
+      n += 1;
+    }
+  }
+  if (n < 2) {
+    return {
+      scale: null,
+      offsetM: null,
+      rmseZFitM: null,
+      improvementPct: null,
+    } as const;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (Math.abs(denom) < 1e-12) {
+    return {
+      scale: null,
+      offsetM: null,
+      rmseZFitM: null,
+      improvementPct: null,
+    } as const;
+  }
+  const scale = (n * sumXY - sumX * sumY) / denom;
+  const offsetM = (sumY - scale * sumX) / n;
+  let sseFit = 0;
+  for (const pair of pairs) {
+    const zFit = scale * pair.z + offsetM;
+    sseFit += (zFit - pair.zGt) * (zFit - pair.zGt);
+  }
+  const rmseRaw = Math.sqrt(sseRaw / n);
+  const rmseZFitM = Math.sqrt(sseFit / n);
+  const improvementPct =
+    rmseRaw > 1e-12 ? Math.max(0, (1 - rmseZFitM / rmseRaw) * 100) : 0;
+  return {
+    scale,
+    offsetM,
+    rmseZFitM,
+    improvementPct,
   } as const;
 };
 
@@ -485,6 +564,7 @@ export const buildReconstructionDiagnostics = ({
   const maxLineDeviationM = computeMaxLineDeviation(positions3d);
   const gtRmseM = computeGtRmse(positions3d, positions3dGt);
   const gtAxis = computeGtAxisMetrics(positions3d, positions3dGt);
+  const gtDepthFit = computeGtDepthFit(positions3d, positions3dGt);
   const intrinsicsByCamera = new Map<number, CameraIntrinsicsLike>();
   for (const i of intrinsics ?? []) {
     const id = toFiniteNumber(i?.camera_id);
@@ -763,6 +843,23 @@ export const buildReconstructionDiagnostics = ({
       value: `x:${formatM(gtAxis.rmseX)} y:${formatM(gtAxis.rmseY)} z:${formatM(gtAxis.rmseZ)}`,
     });
   }
+  if (
+    gtDepthFit.scale !== null &&
+    gtDepthFit.offsetM !== null &&
+    gtDepthFit.rmseZFitM !== null &&
+    gtDepthFit.improvementPct !== null
+  ) {
+    checks.push({
+      id: "gt-depth-fit",
+      label: "GT depth bias fit (z' = a*z + b)",
+      status: gtDepthFit.improvementPct > 20 ? "warn" : "pass",
+      value: `a:${gtDepthFit.scale.toFixed(4)} b:${formatM(gtDepthFit.offsetM)} rmse_z:${formatM(gtDepthFit.rmseZFitM)} (${gtDepthFit.improvementPct.toFixed(1)}%)`,
+      details:
+        gtDepthFit.improvementPct > 20
+          ? "Large post-fit improvement suggests systematic depth scale/offset bias."
+          : undefined,
+    });
+  }
 
   if (reproj.rmseCam0 !== null && reproj.rmseCam1 !== null) {
     const maxReproj = Math.max(reproj.rmseCam0, reproj.rmseCam1);
@@ -816,6 +913,10 @@ export const buildReconstructionDiagnostics = ({
       gtBiasZm: gtAxis.biasZ,
       gtWorstFrame: gtAxis.worstFrame,
       gtWorstFrameErrorM: gtAxis.worstFrameError,
+      gtDepthFitScale: gtDepthFit.scale,
+      gtDepthFitOffsetM: gtDepthFit.offsetM,
+      gtDepthFitRmseZm: gtDepthFit.rmseZFitM,
+      gtDepthFitImprovementPct: gtDepthFit.improvementPct,
       reprojRmseCam0Px: reproj.rmseCam0,
       reprojRmseCam1Px: reproj.rmseCam1,
       reprojWorstFrame: reproj.worstFrame,
