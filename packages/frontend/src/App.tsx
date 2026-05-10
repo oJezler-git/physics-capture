@@ -3,7 +3,6 @@ import type { ReactElement } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { wsClient } from './lib/wsClient';
 import { peerManager } from './lib/webrtc';
-import { ToastViewport } from './components/ToastViewport';
 import { SetupPage } from './pages/SetupPage';
 import { CalibrationPage } from './pages/CalibrationPage';
 import { RecordingPage } from './pages/RecordingPage';
@@ -50,7 +49,6 @@ function AppChrome() {
   const location = useLocation();
   const isPhoneRoute = location.pathname === '/phone';
 
-  const [isWsConnected, setIsWsConnected] = useState(wsClient.connected);
   const [shouldShowOffline, setShouldShowOffline] = useState(false);
 
   useEffect(() => {
@@ -58,7 +56,6 @@ function AppChrome() {
 
     const interval = setInterval(() => {
       const connected = wsClient.connected;
-      setIsWsConnected(connected);
 
       if (!connected) {
         if (!timeoutId) {

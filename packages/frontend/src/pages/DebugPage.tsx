@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useResultsStore } from '../stores/resultsStore';
 import { useTrackingStore } from '../stores/trackingStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useCalibrationStore } from '../stores/calibrationStore';
 import { ExperimentSidebar } from '../components/debug/ExperimentSidebar';
 import { AnalysisSidebar } from '../components/debug/AnalysisSidebar';
 import { DebugMainView } from '../components/debug/DebugMainView';
 import { buildFallbackDiagnostics } from '../lib/diagnostics';
 import type { PhysicsResult } from '../types';
 
-type DebugMode = 'sam2' | 'sync' | '3d';
+type DebugMode = 'sam2' | 'sync' | '3d' | 'calib';
 type SidebarTab = 'quick' | 'analysis';
 
 const DEFAULT_MASS_G = 50;
@@ -29,6 +30,8 @@ export const DebugPage = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [seedMode, setSeedMode] = useState<'click' | 'bbox'>('click');
   const [physicsError, setPhysicsError] = useState<string | null>(null);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isEndToEndRunning, setIsEndToEndRunning] = useState(false);
 
   const {
     seeds,
@@ -57,6 +60,7 @@ export const DebugPage = () => {
   } = useResultsStore();
 
   const { ballConfigs } = useSessionStore();
+  const { startCalibration, onCalibrationComplete, onCalibrationFailed } = useCalibrationStore();
 
   const fetchExperiments = useCallback(async () => {
     try {
@@ -130,7 +134,7 @@ export const DebugPage = () => {
   const frameSrc =
     selectedExp && frameFile ? `/api/experiments/${selectedExp}/frames/0/${frameFile}` : null;
   const maxBalls = ballConfigs.filter((c) => c.mass_g > 0).length || 2;
-  const isFrameMissing = selectedExp && !frameFile;
+  const isFrameMissing = Boolean(selectedExp && !frameFile);
   const actualFileCount = frameMap.filter(Boolean).length;
   const hasFrameMismatch = frameCount > 0 && actualFileCount > 0 && actualFileCount !== frameCount;
 
@@ -155,6 +159,43 @@ export const DebugPage = () => {
 
   const diagnostics = useMemo(() => buildFallbackDiagnostics(physicsResult), [physicsResult]);
 
+  const handleRunCalibration = async () => {
+    if (!selectedExp) return;
+    setIsCalibrating(true);
+    setPhysicsError(null);
+    startCalibration();
+    try {
+      const response = await fetch('/api/calibrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          experimentId: selectedExp,
+          cameraIds: [0, 1],
+          clientId: 'pc',
+        }),
+      });
+      if (!response.ok) {
+        let errorMessage = `Calibration failed (${response.status})`;
+        try {
+          const payload = await response.json();
+          if (payload.error) errorMessage = payload.error;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(errorMessage);
+      }
+      const result = await response.json();
+      onCalibrationComplete(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to calibrate experiment';
+      setPhysicsError(message);
+      onCalibrationFailed(message);
+      throw error;
+    } finally {
+      setIsCalibrating(false);
+    }
+  };
+
   const handleRunTrack = async () => {
     if (!selectedExp || seeds.length === 0) return;
     resetPhysics();
@@ -174,7 +215,6 @@ export const DebugPage = () => {
       if (!response.ok) throw new Error('Tracking failed');
       const data = await response.json();
       onTrackingComplete(data.tracks.map((t: any) => ({ ...t, cameraId: '0' })));
-      await handleRunPhysics();
     } catch (err) {
       console.error(err);
       setStatus('idle');
@@ -212,6 +252,21 @@ export const DebugPage = () => {
     }
   };
 
+  const handleRunEndToEnd = async () => {
+    if (!selectedExp || seeds.length === 0) return;
+    setIsEndToEndRunning(true);
+    setPhysicsError(null);
+    try {
+      await handleRunCalibration();
+      await handleRunTrack();
+      await handleRunPhysics();
+      setMode('3d');
+      setSidebarTab('analysis');
+    } finally {
+      setIsEndToEndRunning(false);
+    }
+  };
+
   return (
     <div className="flex min-h-[100dvh] w-full overflow-hidden bg-[var(--bg-base)] text-slate-100">
       <div
@@ -226,7 +281,7 @@ export const DebugPage = () => {
               </h1>
 
               <div className="flex gap-2">
-                {(['sam2', 'sync', '3d'] as const).map((m) => (
+                {(['sam2', 'sync', 'calib', '3d'] as const).map((m) => (
                   <button
                     key={m}
                     onClick={() => setMode(m)}
@@ -321,10 +376,14 @@ export const DebugPage = () => {
                   resetPhysics();
                   setPhysicsError(null);
                 }}
+                onRunCalibration={handleRunCalibration}
                 onRunTrack={handleRunTrack}
                 onRunPhysics={handleRunPhysics}
+                onRunEndToEnd={handleRunEndToEnd}
                 status={status}
                 physicsStatus={physicsStatus}
+                isCalibrating={isCalibrating}
+                isEndToEndRunning={isEndToEndRunning}
                 hasSeeds={seeds.length > 0}
               />
             ) : (

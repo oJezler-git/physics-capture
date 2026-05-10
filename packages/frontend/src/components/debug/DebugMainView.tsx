@@ -2,10 +2,11 @@ import { BallSeedPicker, type SeedMode } from '../BallSeedPicker';
 import { TrajectoryCanvas } from '../TrajectoryCanvas';
 import { SyncDebugView } from '../SyncDebugView';
 import { ThreeDScene } from '../ThreeDScene';
+import { CalibrationDebugView } from '../CalibrationDebugView';
 import type { Reconstruction3D, PhysicsResult } from '../../types';
 
 interface DebugMainViewProps {
-  mode: 'sam2' | 'sync' | '3d';
+  mode: 'sam2' | 'sync' | '3d' | 'calib';
   dims: { width: number; height: number };
   onDimsChange: (dims: { width: number; height: number }) => void;
   frameSrc: string | null;
@@ -20,7 +21,7 @@ interface DebugMainViewProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   seeds: any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onAddSeed: (seed: any) => void;
+  onAddSeed: (seed: any) => boolean;
   seedMode: SeedMode;
   physicsResult: PhysicsResult | null;
   frameFile: string | null;
@@ -117,6 +118,16 @@ export const DebugMainView = ({
 
   if (mode === 'sync') {
     return <SyncDebugView experimentId={selectedExp} currentFrame={safeFrame} />;
+  }
+
+  if (mode === 'calib') {
+    return (
+      <CalibrationDebugView
+        experimentId={selectedExp}
+        frameSrc={frameSrc}
+        currentFrame={safeFrame}
+      />
+    );
   }
 
   if (mode === '3d') {

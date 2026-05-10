@@ -8,10 +8,14 @@ interface ExperimentSidebarProps {
   selectedModel: string;
   onModelChange: (model: string) => void;
   onClear: () => void;
+  onRunCalibration: () => void;
   onRunTrack: () => void;
   onRunPhysics: () => void;
+  onRunEndToEnd: () => void;
   status: string;
   physicsStatus: string;
+  isCalibrating: boolean;
+  isEndToEndRunning: boolean;
   hasSeeds: boolean;
 }
 
@@ -23,10 +27,14 @@ export const ExperimentSidebar = ({
   selectedModel,
   onModelChange,
   onClear,
+  onRunCalibration,
   onRunTrack,
   onRunPhysics,
+  onRunEndToEnd,
   status,
   physicsStatus,
+  isCalibrating,
+  isEndToEndRunning,
   hasSeeds,
 }: ExperimentSidebarProps) => {
   return (
@@ -86,20 +94,38 @@ export const ExperimentSidebar = ({
             Clear
           </Button>
           <Button
-            variant="main"
-            onClick={onRunTrack}
-            disabled={status === 'tracking' || !selectedExp || !hasSeeds}
+            variant="alt"
+            onClick={onRunCalibration}
+            disabled={isCalibrating || !selectedExp || isEndToEndRunning}
             className="py-2.5 text-[10px]"
           >
-            {status === 'tracking' ? 'Processing...' : 'Run SAM2 + Physics'}
+            {isCalibrating ? 'Calibrating...' : 'Run Calibration'}
+          </Button>
+          <Button
+            variant="main"
+            onClick={onRunTrack}
+            disabled={status === 'tracking' || !selectedExp || !hasSeeds || isEndToEndRunning}
+            className="py-2.5 text-[10px]"
+          >
+            {status === 'tracking' ? 'Tracking...' : 'Run Track'}
           </Button>
           <Button
             variant="alt"
             onClick={onRunPhysics}
-            disabled={physicsStatus === 'computing' || !selectedExp}
+            disabled={physicsStatus === 'computing' || !selectedExp || isEndToEndRunning}
             className="py-2.5 text-[10px]"
           >
-            {physicsStatus === 'computing' ? 'Testing Physics...' : 'Run Physics'}
+            {physicsStatus === 'computing' ? 'Running Physics...' : 'Run Physics'}
+          </Button>
+          <Button
+            variant="main"
+            onClick={onRunEndToEnd}
+            disabled={!selectedExp || !hasSeeds || isEndToEndRunning}
+            className="col-span-2 py-2.5 text-[10px]"
+          >
+            {isEndToEndRunning
+              ? 'Running End-to-End...'
+              : 'Run End-to-End (Calib > Track > Physics)'}
           </Button>
         </div>
       </div>
