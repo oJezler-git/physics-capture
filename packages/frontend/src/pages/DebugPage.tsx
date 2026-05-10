@@ -32,6 +32,8 @@ export const DebugPage = () => {
   const [physicsError, setPhysicsError] = useState<string | null>(null);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [isEndToEndRunning, setIsEndToEndRunning] = useState(false);
+  const [debugCameraId, setDebugCameraId] = useState<'0' | '1'>('0');
+  const [isSplitView, setIsSplitView] = useState(true);
 
   const {
     seeds,
@@ -132,7 +134,9 @@ export const DebugPage = () => {
   const safeFrame = isNaN(currentFrame) ? 0 : currentFrame;
   const frameFile = frameMap[safeFrame];
   const frameSrc =
-    selectedExp && frameFile ? `/api/experiments/${selectedExp}/frames/0/${frameFile}` : null;
+    selectedExp && frameFile
+      ? `/api/experiments/${selectedExp}/frames/${debugCameraId}/${frameFile}`
+      : null;
   const maxBalls = ballConfigs.filter((c) => c.mass_g > 0).length || 2;
   const isFrameMissing = Boolean(selectedExp && !frameFile);
   const actualFileCount = frameMap.filter(Boolean).length;
@@ -158,6 +162,17 @@ export const DebugPage = () => {
           }));
 
   const diagnostics = useMemo(() => buildFallbackDiagnostics(physicsResult), [physicsResult]);
+  const hasStereoSeedOverlap = useMemo(
+    () =>
+      seeds.some(
+        (cam0Seed) =>
+          String(cam0Seed.cameraId) === '0' &&
+          seeds.some(
+            (cam1Seed) => String(cam1Seed.cameraId) === '1' && cam1Seed.ballId === cam0Seed.ballId,
+          ),
+      ),
+    [seeds],
+  );
 
   const handleRunCalibration = async () => {
     if (!selectedExp) return;
@@ -202,22 +217,41 @@ export const DebugPage = () => {
     setPhysicsError(null);
     setStatus('tracking');
     try {
+      const requestSeeds = seeds.map((seed) => ({
+        ball_id: seed.ballId,
+        camera_id: Number.parseInt(String(seed.cameraId), 10),
+        frame_idx: seed.frameIdx,
+        x: seed.x,
+        y: seed.y,
+      }));
+
       const response = await fetch('/api/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           experiment_id: selectedExp,
-          seeds: seeds.map((s) => ({ ...s, ball_id: s.ballId, camera_id: 0 })),
+          seeds: requestSeeds,
           model_id: selectedModel,
           clientId: 'pc',
         }),
       });
-      if (!response.ok) throw new Error('Tracking failed');
+      if (!response.ok) {
+        let errorMessage = `Tracking failed (${response.status})`;
+        try {
+          const payload = await response.json();
+          if (payload.error) errorMessage = payload.error;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(errorMessage);
+      }
       const data = await response.json();
-      onTrackingComplete(data.tracks.map((t: any) => ({ ...t, cameraId: '0' })));
+      onTrackingComplete(data.tracks.map((t: any) => ({ ...t, cameraId: String(t.cameraId) })));
     } catch (err) {
       console.error(err);
+      setPhysicsError(err instanceof Error ? err.message : 'Tracking failed');
       setStatus('idle');
+      throw err;
     }
   };
 
@@ -295,6 +329,38 @@ export const DebugPage = () => {
                   </button>
                 ))}
               </div>
+
+              {mode === 'sam2' && (
+                <div className="ml-2 flex gap-2">
+                  <div className="flex rounded-full border border-[var(--line)] bg-[var(--bg-panel)] p-1">
+                    {(['0', '1'] as const).map((cameraId) => (
+                      <button
+                        key={`debug-camera-${cameraId}`}
+                        type="button"
+                        onClick={() => setDebugCameraId(cameraId)}
+                        className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition ${
+                          debugCameraId === cameraId && !isSplitView
+                            ? 'bg-[var(--accent)] text-zinc-950'
+                            : 'text-slate-500 hover:text-slate-200'
+                        }`}
+                      >
+                        Cam {cameraId}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setIsSplitView(!isSplitView)}
+                    className={`rounded-full border px-4 py-1 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                      isSplitView
+                        ? 'bg-[var(--accent)] text-zinc-950 border-[var(--accent)]'
+                        : 'bg-[var(--bg-panel)] border-[var(--line)] text-slate-500 hover:text-slate-200'
+                    }`}
+                  >
+                    {isSplitView ? 'Dual View' : 'Single View'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
@@ -313,12 +379,14 @@ export const DebugPage = () => {
           <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden">
             <DebugMainView
               mode={mode}
+              isSplitView={isSplitView}
               dims={dims}
               onDimsChange={setDims}
               frameSrc={frameSrc}
               onFrameImageStateChange={setFrameImageState}
               frameImageState={frameImageState}
               selectedExp={selectedExp}
+              cameraId={debugCameraId}
               isFrameMissing={isFrameMissing}
               safeFrame={safeFrame}
               tracks={tracks}
@@ -385,6 +453,7 @@ export const DebugPage = () => {
                 isCalibrating={isCalibrating}
                 isEndToEndRunning={isEndToEndRunning}
                 hasSeeds={seeds.length > 0}
+                hasStereoSeedOverlap={hasStereoSeedOverlap}
               />
             ) : (
               <AnalysisSidebar
@@ -397,8 +466,15 @@ export const DebugPage = () => {
                 onSpeedChange={setPlaybackSpeed}
                 seedMode={seedMode}
                 onSeedModeChange={setSeedMode}
-                seedsCount={seeds.filter((s) => s.frameIdx === safeFrame).length}
-                maxBalls={maxBalls}
+                seedsCount={
+                  isSplitView
+                    ? seeds.filter((s) => s.frameIdx === safeFrame).length
+                    : seeds.filter((s) => s.cameraId === debugCameraId && s.frameIdx === safeFrame)
+                        .length
+                }
+                activeCameraId={isSplitView ? 'Dual' : debugCameraId}
+                hasStereoSeedOverlap={hasStereoSeedOverlap}
+                maxBalls={isSplitView ? maxBalls * 2 : maxBalls}
                 dims={dims}
                 status={status}
                 progress={progress}

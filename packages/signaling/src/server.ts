@@ -1277,7 +1277,7 @@ app.post("/api/track", async (req, res) => {
     }
 
     const tracks = [...trackMap.values()]
-      .sort((a, b) => a.ballId - b.ballId)
+      .sort((a, b) => a.cameraId - b.cameraId || a.ballId - b.ballId)
       .map((track) => ({
         ...track,
         points: track.points.sort((a, b) => a.frameIdx - b.frameIdx),
@@ -1318,24 +1318,39 @@ app.post("/api/track", async (req, res) => {
         { length: maxFrame + 1 },
         (_, i) => i * (1000 / 30),
       );
+      const trackedCameraIds = [
+        ...new Set(tracks.map((track) => track.cameraId)),
+      ].sort((a, b) => a - b);
+      const syncCameras = trackedCameraIds.length > 0 ? trackedCameraIds : [0];
       const syncData = {
         schema_version: "1.0",
         experiment_id: experiment_id,
         is_mock: true,
-        cameras: {
-          cam0: {
-            frame_count: maxFrame + 1,
-            true_fps: 30.0,
-            phase_offset_ms: 0.0,
-            timestamps_ms: timestamps,
-          },
-        },
+        cameras: Object.fromEntries(
+          syncCameras.map((cameraId) => [
+            `cam${cameraId}`,
+            {
+              frame_count: maxFrame + 1,
+              true_fps: 30.0,
+              phase_offset_ms: 0.0,
+              timestamps_ms: timestamps,
+            },
+          ]),
+        ),
       };
       await fs.promises.writeFile(syncPath, JSON.stringify(syncData, null, 2));
     }
 
+    const tracksByCamera = tracks.reduce<Record<string, number>>(
+      (acc, track) => {
+        const key = `cam${track.cameraId}`;
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      },
+      {},
+    );
     console.log(
-      `[Track] Completed tracking for experiment=${experiment_id}, statuses=${statusCount}, tracks=${tracks.length}`,
+      `[Track] Completed tracking for experiment=${experiment_id}, statuses=${statusCount}, tracks=${tracks.length}, cameras=${JSON.stringify(tracksByCamera)}`,
     );
 
     res.json({

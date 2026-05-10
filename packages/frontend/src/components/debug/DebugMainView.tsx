@@ -7,12 +7,14 @@ import type { Reconstruction3D, PhysicsResult } from '../../types';
 
 interface DebugMainViewProps {
   mode: 'sam2' | 'sync' | '3d' | 'calib';
+  isSplitView?: boolean;
   dims: { width: number; height: number };
   onDimsChange: (dims: { width: number; height: number }) => void;
   frameSrc: string | null;
   onFrameImageStateChange: (state: 'idle' | 'loading' | 'ready' | 'error') => void;
   frameImageState: 'idle' | 'loading' | 'ready' | 'error';
   selectedExp: string;
+  cameraId: string;
   isFrameMissing: boolean;
   safeFrame: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,12 +33,14 @@ interface DebugMainViewProps {
 
 export const DebugMainView = ({
   mode,
+  isSplitView = false,
   dims,
   onDimsChange,
   frameSrc,
   onFrameImageStateChange,
   frameImageState,
   selectedExp,
+  cameraId,
   isFrameMissing,
   safeFrame,
   tracks,
@@ -49,27 +53,32 @@ export const DebugMainView = ({
   diagnostics,
 }: DebugMainViewProps) => {
   if (mode === 'sam2') {
-    return (
+    const renderPanel = (cid: string, src: string | null) => (
       <div
-        className="relative bg-black shadow-2xl overflow-hidden"
+        className="relative bg-black shadow-2xl overflow-hidden flex-1 border border-[var(--line)]"
         style={{
           aspectRatio: `${dims.width} / ${dims.height}`,
           maxHeight: '100%',
-          maxWidth: '100%',
         }}
       >
-        {frameSrc && (
+        {src && (
           <img
-            src={frameSrc}
+            src={src}
             className="h-full w-full object-contain block"
             onLoad={(e) => {
-              onDimsChange({
-                width: e.currentTarget.naturalWidth,
-                height: e.currentTarget.naturalHeight,
-              });
-              onFrameImageStateChange('ready');
+              if (cid === cameraId || isSplitView) {
+                onDimsChange({
+                  width: e.currentTarget.naturalWidth,
+                  height: e.currentTarget.naturalHeight,
+                });
+                onFrameImageStateChange('ready');
+              }
             }}
-            onError={() => onFrameImageStateChange('error')}
+            onError={() => {
+              if (cid === cameraId || isSplitView) {
+                onFrameImageStateChange('error');
+              }
+            }}
           />
         )}
         {!selectedExp && (
@@ -77,7 +86,7 @@ export const DebugMainView = ({
             -- No Experiment Selected --
           </div>
         )}
-        {frameImageState === 'error' && (
+        {frameImageState === 'error' && (cid === cameraId || isSplitView) && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-rose-500 font-bold uppercase tracking-tighter">
             [ ERROR: FRAME NOT FOUND ]
           </div>
@@ -98,11 +107,11 @@ export const DebugMainView = ({
           height={dims.height}
           tracks={tracks}
           currentFrame={safeFrame}
-          cameraId="0"
+          cameraId={cid}
         />
 
         <BallSeedPicker
-          cameraId="0"
+          cameraId={cid}
           currentFrame={safeFrame}
           seedFrameIdx={safeFrame}
           maxBalls={maxBalls}
@@ -112,6 +121,37 @@ export const DebugMainView = ({
           onAddSeed={onAddSeed}
           mode={seedMode}
         />
+
+        <div className="absolute top-4 left-4 z-50 rounded-md bg-black/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--accent)] backdrop-blur-md border border-[var(--accent)]/30">
+          Cam {cid}
+        </div>
+      </div>
+    );
+
+    if (isSplitView) {
+      const src0 =
+        selectedExp && frameFile ? `/api/experiments/${selectedExp}/frames/0/${frameFile}` : null;
+      const src1 =
+        selectedExp && frameFile ? `/api/experiments/${selectedExp}/frames/1/${frameFile}` : null;
+
+      return (
+        <div className="flex h-full w-full gap-4 p-4 overflow-hidden">
+          {renderPanel('0', src0)}
+          {renderPanel('1', src1)}
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className="relative bg-black shadow-2xl overflow-hidden"
+        style={{
+          aspectRatio: `${dims.width} / ${dims.height}`,
+          maxHeight: '100%',
+          maxWidth: '100%',
+        }}
+      >
+        {renderPanel(cameraId, frameSrc)}
       </div>
     );
   }

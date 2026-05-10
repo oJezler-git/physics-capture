@@ -17,6 +17,7 @@ interface ExperimentSidebarProps {
   isCalibrating: boolean;
   isEndToEndRunning: boolean;
   hasSeeds: boolean;
+  hasStereoSeedOverlap: boolean;
 }
 
 export const ExperimentSidebar = ({
@@ -36,6 +37,7 @@ export const ExperimentSidebar = ({
   isCalibrating,
   isEndToEndRunning,
   hasSeeds,
+  hasStereoSeedOverlap,
 }: ExperimentSidebarProps) => {
   return (
     <section className="space-y-6">
@@ -128,6 +130,12 @@ export const ExperimentSidebar = ({
               : 'Run End-to-End (Calib > Track > Physics)'}
           </Button>
         </div>
+        {hasSeeds && !hasStereoSeedOverlap && (
+          <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-[10px] font-medium leading-relaxed text-amber-200">
+            Stereo physics needs at least one matching ball ID on both cameras. Switch cameras and
+            place the same ball seed before running the full stereo pipeline.
+          </p>
+        )}
       </div>
     </section>
   );

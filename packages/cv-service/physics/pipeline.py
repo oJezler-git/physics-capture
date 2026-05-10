@@ -46,7 +46,12 @@ def run_physics_pipeline(
         cam1_by_ball = {track.ball_id: track for track in tracks_by_camera.get("cam1", [])}
         common_ball_ids = sorted(set(cam0_by_ball.keys()) & set(cam1_by_ball.keys()))
         if not common_ball_ids:
-            raise ValueError("No overlapping ball IDs across cam0/cam1 for stereo mode.")
+            raise ValueError(
+                "No overlapping ball IDs across cam0/cam1 for stereo mode. "
+                f"cam0_ball_ids={sorted(cam0_by_ball.keys())}, "
+                f"cam1_ball_ids={sorted(cam1_by_ball.keys())}. "
+                "Run stereo tracking with matching ball IDs seeded on both cameras."
+            )
         tri_tracks = []
         metric_tracks = []
         for ball_id in common_ball_ids:

@@ -14,6 +14,8 @@ interface AnalysisSidebarProps {
   seedMode: 'click' | 'bbox';
   onSeedModeChange: (mode: 'click' | 'bbox') => void;
   seedsCount: number;
+  activeCameraId: string;
+  hasStereoSeedOverlap: boolean;
   maxBalls: number;
   dims: { width: number; height: number };
   status: string;
@@ -34,6 +36,8 @@ export const AnalysisSidebar = ({
   seedMode,
   onSeedModeChange,
   seedsCount,
+  activeCameraId,
+  hasStereoSeedOverlap,
   maxBalls,
   dims,
   status,
@@ -90,12 +94,17 @@ export const AnalysisSidebar = ({
           <div className="rounded-[2rem] border border-[var(--line)] bg-[var(--bg-panel)] p-5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                Seeds Placed
+                Cam {activeCameraId} Seeds
               </span>
               <span className="rounded-md bg-[var(--accent)]/10 border border-[var(--accent)]/50 px-2.5 py-1 font-mono text-[11px] text-[var(--accent)] font-medium">
                 {seedsCount} / {maxBalls}
               </span>
             </div>
+            {!hasStereoSeedOverlap && (
+              <p className="mt-4 text-[10px] font-medium leading-relaxed text-amber-300/90">
+                Stereo tracking is waiting for a matching ball ID on both cameras.
+              </p>
+            )}
           </div>
         </div>
       </section>
