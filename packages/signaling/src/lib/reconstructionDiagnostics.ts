@@ -302,32 +302,70 @@ const computeReprojectionMetrics = (
   let sse1 = 0;
   let worstFrame: number | null = null;
   let worstErr = -1;
-  for (const frame of positions3d.frames) {
-    for (const ball of frame.balls ?? []) {
-      const p0 = projectPoint(P0, ball.x_m, ball.y_m, ball.z_m);
-      const p1 = projectPoint(P1, ball.x_m, ball.y_m, ball.z_m);
-      const t0 = trackLookup.get(`0:${ball.ball_id}:${frame.frame}`);
-      const t1 = trackLookup.get(`1:${ball.ball_id}:${frame.frame}`);
-      if (p0 && t0) {
-        const e = Math.hypot(p0.u - t0.x, p0.v - t0.y);
-        sse0 += e * e;
-        n0 += 1;
-        if (e > worstErr) {
-          worstErr = e;
-          worstFrame = frame.frame;
+  // Some calibrations serialize projection matrices with translation in mm
+  // while positions_3d is in metres. Evaluate both and choose lower SSE.
+  const evaluateScale = (xyzScale: number) => {
+    let localN0 = 0;
+    let localSse0 = 0;
+    let localN1 = 0;
+    let localSse1 = 0;
+    let localWorstFrame: number | null = null;
+    let localWorstErr = -1;
+    for (const frame of positions3d.frames ?? []) {
+      for (const ball of frame.balls ?? []) {
+        const x = ball.x_m * xyzScale;
+        const y = ball.y_m * xyzScale;
+        const z = ball.z_m * xyzScale;
+        const p0 = projectPoint(P0, x, y, z);
+        const p1 = projectPoint(P1, x, y, z);
+        const t0 = trackLookup.get(`0:${ball.ball_id}:${frame.frame}`);
+        const t1 = trackLookup.get(`1:${ball.ball_id}:${frame.frame}`);
+        if (p0 && t0) {
+          const e = Math.hypot(p0.u - t0.x, p0.v - t0.y);
+          localSse0 += e * e;
+          localN0 += 1;
+          if (e > localWorstErr) {
+            localWorstErr = e;
+            localWorstFrame = frame.frame;
+          }
         }
-      }
-      if (p1 && t1) {
-        const e = Math.hypot(p1.u - t1.x, p1.v - t1.y);
-        sse1 += e * e;
-        n1 += 1;
-        if (e > worstErr) {
-          worstErr = e;
-          worstFrame = frame.frame;
+        if (p1 && t1) {
+          const e = Math.hypot(p1.u - t1.x, p1.v - t1.y);
+          localSse1 += e * e;
+          localN1 += 1;
+          if (e > localWorstErr) {
+            localWorstErr = e;
+            localWorstFrame = frame.frame;
+          }
         }
       }
     }
-  }
+    return {
+      n0: localN0,
+      sse0: localSse0,
+      n1: localN1,
+      sse1: localSse1,
+      worstFrame: localWorstFrame,
+      worstErr: localWorstErr,
+    } as const;
+  };
+
+  const inMeters = evaluateScale(1);
+  const inMillimeters = evaluateScale(1000);
+  const inMetersTotalSse = inMeters.sse0 + inMeters.sse1;
+  const inMillimetersTotalSse = inMillimeters.sse0 + inMillimeters.sse1;
+  const selected =
+    inMillimeters.n0 + inMillimeters.n1 > 0 &&
+    inMillimetersTotalSse < inMetersTotalSse
+      ? inMillimeters
+      : inMeters;
+  n0 = selected.n0;
+  sse0 = selected.sse0;
+  n1 = selected.n1;
+  sse1 = selected.sse1;
+  worstFrame = selected.worstFrame;
+  worstErr = selected.worstErr;
+
   return {
     rmseCam0: n0 > 0 ? Math.sqrt(sse0 / n0) : null,
     rmseCam1: n1 > 0 ? Math.sqrt(sse1 / n1) : null,
