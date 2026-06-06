@@ -2,36 +2,55 @@ import bpy
 
 def create_materials():
     """Create high-quality PBR materials for the table and balls."""
-    # 1. Table (Felt)
-    mat_table = bpy.data.materials.new("Felt")
+    # 1. Table (Paper)
+    mat_table = bpy.data.materials.new("Paper")
     mat_table.use_nodes = True
     nodes = mat_table.node_tree.nodes
     links = mat_table.node_tree.links
     
     bsdf = nodes["Principled BSDF"]
-    bsdf.inputs['Base Color'].default_value = (0.01, 0.04, 0.01, 1.0) # Much darker green
-    bsdf.inputs['Roughness'].default_value = 0.98
-    bsdf.inputs['Sheen Weight'].default_value = 1.0 
+    bsdf.inputs['Roughness'].default_value = 0.85
+    bsdf.inputs['Sheen Weight'].default_value = 0.1 
     
-    # Add noise for subtle texture
-    noise = nodes.new('ShaderNodeTexNoise')
-    noise.inputs['Scale'].default_value = 500
-    noise.inputs['Detail'].default_value = 15
+    # Large scale variation (unevenness)
+    noise_large = nodes.new('ShaderNodeTexNoise')
+    noise_large.inputs['Scale'].default_value = 5.0
+    noise_large.inputs['Detail'].default_value = 2.0
     
+    # Fine grain noise
+    noise_fine = nodes.new('ShaderNodeTexNoise')
+    noise_fine.inputs['Scale'].default_value = 800.0
+    noise_fine.inputs['Detail'].default_value = 15.0
+    
+    # Mix node for color variation
+    mix_color = nodes.new('ShaderNodeMix')
+    mix_color.data_type = 'RGBA'
+    mix_color.blend_type = 'MIX'
+    # Target Hex #a9a7a8 => ~0.66 sRGB => ~0.39 Linear
+    mix_color.inputs[6].default_value = (0.42, 0.42, 0.41, 1.0) # Slightly lighter patch
+    mix_color.inputs[7].default_value = (0.36, 0.36, 0.36, 1.0) # Slightly darker patch
+    
+    # Connect large noise to mix factor
+    links.new(noise_large.outputs['Fac'], mix_color.inputs[0])
+    links.new(mix_color.outputs[2], bsdf.inputs['Base Color'])
+    
+    # Bump for fine grain
     bump = nodes.new('ShaderNodeBump')
-    bump.inputs['Strength'].default_value = 0.1
-    links.new(noise.outputs['Fac'], bump.inputs['Height'])
+    bump.inputs['Strength'].default_value = 0.03
+    links.new(noise_fine.outputs['Fac'], bump.inputs['Height'])
     links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
 
     # 2. Billiard Balls (High Gloss with micro-imperfections)
-    def create_ball_mat(name, color):
+    def create_ball_mat(name):
         mat = bpy.data.materials.new(name)
         mat.use_nodes = True
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
         
         bsdf = nodes["Principled BSDF"]
-        bsdf.inputs['Base Color'].default_value = color
+        bsdf.inputs['Base Color'].default_value = (0.9, 0.9, 0.9, 1.0) # Bright Silver
+        bsdf.inputs['Metallic'].default_value = 1.0
+        bsdf.inputs['Roughness'].default_value = 0.25 # Slightly higher roughness to scatter light
         bsdf.inputs['Specular IOR Level'].default_value = 0.5
         bsdf.inputs['Coat Weight'].default_value = 1.0 
         
@@ -55,8 +74,8 @@ def create_materials():
         
         return mat
 
-    mat_b0 = create_ball_mat("Ball0", (0.05, 0.4, 0.8, 1.0)) # Deep Blue
-    mat_b1 = create_ball_mat("Ball1", (0.8, 0.05, 0.1, 1.0)) # Deep Red
+    mat_b0 = create_ball_mat("Ball0")
+    mat_b1 = create_ball_mat("Ball1")
     mat_checker = create_checkerboard_material()
     
     return mat_table, mat_b0, mat_b1, mat_checker

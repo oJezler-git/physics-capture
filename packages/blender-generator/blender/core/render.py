@@ -54,7 +54,8 @@ def render_scene(config, cam0, cam1):
     setup_render_engine(scene)
     file_output_node = setup_compositor(scene)
         
-    for cam in [cam0, cam1]:
+    cams = [cam0] if cam1 is None else [cam0, cam1]
+    for cam in cams:
         scene.camera = cam
         file_output_node.base_path = os.path.join(config.EXP_DIR, "frames", cam.name)
         scene.render.filepath = os.path.join(config.EXP_DIR, "raw", f"{cam.name}.mp4")
@@ -80,7 +81,8 @@ def render_debug_single_frame(config, cam0, cam1, frame_idx=1):
     scene.render.image_settings.file_format = 'JPEG'
     scene.render.image_settings.quality = 95
 
-    for cam in [cam0, cam1]:
+    cams = [cam0] if cam1 is None else [cam0, cam1]
+    for cam in cams:
         scene.camera = cam
         scene.render.filepath = os.path.join(debug_dir, f"{cam.name}_frame_{frame_idx:06d}.jpg")
         bpy.ops.render.render(write_still=True)

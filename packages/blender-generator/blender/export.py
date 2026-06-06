@@ -33,7 +33,8 @@ def extract_and_write_data(config, cam0, cam1, balls, include_pipeline_assistanc
             
             if include_pipeline_assistance:
                 # Projected 2D screen coordinates
-                for cam_id, cam in enumerate([cam0, cam1]):
+                cams = [cam0] if cam1 is None else [cam0, cam1]
+                for cam_id, cam in enumerate(cams):
                     co2d = bpy_extras.object_utils.world_to_camera_view(scene, cam, pos)
                     if co2d.z > 0 and 0 <= co2d.x <= 1 and 0 <= co2d.y <= 1:
                         if (cam_id, ball_id) not in track_data:
@@ -73,12 +74,14 @@ def extract_and_write_data(config, cam0, cam1, balls, include_pipeline_assistanc
                     "frame_count": config.TOTAL_FRAMES, "true_fps": config.FPS, "phase_offset_ms": 0.0,
                     "fit_residual_rms_ms": 0.7, "timestamps_ms": timestamps
                 },
-                "cam1": {
-                    "frame_count": config.TOTAL_FRAMES, "true_fps": config.FPS, "phase_offset_ms": 0.3,
-                    "fit_residual_rms_ms": 0.8, "timestamps_ms": [float(t + 0.3) for t in timestamps]
-                },
             }
         }
+        if cam1 is not None:
+            sync_payload["cameras"]["cam1"] = {
+                "frame_count": config.TOTAL_FRAMES, "true_fps": config.FPS, "phase_offset_ms": 0.3,
+                "fit_residual_rms_ms": 0.8, "timestamps_ms": [float(t + 0.3) for t in timestamps]
+            }
+
         with open(os.path.join(results_dir, "sync.json"), "w") as f:
             json.dump(sync_payload, f, indent=2)
 
@@ -87,7 +90,7 @@ def extract_and_write_data(config, cam0, cam1, balls, include_pipeline_assistanc
             json.dump({"px_per_mm": 1.8, "scale_uncertainty_px_per_mm": 0.01}, f, indent=2)
 
         # Intrinsics
-        for cam in [cam0, cam1]:
+        for cam in cams:
             f_mm, sensor_w = cam.data.lens, cam.data.sensor_width
             fx = f_mm * config.RESOLUTION_X / sensor_w
             cx, cy = config.RESOLUTION_X / 2.0, config.RESOLUTION_Y / 2.0
@@ -103,25 +106,26 @@ def extract_and_write_data(config, cam0, cam1, balls, include_pipeline_assistanc
             with open(os.path.join(calib_dir, f"{cam.name}_intrinsics.json"), "w") as f:
                 json.dump(intr_payload, f, indent=2)
 
-        # Stereo Extrinsics
-        M_cv0 = get_cv_matrix(cam0)
-        M_cv1 = get_cv_matrix(cam1)
-        E = M_cv1 @ M_cv0.inverted()  # Transform CV frame 0 -> CV frame 1
+        if cam1 is not None:
+            # Stereo Extrinsics
+            M_cv0 = get_cv_matrix(cam0)
+            M_cv1 = get_cv_matrix(cam1)
+            E = M_cv1 @ M_cv0.inverted()  # Transform CV frame 0 -> CV frame 1
 
-        R = E.to_3x3()
-        T = E.to_translation() * 1000.0  # Output metric expects Baseline in mm
+            R = E.to_3x3()
+            T = E.to_translation() * 1000.0  # Output metric expects Baseline in mm
 
-        K = np.array([[fx, 0, cx], [0, fx, cy], [0, 0, 1]])
-        P0 = K @ np.hstack([np.eye(3), np.zeros((3, 1))])
-        P1 = K @ np.hstack([np.array(R), np.array(T).reshape(3, 1)])
+            K = np.array([[fx, 0, cx], [0, fx, cy], [0, 0, 1]])
+            P0 = K @ np.hstack([np.eye(3), np.zeros((3, 1))])
+            P1 = K @ np.hstack([np.array(R), np.array(T).reshape(3, 1)])
 
-        stereo_payload = {
-            "R": [list(float(c) for c in row) for row in R],
-            "T": [float(c) for c in T],
-            "E": np.zeros((3, 3)).tolist(), "F": np.zeros((3, 3)).tolist(),
-            "P0": P0.tolist(), "P1": P1.tolist(),
-            "reprojection_error_px": 0.0,
-            "baseline_mm": float(T.length)
-        }
-        with open(os.path.join(calib_dir, "stereo_extrinsics.json"), "w") as f:
-            json.dump(stereo_payload, f, indent=2)
+            stereo_payload = {
+                "R": [list(float(c) for c in row) for row in R],
+                "T": [float(c) for c in T],
+                "E": np.zeros((3, 3)).tolist(), "F": np.zeros((3, 3)).tolist(),
+                "P0": P0.tolist(), "P1": P1.tolist(),
+                "reprojection_error_px": 0.0,
+                "baseline_mm": float(T.length)
+            }
+            with open(os.path.join(calib_dir, "stereo_extrinsics.json"), "w") as f:
+                json.dump(stereo_payload, f, indent=2)

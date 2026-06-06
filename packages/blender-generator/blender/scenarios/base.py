@@ -59,9 +59,9 @@ class BaseScenario:
             return light
 
         # Main Light (Front-Left)
-        create_studio_light("Main", (-3, -4, 5), (0.6, 0, -0.6), (3, 3, 1), 50)
+        create_studio_light("Main", (-3, -4, 5), (0.6, 0, -0.6), (3, 3, 1), 150) # Increased from 50
         # Fill Light (Front-Right)
-        create_studio_light("Fill", (4, -2, 4), (0.5, 0, 0.8), (4, 4, 1), 20)
+        create_studio_light("Fill", (4, -2, 4), (0.5, 0, 0.8), (4, 4, 1), 60) # Increased from 20
         
         # --- World Ambient Light ---
         if not bpy.context.scene.world:

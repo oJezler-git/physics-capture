@@ -43,3 +43,19 @@ def setup_cameras(config):
         cam.data.dof.use_dof = False 
         
     return cam0, cam1
+
+def setup_planar_camera(config):
+    """Create a single near-orthogonal overhead camera for planar scale experiments."""
+    # Raise camera slightly and use a more standard view
+    bpy.ops.object.camera_add(location=(0.0, 0.0, 1.0), rotation=(0, 0, 0))
+    cam0 = bpy.context.active_object
+    cam0.name = "cam0"
+
+    cam0.data.type = 'PERSP'
+    cam0.data.sensor_fit = 'HORIZONTAL'
+    cam0.data.sensor_width = 36.0
+    # Increase lens to zoom in slightly
+    cam0.data.lens = getattr(config, "PLANAR_LENS_MM", 65.0)
+    cam0.data.dof.use_dof = False
+
+    return cam0, None

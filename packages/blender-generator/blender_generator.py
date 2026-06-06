@@ -7,9 +7,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from blender.core.render import render_scene, render_debug_single_frame
-from blender.core.camera import setup_cameras
+from blender.core.camera import setup_cameras, setup_planar_camera
 from blender.core.material import create_materials
 from blender.scenarios.collision import CollisionScenario
+from blender.scenarios.planar import PlanarScenario
 from blender.sync import create_sync_marker, get_sync_handler
 from blender.physics import bake_physics
 from blender.export import extract_and_write_data
@@ -22,7 +23,7 @@ def _remove_if_exists(path):
 class Config:
     RESOLUTION_X = 1920
     RESOLUTION_Y = 1080
-    TOTAL_FRAMES = int(os.getenv("BLENDER_TOTAL_FRAMES", "100"))
+    TOTAL_FRAMES = int(os.getenv("BLENDER_TOTAL_FRAMES", "200"))
     FPS = 30
     BASELINE_M = 0.12 # 12cm baseline
     CHECKER_SQUARE_SIZE_M = float(
@@ -44,6 +45,7 @@ def main():
     parser.add_argument('--debug-frame', type=int, default=1, help='Frame index for debug')
     parser.add_argument('--debug-sequence', action='store_true', help='Render snapshots every 20 frames')
     parser.add_argument('--experiment-id', type=str, default="synthetic-stereo-01", help='Experiment ID')
+    parser.add_argument('--scenario', type=str, default="collision", choices=["collision", "planar"], help='Scenario type')
     parser.add_argument(
         '--blind-pipeline',
         action='store_true',
@@ -80,17 +82,24 @@ def main():
     clear_scene()
     
     # 1. Component Setup
-    cam0, cam1 = setup_cameras(config)
+    if args.scenario == "planar":
+        cam0, cam1 = setup_planar_camera(config)
+    else:
+        cam0, cam1 = setup_cameras(config)
     
     # 2. Scene Setup
     mat_table, mat_b0, mat_b1, mat_checker = create_materials()
-    scenario = CollisionScenario(config)
+    if args.scenario == "planar":
+        scenario = PlanarScenario(config)
+    else:
+        scenario = CollisionScenario(config)
     balls = scenario.setup_scene(mat_table, mat_b0, mat_b1, mat_checker)
     
     # 3. Sync Marker & Frame Handler Injection
-    create_sync_marker() # Single global marker in the scene
-    bpy.app.handlers.frame_change_pre.clear()
-    bpy.app.handlers.frame_change_pre.append(get_sync_handler(config))
+    if cam1 is not None:
+        create_sync_marker() # Single global marker in the scene
+        bpy.app.handlers.frame_change_pre.clear()
+        bpy.app.handlers.frame_change_pre.append(get_sync_handler(config))
     
     # 4. Bake Physics (Must happen before extraction to ensure determinism)
     bake_physics(balls)
