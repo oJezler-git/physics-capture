@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Maximize, Minimize } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { clsx } from 'clsx';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { useCalibrationStore } from '../stores/calibrationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -23,7 +25,18 @@ export const CalibrationPage = () => {
   const { experimentId, cameras, ballConfigs, setBallConfig, advancePhase } = useSessionStore();
   const activeCamera = cameras.find((camera) => camera.status === 'live');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const rulerImageRef = useRef<HTMLImageElement>(null);
+  const rulerContainerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const ballTone = ['#4cc3ff', '#9ad46f', '#ff7244'];
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(document.fullscreenElement === rulerContainerRef.current);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
   useEffect(() => {
     if (activeCamera?.stream && videoRef.current) {
@@ -67,6 +80,25 @@ export const CalibrationPage = () => {
   const [profileName, setProfileName] = useState('Lab Bench A');
   const [rulerPoints, setRulerPoints] = useState<Point[]>([]);
   const [knownDistanceMm, setKnownDistanceMm] = useState(100);
+  const [rulerFrameFile, setRulerFrameFile] = useState<string | null>(null);
+  const [rulerImageSize, setRulerImageSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!experimentId) return;
+
+    const loadFirstFrame = async () => {
+      try {
+        const response = await fetch(`/api/experiments/${experimentId}/metadata`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { frameMap?: Array<string | null> };
+        setRulerFrameFile(data.frameMap?.find(Boolean) ?? null);
+      } catch {
+        // Live camera fallback remains available.
+      }
+    };
+
+    void loadFirstFrame();
+  }, [experimentId]);
 
   useEffect(() => {
     const loadProfiles = async () => {
@@ -82,6 +114,15 @@ export const CalibrationPage = () => {
 
     void loadProfiles();
   }, [setProfiles]);
+
+  const handleToggleFullscreen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!document.fullscreenElement) {
+      rulerContainerRef.current?.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   const handleRunCalibration = async () => {
     if (!experimentId) return;
@@ -147,8 +188,11 @@ export const CalibrationPage = () => {
 
   const handleRulerFrameClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const image = rulerImageRef.current;
+    const scaleX = image?.naturalWidth ? image.naturalWidth / rect.width : 1;
+    const scaleY = image?.naturalHeight ? image.naturalHeight / rect.height : 1;
+    const x = (event.clientX - rect.left) * scaleX;
+    const y = (event.clientY - rect.top) * scaleY;
 
     setRulerPoints((points) => {
       if (points.length >= 2) return [{ x, y }];
@@ -166,6 +210,16 @@ export const CalibrationPage = () => {
 
     return distancePx / knownDistanceMm;
   }, [rulerPoints, knownDistanceMm]);
+
+  const displayPoint = (point: Point) => ({
+    left: rulerImageSize.width > 0 ? `${(point.x / rulerImageSize.width) * 100}%` : `${point.x}px`,
+    top: rulerImageSize.height > 0 ? `${(point.y / rulerImageSize.height) * 100}%` : `${point.y}px`,
+  });
+
+  const displaySvgPoint = (point: Point) => ({
+    x: rulerImageSize.width > 0 ? `${(point.x / rulerImageSize.width) * 100}%` : point.x,
+    y: rulerImageSize.height > 0 ? `${(point.y / rulerImageSize.height) * 100}%` : point.y,
+  });
 
   const baselineMm = useMemo(() => {
     if (!stereoExtrinsics?.T) return null;
@@ -206,11 +260,11 @@ export const CalibrationPage = () => {
     <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6">
       <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 glitch-in stagger-1">
         <div className="space-y-1">
-          <p className="eyebrow">Step 2/4</p>
-          <h1 className="text-2xl sm:text-3xl">Calibration</h1>
+          <p className="eyebrow">Step 3/5</p>
+          <h1 className="text-2xl sm:text-3xl">Scale</h1>
           <p className="subtle-copy max-w-2xl text-xs">
-            Run stereo calibration for full depth reconstruction, or define a reliable px/mm ruler
-            scale in fallback mode.
+            Click two ruler points in the uploaded overhead frame. This replaces stereo calibration
+            for the planar workflow.
           </p>
         </div>
         <Button
@@ -218,11 +272,11 @@ export const CalibrationPage = () => {
           disabled={!calibrationReady || !hasMassConfig}
           onClick={() => {
             advancePhase();
-            navigate('/recording');
+            navigate('/tracking');
           }}
           className="px-6 py-2"
         >
-          Continue to Recording
+          Continue to Tracking
         </Button>
       </header>
 
@@ -235,7 +289,7 @@ export const CalibrationPage = () => {
               <div className="flex items-center gap-2">
                 {stereoExtrinsics && (
                   <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
-                    STEREO ACTIVE
+                    ADVANCED STEREO ACTIVE
                   </span>
                 )}
                 <span className="ui-pill">{status}</span>
@@ -317,20 +371,20 @@ export const CalibrationPage = () => {
             {(status === 'idle' || status === 'running') && (
               <div className="surface-soft border-l-4 border-[var(--accent)] p-4 space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                  Checkerboard Instructions
+                  Advanced Checkerboard Calibration
                 </h3>
                 <ul className="space-y-2 text-xs text-slate-400">
                   <li className="flex gap-2">
                     <span className="text-[var(--accent)]">●</span>
-                    Move the board slowly to fill the frame from different angles and depths.
+                    Optional only: use this if you are deliberately running the old stereo workflow.
                   </li>
                   <li className="flex gap-2">
                     <span className="text-[var(--accent)]">●</span>
-                    Keep the board within view of both cameras simultaneously for 3D stereo.
+                    The planar workflow only needs the ruler scale below.
                   </li>
                   <li className="flex gap-2">
                     <span className="text-[var(--accent)]">●</span>
-                    Avoid glare on the board surface; matte paper works best.
+                    Keep this section closed in normal one-video experiments.
                   </li>
                 </ul>
               </div>
@@ -343,7 +397,7 @@ export const CalibrationPage = () => {
                 disabled={isBusy || !experimentId}
                 className="py-2 text-sm"
               >
-                {isBusy ? 'Running...' : 'Run Calibration'}
+                {isBusy ? 'Running...' : 'Run Advanced Calibration'}
               </Button>
               <input
                 value={profileName}
@@ -365,8 +419,8 @@ export const CalibrationPage = () => {
           <section className="surface-panel space-y-4 p-5 glitch-in stagger-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="eyebrow">Fallback Pipeline</p>
-                <h2 className="mt-1 text-xl">Ruler Scale Capture</h2>
+                <p className="eyebrow">Required</p>
+                <h2 className="mt-1 text-xl">Ruler Scale</h2>
               </div>
               <Button
                 variant="alt"
@@ -402,15 +456,34 @@ export const CalibrationPage = () => {
             </div>
 
             <p className="subtle-copy text-xs">
-              Click two points on the frame and enter the known physical distance in millimeters.
+              Click two ruler points on the uploaded frame and enter the known physical distance in
+              millimeters.
             </p>
 
             <div className="grid gap-4 lg:grid-cols-[1fr_200px]">
               <div
+                ref={rulerContainerRef}
                 onClick={handleRulerFrameClick}
-                className="relative aspect-video cursor-crosshair overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg-surface)] shadow-sm"
+                className={clsx(
+                  'relative cursor-crosshair overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg-surface)] shadow-sm transition-all',
+                  !isFullscreen ? 'aspect-video' : 'h-screen w-screen rounded-none border-none',
+                )}
               >
-                {activeCamera?.stream ? (
+                {rulerFrameFile && experimentId ? (
+                  <img
+                    ref={rulerImageRef}
+                    src={`/api/experiments/${encodeURIComponent(experimentId)}/frames/0/${rulerFrameFile}`}
+                    alt="Uploaded ruler frame"
+                    onLoad={(event) => {
+                      setRulerImageSize({
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      });
+                    }}
+                    className="absolute inset-0 h-full w-full object-fill"
+                    draggable={false}
+                  />
+                ) : activeCamera?.stream ? (
                   <video
                     ref={videoRef}
                     autoPlay
@@ -423,31 +496,70 @@ export const CalibrationPage = () => {
                     <div>
                       <p className="eyebrow">No Live Camera</p>
                       <p className="mt-1 text-xs text-slate-400">
-                        Connect a phone feed for ruler marking.
+                        Upload a video first, or connect a live camera for ruler marking.
                       </p>
                     </div>
                   </div>
                 )}
 
+                <button
+                  onClick={handleToggleFullscreen}
+                  className="absolute top-3 right-3 z-20 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors border border-white/10"
+                  title="Toggle Fullscreen"
+                >
+                  {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+                </button>
+
                 {rulerPoints.map((point, index) => (
                   <div
                     key={`${point.x}-${point.y}-${index}`}
-                    className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--accent)] shadow-md"
-                    style={{ left: point.x, top: point.y }}
+                    className={clsx(
+                      'absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--accent)] shadow-md transition-all',
+                      isFullscreen ? 'h-6 w-6 border-4' : 'h-3 w-3',
+                    )}
+                    style={displayPoint(point)}
                   />
                 ))}
 
                 {rulerPoints.length === 2 && (
                   <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
                     <line
-                      x1={rulerPoints[0].x}
-                      y1={rulerPoints[0].y}
-                      x2={rulerPoints[1].x}
-                      y2={rulerPoints[1].y}
+                      x1={displaySvgPoint(rulerPoints[0]).x}
+                      y1={displaySvgPoint(rulerPoints[0]).y}
+                      x2={displaySvgPoint(rulerPoints[1]).x}
+                      y2={displaySvgPoint(rulerPoints[1]).y}
                       stroke="var(--accent)"
-                      strokeWidth="2"
+                      strokeWidth={isFullscreen ? '4' : '2'}
                     />
                   </svg>
+                )}
+
+                {isFullscreen && (
+                  <div className="absolute bottom-8 left-1/2 z-20 flex -translate-x-1/2 items-center gap-6 rounded-2xl border border-white/20 bg-black/60 p-6 backdrop-blur-md transition-all shadow-2xl">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-white/50">
+                        Distance (mm)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={knownDistanceMm}
+                        onChange={(event) => setKnownDistanceMm(Number(event.target.value))}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-32 bg-transparent p-0 text-3xl font-bold text-white focus:outline-none focus:ring-0"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="h-12 w-px bg-white/20" />
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-white/50">
+                        Computed Scale
+                      </label>
+                      <div className="text-3xl font-mono font-bold text-[var(--accent)]">
+                        {computedScale ? computedScale.toFixed(4) : '--'}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
 
