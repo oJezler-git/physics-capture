@@ -123,4 +123,5 @@ message SystemResult {
   float momentum_conservation_error_pct_uncertainty = 10;
   float coefficient_of_restitution = 11;
   float coefficient_of_restitution_uncertainty = 12;
+  int32 collision_frame_idx = 13;
 }

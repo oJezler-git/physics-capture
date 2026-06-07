@@ -5,14 +5,21 @@ import sys
 import os
 import socket
 import time
+import traceback
+import signal
 from concurrent import futures
 from pathlib import Path
-import queue
 
-logging.basicConfig(level=logging.INFO)
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+CODE_VERSION = "lifecycle-fix-v3-2026-06-07"
 
 
 def _can_bind_locally(port: int) -> bool:
@@ -36,6 +43,7 @@ try:
 except ImportError:
     # Fallback for systems without SAM2 installed
     class SAM2Tracker:
+        def __init__(self, **kwargs): pass
         def track(self, frames_dir, seeds, start_frame_idx=None, end_frame_idx=None):
             # Fallback for when SAM2 is not installed: just yield seed positions
             logger.warning("SAM2 is not installed. Using basic seed-only tracking fallback.")
@@ -50,6 +58,7 @@ from physics.pipeline import run_physics_pipeline
 
 class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
     def __init__(self):
+        logger.info("CV service starting. Code version: %s", CODE_VERSION)
         self.tracker = SAM2Tracker()
         self.base_dir = Path(__file__).parent.parent / "experiments"
 
@@ -61,6 +70,11 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         if value is None:
             return default
         return float(value)
+
+    @staticmethod
+    def _looks_like_invalid_argument(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "[errno 22]" in text or "invalid argument" in text
 
     async def RunCalibration(self, request, context):
         experiment_id = request.experiment_id
@@ -249,7 +263,11 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
         )
 
     async def TrackBalls(self, request, context):
-        logger.info(f"TrackBalls called for experiment {request.experiment_id}")
+        logger.info(
+            "TrackBalls called for experiment %s code_version=%s",
+            request.experiment_id,
+            CODE_VERSION,
+        )
         
         # Determine target model
         requested_model = request.model_id or os.getenv("SAM2_MODEL_ID", "facebook/sam2-hiera-tiny").strip()
@@ -329,9 +347,60 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                     await asyncio.sleep(0)
                     
             except Exception as e:
+                if (
+                    self._looks_like_invalid_argument(e)
+                    and "cuda" in str(getattr(self.tracker, "device", "")).lower()
+                ):
+                    logger.warning(
+                        "CUDA tracking failed with invalid argument for camera %s; retrying on CPU.",
+                        camera_id,
+                        exc_info=True,
+                    )
+                    try:
+                        self.tracker = SAM2Tracker(model_id=requested_model, force_device="cpu")
+                        tracker_gen = self.tracker.track(
+                            frames_dir,
+                            seeds_by_camera[camera_id],
+                            start_frame_idx=start_frame_idx,
+                            end_frame_idx=end_frame_idx,
+                        )
+                        for frame_idx, frame_results, progress in tracker_gen:
+                            pb_points = []
+                            for res in frame_results:
+                                pb_points.append(physics_pb2.TrackedPoint(
+                                    ball_id=res["ball_id"],
+                                    camera_id=camera_id,
+                                    x=res["x"],
+                                    y=res["y"],
+                                    confidence=res["confidence"]
+                                ))
+
+                            overall_progress = (cam_idx + progress) / total_cameras
+
+                            yield physics_pb2.TrackingStatus(
+                                frame=frame_idx,
+                                progress=overall_progress,
+                                points=pb_points,
+                                frame_confidence=max((p.confidence for p in pb_points), default=0.0)
+                            )
+                            await asyncio.sleep(0)
+                        continue
+                    except Exception as retry_error:
+                        e = retry_error
+
                 logger.exception(f"Error tracking camera {camera_id}: {e}")
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Tracking failed for camera {camera_id}: {str(e)}")
+                tb = traceback.extract_tb(e.__traceback__)
+                origin = tb[-1] if tb else None
+                origin_msg = (
+                    f" at {origin.filename}:{origin.lineno} in {origin.name}"
+                    if origin
+                    else ""
+                )
+                context.set_details(
+                    f"Tracking failed for camera {camera_id}: "
+                    f"{type(e).__name__}: {e}{origin_msg}"
+                )
                 return
 
     async def ComputePhysics(self, request, context):
@@ -420,7 +489,8 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
                     momentum_conservation_error_pct=self._read_optional_float(sys_p.get("conservation_pct"), "value_pct"),
                     momentum_conservation_error_pct_uncertainty=self._read_optional_float(sys_p.get("conservation_pct"), "uncertainty_pct"),
                     coefficient_of_restitution=sys_p["cor"]["value"] if sys_p["cor"] else -1.0,
-                    coefficient_of_restitution_uncertainty=sys_p["cor"]["uncertainty"] if sys_p["cor"] else 0.0
+                    coefficient_of_restitution_uncertainty=sys_p["cor"]["uncertainty"] if sys_p["cor"] else 0.0,
+                    collision_frame_idx=v_data.get("collision_frame", -1)
                 )
             )
             
@@ -430,65 +500,65 @@ class PhysicsCaptureServicer(physics_pb2_grpc.PhysicsCaptureServicer):
             context.set_details(str(e))
             return physics_pb2.PhysicsResult()
 
+
+async def watchdog_task(stop_event):
+    """
+    Terminates the process if the parent process (npm/concurrently) dies.
+    This prevents 'ghost' processes on Windows.
+    """
+    import psutil
+    parent_pid = os.getppid()
+    try:
+        parent = psutil.Process(parent_pid)
+    except psutil.NoSuchProcess:
+        logger.warning("No parent process found at startup. Watchdog disabled.")
+        return
+
+    logger.info("Watchdog active: monitoring parent PID %d (%s)", parent_pid, parent.name())
+    
+    while not stop_event.is_set():
+        if not parent.is_running():
+            logger.warning("Parent process %d has terminated. Shutting down server...", parent_pid)
+            stop_event.set()
+            break
+        await asyncio.sleep(2.0)
+
+
 async def serve():
+    stop_event = asyncio.Event()
+    
+    # Setup Signal Handlers (SIGINT/SIGTERM)
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, lambda: stop_event.set())
+        except NotImplementedError:
+            # add_signal_handler is not implemented on Windows for some signals
+            pass
+
     server = grpc.aio.server()
     physics_pb2_grpc.add_PhysicsCaptureServicer_to_server(PhysicsCaptureServicer(), server)
+    
     grpc_port = os.getenv("PYTHON_GRPC_PORT", "50052")
-    configured_addr = os.getenv("PYTHON_GRPC_BIND_ADDR")
-    candidate_addrs = []
-    if configured_addr:
-        candidate_addrs.append(configured_addr)
-    candidate_addrs.extend([f"[::]:{grpc_port}", f"0.0.0.0:{grpc_port}", f"127.0.0.1:{grpc_port}"])
+    server.add_insecure_port(f"[::]:{grpc_port}")
 
-    bound_addr = None
-    seen = set()
-    for addr in candidate_addrs:
-        if addr in seen:
-            continue
-        seen.add(addr)
-        try:
-            server.add_insecure_port(addr)
-            bound_addr = addr
-            break
-        except RuntimeError as exc:
-            logger.warning(f"Failed to bind gRPC server to {addr}: {exc}")
-
-    if bound_addr is None:
-        local_bind_ok = True
-        try:
-            local_bind_ok = _can_bind_locally(int(grpc_port))
-        except ValueError:
-            local_bind_ok = False
-
-        port_hint = (
-            f"Port {grpc_port} appears to be unavailable (possibly already in use). "
-            f"Stop the process using it, or choose another port via PYTHON_GRPC_PORT (for example {int(grpc_port) + 1})."
-            if not local_bind_ok
-            else "Set PYTHON_GRPC_BIND_ADDR to an explicit reachable host:port."
-        )
-        raise RuntimeError(
-            "Failed to bind gRPC server to any candidate address. "
-            + port_hint
-        )
-
-    logger.info(f"Starting server on {bound_addr}")
+    logger.info("Starting CV gRPC server on port %s", grpc_port)
     await server.start()
-    try:
-        await server.wait_for_termination()
-    except asyncio.CancelledError:
-        logger.info("Shutdown requested; stopping CV gRPC server.")
-        raise
-    finally:
-        # Ensure clean gRPC shutdown to avoid noisy destructor warnings on Ctrl+C.
-        await server.stop(grace=2.0)
-        logger.info("CV gRPC server stopped.")
+    
+    # Start the watchdog
+    watchdog = asyncio.create_task(watchdog_task(stop_event))
+
+    # Wait for the stop event (either SIGINT or Watchdog trigger)
+    await stop_event.wait()
+    
+    logger.info("Shutdown initiated...")
+    await server.stop(grace=2.0)
+    watchdog.cancel()
+    logger.info("CV gRPC server stopped.")
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(serve())
     except KeyboardInterrupt:
-        logger.info("CV service interrupted by user.")
-        raise SystemExit(0)
-    except RuntimeError as exc:
-        logger.error(str(exc))
-        raise SystemExit(1)
+        pass

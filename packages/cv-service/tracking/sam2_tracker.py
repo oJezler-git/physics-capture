@@ -108,12 +108,15 @@ def _profile_defaults(profile: str, use_cuda: bool) -> Dict[str, object]:
 
 
 class SAM2Tracker:
-    def __init__(self, model_id: str = None):
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if torch is not None
-            else "cpu"
-        )
+    def __init__(self, model_id: str = None, force_device: str = None):
+        if force_device:
+            self.device = torch.device(force_device) if torch is not None else force_device
+        else:
+            self.device = (
+                torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                if torch is not None
+                else "cpu"
+            )
         logger.info(f"[SAM2] Initializing on device: {self.device}")
         self.predictor = None
         self._coord_cache: Dict[Tuple[int, int, str, str], Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -255,8 +258,15 @@ class SAM2Tracker:
                     physical_idx: local_idx
                     for local_idx, physical_idx in enumerate(chunk_physical_indices)
                 }
-                use_isolated_dir = use_chunking or len(selected_frame_files) != len(frame_files)
+                range_requested = start_frame_idx is not None or end_frame_idx is not None
+                use_isolated_dir = use_chunking or range_requested or len(selected_frame_files) != len(frame_files)
                 with self._prepare_sam2_frames(chunk_files, isolate=use_isolated_dir) as sam2_frames_dir:
+                    logger.info(
+                        "[SAM2] chunk frames=%d isolate=%s video_dir=%s",
+                        len(chunk_files),
+                        use_isolated_dir,
+                        sam2_frames_dir,
+                    )
                     inference_state = self._init_inference_state(
                         str(sam2_frames_dir),
                         chunk_frame_count=len(chunk_files),
@@ -580,9 +590,11 @@ class SAM2Tracker:
         temp_dir = tempfile.TemporaryDirectory(prefix="sam2_frames_")
         sam2_dir = Path(temp_dir.name)
 
-        for src in frame_files:
-            dst = sam2_dir / src.name
-            self._link_or_copy(src, dst)
+        for local_idx, src in enumerate(frame_files):
+            # SAM2's video loader is strict about frame names on some platforms.
+            # Isolated ranges should look like a fresh, contiguous video.
+            dst = sam2_dir / f"{local_idx:06d}.jpg"
+            shutil.copy2(src, dst)
 
         return _TemporaryFrameDir(sam2_dir, temp_dir)
 

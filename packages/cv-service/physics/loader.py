@@ -10,6 +10,99 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# SAM2 often freezes a ball at its seed (or last valid) position before/after real
+# tracking. Positions may jitter slightly, so use tolerance rather than exact match.
+PLATEAU_EPS_PX = 0.5
+RELIABLE_CONFIDENCE = 0.7
+
+
+def _mask_sentinel_plateaus(
+    x: np.ndarray,
+    y: np.ndarray,
+    confidence: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Remove SAM2 sentinel positions from the start/end of a track.
+
+    1. Drop low-confidence frames before the first reliable observation.
+    2. Drop low-confidence frozen runs at the end.
+    3. Drop tolerance plateaus (near-identical x/y) when mean confidence is low.
+    """
+    nx = x.copy()
+    ny = y.copy()
+    conf = confidence.copy()
+    n = len(nx)
+    if n < 2:
+        return nx, ny, conf
+
+    def _within_eps(xa: float, ya: float, xb: float, yb: float) -> bool:
+        return abs(xa - xb) <= PLATEAU_EPS_PX and abs(ya - yb) <= PLATEAU_EPS_PX
+
+    def _mask_index(idx: int) -> None:
+        nx[idx] = np.nan
+        ny[idx] = np.nan
+        conf[idx] = 0.0
+
+    # Leading low-confidence frames before first reliable track point.
+    first_reliable = next(
+        (
+            i
+            for i in range(n)
+            if conf[i] >= RELIABLE_CONFIDENCE and not np.isnan(nx[i]) and not np.isnan(ny[i])
+        ),
+        None,
+    )
+    if first_reliable is not None:
+        for i in range(first_reliable):
+            if conf[i] < RELIABLE_CONFIDENCE:
+                _mask_index(i)
+
+    # Trailing low-confidence frames after the last reliable track point.
+    last_reliable = next(
+        (
+            i
+            for i in range(n - 1, -1, -1)
+            if conf[i] >= RELIABLE_CONFIDENCE and not np.isnan(nx[i]) and not np.isnan(ny[i])
+        ),
+        None,
+    )
+    if last_reliable is not None:
+        for i in range(last_reliable + 1, n):
+            if conf[i] < RELIABLE_CONFIDENCE:
+                _mask_index(i)
+
+    # Leading tolerance plateau with low confidence (seed freeze with jitter).
+    lead_start = next((i for i in range(n) if not np.isnan(nx[i]) and not np.isnan(ny[i])), None)
+    if lead_start is not None:
+        lx, ly = nx[lead_start], ny[lead_start]
+        lead_end = lead_start
+        while lead_end + 1 < n and not np.isnan(nx[lead_end + 1]) and _within_eps(
+            nx[lead_end + 1], ny[lead_end + 1], lx, ly
+        ):
+            lead_end += 1
+        if lead_end > lead_start and np.mean(conf[lead_start : lead_end + 1]) < RELIABLE_CONFIDENCE:
+            for i in range(lead_start, lead_end + 1):
+                _mask_index(i)
+
+    # Trailing tolerance plateau with low confidence.
+    trail_end = next(
+        (i for i in range(n - 1, -1, -1) if not np.isnan(nx[i]) and not np.isnan(ny[i])),
+        None,
+    )
+    if trail_end is not None:
+        tx, ty = nx[trail_end], ny[trail_end]
+        trail_start = trail_end
+        while trail_start > 0 and not np.isnan(nx[trail_start - 1]) and _within_eps(
+            nx[trail_start - 1], ny[trail_start - 1], tx, ty
+        ):
+            trail_start -= 1
+        if trail_start < trail_end and np.mean(conf[trail_start : trail_end + 1]) < RELIABLE_CONFIDENCE:
+            for i in range(trail_start, trail_end + 1):
+                _mask_index(i)
+
+    return nx, ny, conf
+
+
 @dataclass
 class LoadedTrack:
     ball_id:       int
@@ -75,24 +168,36 @@ def load_experiment_data(
         with open(calib_path, 'r') as f:
             calib_data = json.load(f)
 
-    scale_px_per_mm = None
-    scale_unc_px_per_mm = None
+    # Scale priority:
+    # 1. Calibrated scale from cam0_intrinsics.json (Active calibration)
+    # 2. Provided scale from scale.json (Generator ground truth)
+    # 3. Default fallback (1.0 px/mm)
+    
+    scale_px_per_mm = calib_data.get("scale_px_per_mm")
+    scale_unc_px_per_mm = calib_data.get("scale_uncertainty_px_per_mm")
+    
+    gt_scale = None
     if scale_path.exists():
         with open(scale_path, "r") as f:
             scale_data = json.load(f)
-        scale_px_per_mm = scale_data.get("px_per_mm")
-        scale_unc_px_per_mm = scale_data.get("scale_uncertainty_px_per_mm")
+        gt_scale = scale_data.get("px_per_mm") or scale_data.get("scale_px_per_mm")
+        logger.info(f"Ground truth scale from generator: {gt_scale} px/mm")
 
-    if scale_px_per_mm is None:
-        scale_px_per_mm = calib_data.get("scale_px_per_mm")
-        scale_unc_px_per_mm = calib_data.get("scale_uncertainty_px_per_mm")
+    if (scale_px_per_mm is None or float(scale_px_per_mm) <= 0):
+        if gt_scale:
+            scale_px_per_mm = gt_scale
+            logger.info(f"Using ground truth scale: {scale_px_per_mm} px/mm")
+        else:
+            logger.warning(
+                "No valid scale calibration found for %s; falling back to default 1.0 px/mm.",
+                experiment_dir,
+            )
+            scale_px_per_mm = 1.0
+    else:
+        logger.info(f"Using active manual scale: {scale_px_per_mm} px/mm")
+        if gt_scale and abs(float(scale_px_per_mm) - float(gt_scale)) / float(gt_scale) > 0.1:
+            logger.warning(f"Active scale ({scale_px_per_mm}) deviates from ground truth ({gt_scale}) by >10%!")
 
-    if scale_px_per_mm is None or float(scale_px_per_mm) <= 0:
-        logger.warning(
-            "No valid scale calibration found for %s; falling back to default 1.0 px/mm.",
-            experiment_dir,
-        )
-        scale_px_per_mm = 1.0
     if scale_unc_px_per_mm is None:
         scale_unc_px_per_mm = 0.001
 
@@ -172,6 +277,8 @@ def load_experiment_data(
                     y_px[idx] = y_val
                 confidence[idx] = frame["confidence"]
         
+        x_px, y_px, confidence = _mask_sentinel_plateaus(x_px, y_px, confidence)
+
         loaded_tracks.append(LoadedTrack(
             ball_id=ball_id,
             camera_id=camera_idx,

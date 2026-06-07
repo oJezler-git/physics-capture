@@ -96,11 +96,21 @@ def triangulated_to_metric_track(
     projected[valid_mask] = centered @ principal_axis
     projected[valid_mask] -= projected[valid_mask][0]
 
+    # For stereo, we use the original X, Y, Z to compute speed.
+    # To fit the MetricTrack interface, we store Y (or Z) in y_m_raw.
+    # Actually, it's better to store the 3D coordinates if available.
+    # But for now, let's just make it compatible.
+    y_raw = np.full(tri_track.xyz_m.shape[0], np.nan, dtype=np.float64)
+    # We'll use the second principal axis as a proxy for 'the other dimension'
+    # or just use the Y coordinate. Let's use Y for now.
+    y_raw[valid_mask] = tri_track.xyz_m[valid_mask, 1]
+
     sigma = np.full_like(projected, position_sigma_m, dtype=np.float64)
 
     return MetricTrack(
         ball_id=tri_track.ball_id,
         t_s=tri_track.t_s,
         x_m=projected,
+        y_m_raw=y_raw,
         sigma_x_m=sigma,
     )
