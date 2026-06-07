@@ -106,6 +106,7 @@ export interface SystemResult {
   momentum_conservation_error_pct_uncertainty: number;
   coefficient_of_restitution: number;
   coefficient_of_restitution_uncertainty: number;
+  collision_frame_idx: number;
 }
 
 export interface PhysicsResult {

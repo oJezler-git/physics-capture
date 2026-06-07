@@ -657,12 +657,6 @@ app.post("/api/upload-video", upload.single("file"), async (req, res) => {
     // Extraction
     const frameCount = await extractFrames(destPath, framesDir, outputFormat);
 
-    // Best-effort: generate sync.json once frames exist. Run in the background
-    // so upload responses are not blocked by sync decode latency.
-    runSyncMarkerDecode(experiment_id).catch((err) => {
-      console.warn("[sync] Sync Marker decode failed:", err);
-    });
-
     res.json({
       experiment_id,
       camera_id,
@@ -719,9 +713,13 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
     const resultsDir = path.join(experimentDir, "results");
     const syncPath = path.join(resultsDir, "sync.json");
     const tracksPath = path.join(resultsDir, "tracks.json");
-    const mode = existsSync(stereoPath) ? "STEREO_3D" : "SINGLE_CAMERA_PLANAR";
+    const wantsStereo = req.body?.mode === "STEREO_3D";
+    const mode =
+      wantsStereo && existsSync(stereoPath)
+        ? "STEREO_3D"
+        : "SINGLE_CAMERA_PLANAR";
 
-    if (!existsSync(syncPath)) {
+    if (mode === "STEREO_3D" && !existsSync(syncPath)) {
       try {
         await runSyncMarkerDecode(experimentId);
       } catch (err) {
@@ -748,13 +746,6 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
           is_mock: true,
           cameras: {
             cam0: {
-              frame_count: frameCount,
-              true_fps: 30.0,
-              phase_offset_ms: 0.0,
-              fit_residual_rms_ms: 0.0,
-              timestamps_ms: timestamps,
-            },
-            cam1: {
               frame_count: frameCount,
               true_fps: 30.0,
               phase_offset_ms: 0.0,
@@ -1012,7 +1003,7 @@ app.post("/api/experiments/:experimentId/physics", async (req, res) => {
           uncertainty:
             grpcResult?.system?.coefficient_of_restitution_uncertainty ?? 0,
         },
-        collision_frame_idx: 0,
+        collision_frame_idx: grpcResult?.system?.collision_frame_idx ?? -1,
       },
       velocityTimeSeries: [],
       reconstruction3d: {
