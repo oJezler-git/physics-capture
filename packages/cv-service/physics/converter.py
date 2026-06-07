@@ -9,7 +9,8 @@ from .exceptions import InsufficientDataError
 class MetricTrack:
     ball_id:       int
     t_s:           np.ndarray   # float64, shape [N] — seconds
-    x_m:           np.ndarray   # float64, shape [N] — metres; NaN if frame missing
+    x_m:           np.ndarray   # float64, shape [N] — metres (1D projected for fitting); NaN if frame missing
+    y_m_raw:       np.ndarray   # float64, shape [N] — metres (original Y/Z coordinate for speed)
     sigma_x_m:     np.ndarray   # float64, shape [N] — position uncertainty in metres
 
 def convert_to_metric(
@@ -20,7 +21,8 @@ def convert_to_metric(
     """
     Convert pixel coordinates to metres; attach timestamps in seconds;
     compute per-point position uncertainty in metres.
-    Projects to 1D using the axis of maximum variance.
+    Projects to 1D using the axis of maximum variance for fitting,
+    but retains both coordinates for collision detection.
     """
     # 1. Convert timestamps to seconds
     t_s = track.timestamps_ms / 1000.0
@@ -39,18 +41,18 @@ def convert_to_metric(
     
     if var_x >= var_y:
         p_px = track.x_px
+        p_px_raw_y = track.y_px
     else:
         p_px = track.y_px
+        p_px_raw_y = track.x_px
         
     # 4. Convert to metres
-    # x_mm = x_px / scale_px_per_mm
-    # x_m = x_mm / 1000.0
+    # Note: We flip the Y-axis for the 'raw' component here because pixels are Y-down 
+    # but the physics engine expects Y-up.
     p_m = p_px / scale.scale_px_per_mm / 1000.0
+    p_m_raw_y = -p_px_raw_y / scale.scale_px_per_mm / 1000.0
     
-    # 5. Position uncertainty propagation (Step 2.2 in plan)
-    # sigma_x_mm = sqrt( (sigma_x_px / scale_px_per_mm)^2
-    #                  + (x_px * scale_unc_px_per_mm / scale_px_per_mm^2)^2 )
-    
+    # 5. Position uncertainty propagation
     sigma_p_mm = np.sqrt(
         (position_sigma_px / scale.scale_px_per_mm)**2 +
         (p_px * scale.scale_uncertainty_px_per_mm / (scale.scale_px_per_mm**2))**2
@@ -61,5 +63,6 @@ def convert_to_metric(
         ball_id=track.ball_id,
         t_s=t_s,
         x_m=p_m,
+        y_m_raw=p_m_raw_y,
         sigma_x_m=sigma_p_m
     )
