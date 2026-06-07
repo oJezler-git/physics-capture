@@ -1425,6 +1425,27 @@ app.get(
   },
 );
 
+app.get("/api/experiments/:experimentId/raw-physics", async (req, res) => {
+  try {
+    const { experimentId } = req.params;
+    const velocitiesPath = path.join(
+      EXPERIMENTS_DIR,
+      experimentId,
+      "results",
+      "velocities.json",
+    );
+    if (existsSync(velocitiesPath)) {
+      const data = await fs.promises.readFile(velocitiesPath, "utf-8");
+      res.json(JSON.parse(data));
+    } else {
+      res.status(404).json({ error: "Velocities data not found" });
+    }
+  } catch (err) {
+    console.error("Failed to fetch raw physics:", err);
+    res.status(500).json({ error: "Failed to fetch raw physics" });
+  }
+});
+
 wss.on("connection", (ws: WebSocket & { clientId?: string }) => {
   ws.on("message", (data: string) => {
     try {
