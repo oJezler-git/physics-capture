@@ -112,6 +112,8 @@ class LoadedTrack:
     x_px:          np.ndarray   # float64, shape [N]
     y_px:          np.ndarray   # float64, shape [N]
     confidence:    np.ndarray   # float32, shape [N]
+    fit_pre_window: int = 15
+    fit_post_window: int = 15
 
 @dataclass
 class ScaleCalibration:
@@ -286,7 +288,9 @@ def load_experiment_data(
             timestamps_ms=timestamps_ms,
             x_px=x_px,
             y_px=y_px,
-            confidence=confidence
+            confidence=confidence,
+            fit_pre_window=tracks_data.get("fit_pre_window", 15),
+            fit_post_window=tracks_data.get("fit_post_window", 15)
         ))
         
     return loaded_tracks, scale

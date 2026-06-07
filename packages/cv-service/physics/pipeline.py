@@ -264,8 +264,10 @@ def run_physics_pipeline(
 
         ball_fits.append({
             "ball_id": track.ball_id,
-            "pre_fit": fit_x_pre, # Keep X fit for diagnostics/UI backward compat
+            "pre_fit": fit_x_pre,
+            "pre_fit_y": fit_y_pre,
             "post_fit": fit_x_post,
+            "post_fit_y": fit_y_post,
             "v_before": v_at_collision_before,
             "v_after": v_at_collision_after if fit_x_post else None
         })
@@ -303,11 +305,24 @@ def run_physics_pipeline(
         "balls": []
     }
     for i, fit in enumerate(ball_fits):
+        # Calculate vx/vy components at collision
+        # These were computed in the loop using fit_x_pre/post and fit_y_pre/post
+        # We need to re-extract them from the ball_fits dictionary
+        vx_before = fit["pre_fit"].v0
+        vy_before = fit["pre_fit_y"].v0 # Need to add pre_fit_y to ball_fits
+        
         ball_entry = {
             "ball_id": fit["ball_id"],
+            "v_before_vec": {
+                "x": ufloat_to_dict(fit["pre_fit"].v0, "vx", "mps"),
+                "y": ufloat_to_dict(fit["pre_fit_y"].v0, "vy", "mps")
+            },
+            "v_after_vec": {
+                "x": ufloat_to_dict(fit["post_fit"].v0, "vx", "mps"),
+                "y": ufloat_to_dict(fit["post_fit_y"].v0, "vy", "mps")
+            } if fit["post_fit"] else None,
             "v_before": ufloat_to_dict(fit["v_before"], "v_before", "mps"),
             "v_after": ufloat_to_dict(fit["v_after"], "v_after", "mps"),
-            "friction_a": ufloat_to_dict(fit["pre_fit"].a, "friction_a", "mps2"),
             "fit_diagnostics": {
                 "pre_window_frames": [collision.pre_start, collision.pre_end],
                 "post_window_frames": [collision.post_start, collision.post_end] if fit["post_fit"] else None,
