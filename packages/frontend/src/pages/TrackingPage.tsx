@@ -47,6 +47,10 @@ export const TrackingPage = () => {
   const [seedFrameIdx, setSeedFrameIdx] = useState(0);
   const [trackStartFrameIdx, setTrackStartFrameIdx] = useState(0);
   const [trackEndFrameIdx, setTrackEndFrameIdx] = useState(0);
+  const [preStart, setPreStart] = useState(25);
+  const [preEnd, setPreEnd] = useState(40);
+  const [postStart, setPostStart] = useState(48);
+  const [postEnd, setPostEnd] = useState(63);
   const [selectedModel, setSelectedModel] = useState<string>('facebook/sam2-hiera-tiny');
   const [dims, setDims] = useState({ width: 1280, height: 720 });
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -150,13 +154,6 @@ export const TrackingPage = () => {
   }, [frameSrc]);
 
   useEffect(() => {
-    if (frameCount <= 0) return;
-    setSeedFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
-    setTrackStartFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
-    setTrackEndFrameIdx((value) => Math.min(Math.max(value, 0), frameCount - 1));
-  }, [frameCount]);
-
-  useEffect(() => {
     if (frameCount > 0 && seeds.length === 0 && tracks.length === 0) {
       setTrackStartFrameIdx(0);
       setTrackEndFrameIdx(frameCount - 1);
@@ -254,6 +251,10 @@ export const TrackingPage = () => {
         experimentId,
         seedCount: requestSeeds.length,
         modelId: selectedModel,
+        preStart,
+        preEnd,
+        postStart,
+        postEnd,
       });
 
       const response = await fetch('/api/track', {
@@ -266,6 +267,10 @@ export const TrackingPage = () => {
           end_frame_idx: trackEndFrameIdx,
           model_id: selectedModel,
           clientId: 'pc',
+          fit_pre_start: preStart,
+          fit_pre_end: preEnd,
+          fit_post_start: postStart,
+          fit_post_end: postEnd,
         }),
       });
 
@@ -635,6 +640,75 @@ export const TrackingPage = () => {
                 </select>
               </div>
 
+              <div className="space-y-4 pt-4 border-t border-[var(--line)]">
+                <h4 className="text-[8px] font-medium uppercase tracking-wider text-slate-500">
+                  Physics Fit Windows (Frames)
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <p className="text-[8px] uppercase text-slate-500">Pre Start/End</p>
+                    <div className="flex gap-1">
+                      <input
+                        type="number"
+                        value={preStart}
+                        onChange={(e) => setPreStart(Number(e.target.value))}
+                        className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-1 py-1 text-[10px] font-mono text-emerald-400"
+                      />
+                      <input
+                        type="number"
+                        value={preEnd}
+                        onChange={(e) => setPreEnd(Number(e.target.value))}
+                        className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-1 py-1 text-[10px] font-mono text-emerald-400"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        onClick={() => setPreStart(currentFrame)}
+                        className="w-full py-0.5 text-[8px]"
+                      >
+                        Set Start
+                      </Button>
+                      <Button
+                        onClick={() => setPreEnd(currentFrame)}
+                        className="w-full py-0.5 text-[8px]"
+                      >
+                        Set End
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[8px] uppercase text-slate-500">Post Start/End</p>
+                    <div className="flex gap-1">
+                      <input
+                        type="number"
+                        value={postStart}
+                        onChange={(e) => setPostStart(Number(e.target.value))}
+                        className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-1 py-1 text-[10px] font-mono text-rose-400"
+                      />
+                      <input
+                        type="number"
+                        value={postEnd}
+                        onChange={(e) => setPostEnd(Number(e.target.value))}
+                        className="w-full bg-[var(--bg-base)] border border-[var(--line)] rounded-md px-1 py-1 text-[10px] font-mono text-rose-400"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        onClick={() => setPostStart(currentFrame)}
+                        className="w-full py-0.5 text-[8px]"
+                      >
+                        Set Start
+                      </Button>
+                      <Button
+                        onClick={() => setPostEnd(currentFrame)}
+                        className="w-full py-0.5 text-[8px]"
+                      >
+                        Set End
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="space-y-2 pt-1">
                 <Button
                   type="button"

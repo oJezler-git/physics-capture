@@ -4,7 +4,7 @@ import type { PhysicsResult } from '../types';
 
 export const exportCSV = (result: PhysicsResult): string => {
   const lines: string[] = [
-    'ball_id,mass_kg,mass_uncertainty,v_before_mps,v_before_uncertainty,v_after_mps,v_after_uncertainty,p_before,p_before_uncertainty,p_after,p_after_uncertainty,ke_before,ke_before_uncertainty,ke_after,ke_after_uncertainty',
+    'ball_id,mass_kg,mass_uncertainty,v_before_mps,v_before_uncertainty,v_after_mps,v_after_uncertainty,vx_before,vy_before,vx_after,vy_after,p_before,p_before_uncertainty,p_after,p_after_uncertainty,ke_before,ke_before_uncertainty,ke_after,ke_after_uncertainty',
   ];
 
   for (const ball of result.balls) {
@@ -17,6 +17,10 @@ export const exportCSV = (result: PhysicsResult): string => {
         ball.v_before.uncertainty,
         ball.v_after.value,
         ball.v_after.uncertainty,
+        ball.v_before_vec?.x.value_mps ?? 0,
+        ball.v_before_vec?.y.value_mps ?? 0,
+        ball.v_after_vec?.x.value_mps ?? 0,
+        ball.v_after_vec?.y.value_mps ?? 0,
         ball.p_before.value,
         ball.p_before.uncertainty,
         ball.p_after.value,

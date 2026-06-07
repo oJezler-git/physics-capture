@@ -102,8 +102,10 @@ export interface BallTrack {
 // --- Physics Results ---
 
 export interface UFloat {
-  value: number;
-  uncertainty: number;
+  value_mps: number;
+  uncertainty_mps: number;
+  value?: number; // Keep for backward compatibility if needed
+  uncertainty?: number;
 }
 
 export interface Point3D {
@@ -126,6 +128,8 @@ export interface BallResult {
   p_after: UFloat;
   ke_before: UFloat;
   ke_after: UFloat;
+  v_before_vec?: { x: UFloat; y: UFloat };
+  v_after_vec?: { x: UFloat; y: UFloat };
   trajectory3d?: Point3D[];
 }
 

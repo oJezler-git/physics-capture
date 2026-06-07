@@ -21,11 +21,27 @@ const BALL_COLORS = ['#10b981', '#3b82f6', '#f43f5e'];
 
 const formatWithUncertainty = (value: number, uncertainty: number, digits = 3) =>
   `${value.toFixed(digits)} +/- ${uncertainty.toFixed(digits)}`;
+enum ViewMode {
+  FINAL = 'FINAL',
+  STUDENT = 'STUDENT',
+}
 
 export const ResultsPage = () => {
   const { experimentId, ballConfigs } = useSessionStore();
-  const { physicsResult, status, requestPhysics, onPhysicsResult, onPhysicsFailed } =
-    useResultsStore();
+  const { physicsResult, status, requestPhysics } = useResultsStore();
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STUDENT);
+  const [rawPhysics, setRawPhysics] = useState<any>(null);
+
+  useEffect(() => {
+    if (experimentId) {
+      fetch(`/api/experiments/${experimentId}/raw-physics`)
+        .then((res) => res.json())
+        .then((data) => setRawPhysics(data))
+        .catch((err) => console.error('Failed to load raw physics', err));
+    }
+  }, [experimentId, physicsResult]);
+  // ... rest of state
+
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -186,6 +202,20 @@ export const ResultsPage = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <div className="surface-soft rounded-lg p-1 flex gap-1">
+            <button
+              onClick={() => setViewMode(ViewMode.FINAL)}
+              className={`px-3 py-1.5 text-[10px] font-bold uppercase rounded ${viewMode === ViewMode.FINAL ? 'bg-[var(--accent)] text-white' : 'text-slate-500'}`}
+            >
+              Final
+            </button>
+            <button
+              onClick={() => setViewMode(ViewMode.STUDENT)}
+              className={`px-3 py-1.5 text-[10px] font-bold uppercase rounded ${viewMode === ViewMode.STUDENT ? 'bg-[var(--accent)] text-white' : 'text-slate-500'}`}
+            >
+              Student
+            </button>
+          </div>
           <Button
             variant="alt"
             onClick={handleComputePhysics}
@@ -231,6 +261,36 @@ export const ResultsPage = () => {
           ) : (
             <p className="eyebrow">Run physics to generate collision metrics.</p>
           )}
+        </div>
+      ) : viewMode === ViewMode.STUDENT ? (
+        <div className="surface-panel p-6 glitch-in stagger-2">
+          <h2 className="text-xl mb-4">Raw Data Analysis</h2>
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="border-b border-[var(--line)] text-slate-500">
+                <th className="p-2">Ball</th>
+                <th className="p-2">Pre (vx, vy) [m/s]</th>
+                <th className="p-2">Post (vx, vy) [m/s]</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rawPhysics?.balls.map((ball: any) => (
+                <tr key={ball.ball_id} className="border-b border-[var(--line)]">
+                  <td className="p-2 font-bold">Ball {ball.ball_id + 1}</td>
+                  <td className="p-2 font-mono">
+                    {ball.v_before_vec
+                      ? `(${ball.v_before_vec.x.value_mps.toFixed(3)}, ${ball.v_before_vec.y.value_mps.toFixed(3)})`
+                      : 'N/A'}
+                  </td>
+                  <td className="p-2 font-mono">
+                    {ball.v_after_vec
+                      ? `(${ball.v_after_vec.x.value_mps.toFixed(3)}, ${ball.v_after_vec.y.value_mps.toFixed(3)})`
+                      : 'N/A'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="space-y-6">
