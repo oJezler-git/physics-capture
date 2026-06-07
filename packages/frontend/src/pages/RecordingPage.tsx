@@ -2,11 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTrackingStore } from '../stores/trackingStore';
-import { SyncMarkerComponent } from '../components/SyncMarker';
 import { createRecorder, startRecording, stopRecording, uploadVideo } from '../lib/mediaRecorder';
 import { Button } from '../components/ui/Button';
-
-const SYNC_CONFIG = { grayBits: 8, gratingCycles: 4 };
 
 type CaptureSource = 'live' | 'manual';
 
@@ -16,14 +13,12 @@ export const RecordingPage = () => {
   const setTrackingFrameCount = useTrackingStore((state) => state.setFrameCount);
   const liveRecordableCameras = useMemo(() => cameras.filter((camera) => camera.stream), [cameras]);
 
-  const [captureSource, setCaptureSource] = useState<CaptureSource>(
-    liveRecordableCameras.length > 0 ? 'live' : 'manual',
-  );
+  const [captureSource, setCaptureSource] = useState<CaptureSource>('manual');
   const [isRecording, setIsRecording] = useState(false);
   const [frameCount, setFrameCount] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [manualSlots, setManualSlots] = useState(() => Math.min(3, Math.max(cameras.length, 1)));
+  const [manualSlots] = useState(1);
   const [manualFiles, setManualFiles] = useState<Record<number, File | null>>({});
   const recorders = useRef<Map<string, MediaRecorder>>(new Map());
 
@@ -36,10 +31,6 @@ export const RecordingPage = () => {
       setCaptureSource('manual');
     }
   }, [captureSource, liveRecordableCameras.length]);
-
-  useEffect(() => {
-    setManualSlots((slots) => Math.min(3, Math.max(slots, cameras.length || 1)));
-  }, [cameras.length]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -186,7 +177,7 @@ export const RecordingPage = () => {
       {!isRecording && (
         <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 transition-all duration-300 glitch-in stagger-1">
           <div className="space-y-1">
-            <p className="eyebrow">Step 3/4</p>
+            <p className="eyebrow">Step 2/5</p>
             <h1 className="text-2xl sm:text-3xl">Capture</h1>
             <p className="subtle-copy max-w-2xl text-xs">
               Session {experimentId?.slice(0, 8).toUpperCase()} • Mode:{' '}
@@ -230,11 +221,11 @@ export const RecordingPage = () => {
                 variant="main"
                 onClick={() => {
                   advancePhase();
-                  navigate('/tracking');
+                  navigate('/calibration');
                 }}
                 className="px-6 py-2"
               >
-                Continue to Tracking
+                Continue to Scale
               </Button>
             ) : captureSource === 'live' ? (
               <Button
@@ -282,19 +273,33 @@ export const RecordingPage = () => {
         className={`grid gap-6 ${isRecording ? 'grid-cols-1' : 'lg:grid-cols-[5fr_3fr]'} items-start`}
       >
         <div className="flex flex-col gap-6">
-          <section
-            className={`surface-panel overflow-hidden glitch-in stagger-2 ${isRecording ? 'h-[75vh]' : 'h-[300px] lg:h-[400px]'}`}
-          >
-            {!isRecording && (
-              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-                <p className="eyebrow">Visual Sync</p>
-                <span className="ui-pill text-[9px]">
-                  {captureSource === 'manual' ? 'Manual Upload' : 'Idle'}
-                </span>
+          <section className="surface-panel p-5 glitch-in stagger-2">
+            <p className="eyebrow">Planar Capture</p>
+            <h2 className="mt-1 text-xl">One Overhead Video</h2>
+            <p className="subtle-copy mt-2 text-xs">
+              Place the camera above the scene, keep the ball path and a ruler in frame, then upload
+              the recording as Cam 1. No visual sync, stereo calibration, or second camera is
+              needed.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="surface-soft rounded-xl p-3">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Camera
+                </p>
+                <p className="mt-1 text-xs text-slate-200">Overhead, zoomed, steady</p>
               </div>
-            )}
-            <div className={`h-full ${!isRecording ? 'pb-4 px-4' : ''}`}>
-              <SyncMarkerComponent config={SYNC_CONFIG} />
+              <div className="surface-soft rounded-xl p-3">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Scale
+                </p>
+                <p className="mt-1 text-xs text-slate-200">Ruler in the ball plane</p>
+              </div>
+              <div className="surface-soft rounded-xl p-3">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Motion
+                </p>
+                <p className="mt-1 text-xs text-slate-200">Keep the full path visible</p>
+              </div>
             </div>
           </section>
 
@@ -347,51 +352,8 @@ export const RecordingPage = () => {
             {captureSource === 'manual' && (
               <section className="surface-panel flex flex-col p-5 glitch-in stagger-3">
                 <div className="mb-4 flex items-center justify-between">
-                  <p className="eyebrow">Manual Video Uploads</p>
-                  <div className="flex gap-1.5">
-                    <Button
-                      variant="alt"
-                      type="button"
-                      onClick={() => setManualSlots((count) => Math.min(3, count + 1))}
-                      className="p-1.5 text-[9px]"
-                      disabled={manualSlots >= 3}
-                    >
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                        />
-                      </svg>
-                    </Button>
-                    <Button
-                      variant="alt"
-                      type="button"
-                      onClick={() => setManualSlots((count) => Math.max(1, count - 1))}
-                      className="p-1.5 text-[9px]"
-                      disabled={manualSlots <= 1}
-                    >
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M20 12H4"
-                        />
-                      </svg>
-                    </Button>
-                  </div>
+                  <p className="eyebrow">Manual Video Upload</p>
+                  <span className="ui-pill text-[9px]">Single camera</span>
                 </div>
 
                 <div className="space-y-3">
@@ -404,7 +366,7 @@ export const RecordingPage = () => {
                         className="surface-soft space-y-2 p-3 rounded-xl border border-[var(--line)]"
                       >
                         <p className="text-[9px] font-semibold tracking-wider uppercase text-slate-400">
-                          {camera?.label ?? `Cam ${index + 1}`}
+                          {camera?.label ?? 'Overhead Cam'}
                         </p>
                         <input
                           type="file"

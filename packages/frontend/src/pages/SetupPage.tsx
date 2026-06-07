@@ -233,10 +233,10 @@ export const SetupPage = () => {
     <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6">
       <header className="surface-panel flex flex-wrap items-center justify-between gap-5 p-5 glitch-in stagger-1">
         <div className="space-y-1">
-          <p className="eyebrow">Step 1/3</p>
+          <p className="eyebrow">Step 1/5</p>
           <h1 className="text-2xl sm:text-3xl">Setup</h1>
           <p className="subtle-copy max-w-2xl text-xs">
-            Pair recording phone(s) or continue with local files.
+            Create a planar single-video experiment. Upload one overhead video in the next step.
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -246,11 +246,11 @@ export const SetupPage = () => {
             disabled={!canProceed}
             onClick={() => {
               advancePhase();
-              navigate('/calibration');
+              navigate('/recording');
             }}
             className="px-6 py-2"
           >
-            Continue to Calibration
+            Continue to Upload
           </Button>
         </div>
       </header>
@@ -293,7 +293,7 @@ export const SetupPage = () => {
 
       {experimentId && (
         <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
-          {/* Left Column: QR Code & Technical Details */}
+          {/* Left Column: Optional live capture details */}
           <section className="surface-panel flex flex-col gap-5 p-5 glitch-in stagger-2">
             <div className="surface-soft flex flex-col items-center justify-center gap-3 p-5 text-center">
               {qrCodeUrl ? (
@@ -310,7 +310,7 @@ export const SetupPage = () => {
                 />
               )}
               <div className="w-full">
-                <p className="eyebrow">Quick Code</p>
+                <p className="eyebrow">Optional Live Code</p>
                 <div className="mt-1 flex items-center justify-center gap-2">
                   <p className="font-mono text-xl font-bold tracking-widest text-[var(--accent)]">
                     {inviteCode}
@@ -349,7 +349,7 @@ export const SetupPage = () => {
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
-                    Invite URL
+                    Optional Phone URL
                   </span>
                   <Button
                     onClick={() => copyText(phoneUrl, 'url')}

@@ -14,7 +14,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useCalibrationStore } from './stores/calibrationStore';
 import { useTrackingStore } from './stores/trackingStore';
 
-const phaseOrder = ['setup', 'calibration', 'recording', 'tracking', 'results'] as const;
+const phaseOrder = ['setup', 'recording', 'calibration', 'tracking', 'results'] as const;
 type GuardPhase = (typeof phaseOrder)[number];
 
 const routeForPhase = (phase: GuardPhase) => `/${phase}`;
@@ -34,11 +34,11 @@ function PhaseGuard({ phase, children }: { phase: GuardPhase; children: ReactEle
     return <Navigate to="/setup" replace />;
   }
 
-  if (phase === 'recording' && calibrationStatus !== 'complete' && rulerScaleFactor === null) {
+  if (phase === 'tracking' && calibrationStatus !== 'complete' && rulerScaleFactor === null) {
     return <Navigate to="/calibration" replace />;
   }
 
-  if (phase === 'tracking' && frameCount === 0) {
+  if (phase === 'calibration' && frameCount === 0) {
     return <Navigate to="/recording" replace />;
   }
 

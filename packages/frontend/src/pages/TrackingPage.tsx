@@ -54,9 +54,10 @@ export const TrackingPage = () => {
     const configured = ballConfigs.filter((config) => config.mass_g > 0).length;
     return Math.min(Math.max(configured || 1, 1), 3);
   }, [ballConfigs]);
-  const resolvedActiveCameraId = activeCameraId ?? cameras[0]?.id ?? null;
+  const planarCameras = useMemo(() => cameras.slice(0, 1), [cameras]);
+  const resolvedActiveCameraId = activeCameraId ?? planarCameras[0]?.id ?? null;
   const activeCameraIndex = resolvedActiveCameraId
-    ? cameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
+    ? planarCameras.findIndex((camera) => camera.id === resolvedActiveCameraId)
     : -1;
 
   const currentFrameEntry = frameMap[currentFrame];
@@ -77,11 +78,11 @@ export const TrackingPage = () => {
     status !== 'tracking' &&
     frameImageState === 'ready' &&
     activeCameraIndex >= 0;
-  const camerasMissingSeeds = cameras.filter((camera) => {
+  const camerasMissingSeeds = planarCameras.filter((camera) => {
     const cameraSeedCount = seeds.filter((seed) => seed.cameraId === camera.id).length;
     return cameraSeedCount < maxBalls;
   });
-  const hasRequiredSeedCoverage = cameras.length > 0 && camerasMissingSeeds.length === 0;
+  const hasRequiredSeedCoverage = planarCameras.length > 0 && camerasMissingSeeds.length === 0;
   const statusLabel =
     status === 'tracking'
       ? `Tracking ${trackStartFrameIdx + 1}-${trackEndFrameIdx + 1}`
@@ -212,9 +213,9 @@ export const TrackingPage = () => {
     }
     if (!hasRequiredSeedCoverage) {
       setTrackingError(
-        `Seed all cameras before tracking (${maxBalls} per camera). Missing: ${camerasMissingSeeds
-          .map((camera) => camera.label)
-          .join(', ')}`,
+        `Seed the overhead video before tracking (${maxBalls} ball seed${
+          maxBalls === 1 ? '' : 's'
+        }). Missing: ${camerasMissingSeeds.map((camera) => camera.label).join(', ')}`,
       );
       return;
     }
@@ -228,7 +229,7 @@ export const TrackingPage = () => {
     }
 
     const unresolvedSeeds = seeds.filter(
-      (seed) => cameras.findIndex((camera) => camera.id === seed.cameraId) < 0,
+      (seed) => planarCameras.findIndex((camera) => camera.id === seed.cameraId) < 0,
     );
     if (unresolvedSeeds.length > 0) {
       setTrackingError('Some seeds are bound to cameras that are no longer active.');
@@ -239,13 +240,15 @@ export const TrackingPage = () => {
     setTrackingError(null);
 
     try {
-      const requestSeeds = seeds.map((seed) => ({
-        ball_id: seed.ballId,
-        camera_id: cameras.findIndex((camera) => camera.id === seed.cameraId),
-        frame_idx: seed.frameIdx,
-        x: seed.x,
-        y: seed.y,
-      }));
+      const requestSeeds = seeds
+        .filter((seed) => seed.cameraId === resolvedActiveCameraId)
+        .map((seed) => ({
+          ball_id: seed.ballId,
+          camera_id: 0,
+          frame_idx: seed.frameIdx,
+          x: seed.x,
+          y: seed.y,
+        }));
 
       console.log('[Tracking] Starting tracking request', {
         experimentId,
@@ -295,7 +298,7 @@ export const TrackingPage = () => {
       const normalizedTracks =
         payload.tracks?.map((track) => ({
           ballId: track.ballId,
-          cameraId: cameras[track.cameraId]?.id ?? String(track.cameraId),
+          cameraId: planarCameras[track.cameraId]?.id ?? String(track.cameraId),
           points: track.points.filter(
             (point) => point.frameIdx >= trackStartFrameIdx && point.frameIdx <= trackEndFrameIdx,
           ),
@@ -326,7 +329,7 @@ export const TrackingPage = () => {
           <div className="absolute top-8 left-8 z-30 pointer-events-none transition-opacity group-hover:opacity-100 opacity-40 slide-up stagger-1">
             <div className="space-y-1">
               <p className="text-[10px] font-medium uppercase tracking-widest text-[var(--accent)]">
-                Step 4/4
+                Step 4/5
               </p>
               <h1 className="text-xl font-bold tracking-tight text-[var(--text-main)]">
                 Trajectory Analysis
@@ -435,7 +438,7 @@ export const TrackingPage = () => {
 
             <div className="surface-soft p-3 space-y-3 rounded-xl">
               <div className="flex flex-wrap gap-2">
-                {cameras.map((camera) => (
+                {planarCameras.map((camera) => (
                   <Button
                     key={camera.id}
                     onClick={() => setActiveCameraId(camera.id)}

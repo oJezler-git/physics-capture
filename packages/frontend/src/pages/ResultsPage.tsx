@@ -272,7 +272,7 @@ export const ResultsPage = () => {
 
           <div ref={exportRef} className="grid gap-6 lg:grid-cols-[1fr_350px] items-start">
             <div className="space-y-6">
-              {physicsResult.reconstruction3d?.mode === 'STEREO_3D' && (
+              {trajectoryFrameCount > 0 && (
                 <section className="space-y-3">
                   <ThreeDScene
                     balls={physicsResult.balls}

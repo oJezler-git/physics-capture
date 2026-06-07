@@ -18,7 +18,7 @@ interface SessionState {
   setPhase: (phase: SessionPhase) => void;
 }
 
-const PHASES: SessionPhase[] = ['setup', 'calibration', 'recording', 'tracking', 'results'];
+const PHASES: SessionPhase[] = ['setup', 'recording', 'calibration', 'tracking', 'results'];
 
 export const useSessionStore = create<SessionState>((set) => ({
   experimentId: null,
